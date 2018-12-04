@@ -370,6 +370,12 @@ bool mpqemu_msg_valid(MPQemuMsg *msg)
             return false;
         }
         break;
+    case BAR_WRITE:
+    case BAR_READ:
+        if (msg->size != sizeof(msg->data1)) {
+            return false;
+        }
+        break;
     case SYNC_SYSMEM:
         if (msg->num_fds == 0 || msg->bytestream != 0) {
             return false;
