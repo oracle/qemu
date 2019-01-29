@@ -55,6 +55,7 @@
 
 static MPQemuLinkState *mpqemu_link;
 PCIDevice *remote_pci_dev;
+bool create_done;
 
 char **deferred_argv;
 int deferred_argc;
@@ -339,21 +340,29 @@ static void process_msg(GIOCondition cond, MPQemuChannel *chan)
         process_get_pci_info_msg(remote_pci_dev, msg);
         break;
     case PCI_CONFIG_WRITE:
-        process_config_write(msg);
+        if (create_done) {
+            process_config_write(msg);
+        }
         break;
     case PCI_CONFIG_READ:
-        process_config_read(msg);
+        if (create_done) {
+            process_config_read(msg);
+        }
         break;
     case BAR_WRITE:
-        process_bar_write(msg, &err);
-        if (err) {
-            goto finalize_loop;
+        if (create_done) {
+            process_bar_write(msg, &err);
+            if (err) {
+                error_report_err(err);
+            }
         }
         break;
     case BAR_READ:
-        process_bar_read(msg, &err);
-        if (err) {
-            goto finalize_loop;
+        if (create_done) {
+            process_bar_read(msg, &err);
+            if (err) {
+                error_report_err(err);
+            }
         }
         break;
     case SYNC_SYSMEM:
@@ -373,7 +382,7 @@ static void process_msg(GIOCondition cond, MPQemuChannel *chan)
         qemu_mutex_lock_iothread();
         qemu_run_machine_init_done_notifiers();
         qemu_mutex_unlock_iothread();
-
+        create_done = true;
         break;
     case DEV_OPTS:
         if (setup_device(msg, &err)) {
