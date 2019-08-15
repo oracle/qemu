@@ -52,6 +52,7 @@
 #include "qapi/qmp/qlist.h"
 #include "qemu/log.h"
 #include "qemu/cutils.h"
+#include "remote-opts.h"
 
 static MPQemuLinkState *mpqemu_link;
 PCIDevice *remote_pci_dev;
@@ -444,6 +445,13 @@ int main(int argc, char *argv[])
     deferred_argv = argv + 3;
     deferred_argc = argc - 3;
     
+    qemu_add_opts(&qemu_device_opts);
+    qemu_add_opts(&qemu_drive_opts);
+    qemu_add_drive_opts(&qemu_legacy_drive_opts);
+    qemu_add_drive_opts(&qemu_common_drive_opts);
+    qemu_add_drive_opts(&qemu_drive_opts);
+    qemu_add_drive_opts(&bdrv_runtime_opts);
+
     mpqemu_link = mpqemu_link_create();
     if (!mpqemu_link) {
         printf("Could not create MPQemu link\n");
@@ -457,6 +465,9 @@ int main(int argc, char *argv[])
     }
 
     mpqemu_init_channel(mpqemu_link, &mpqemu_link->com, fd);
+
+    parse_cmdline(argc - 2, argv + 2, NULL);
+
     mpqemu_link_set_callback(mpqemu_link, process_msg);
 
     mpqemu_start_coms(mpqemu_link);
