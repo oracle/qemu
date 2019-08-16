@@ -53,8 +53,11 @@
 #include "qemu/log.h"
 #include "qemu/cutils.h"
 #include "remote-opts.h"
+#include "monitor/monitor.h"
+#include "sysemu/reset.h"
 
 static MPQemuLinkState *mpqemu_link;
+
 PCIDevice *remote_pci_dev;
 bool create_done;
 
@@ -244,6 +247,11 @@ fail:
     PUT_REMOTE_WAIT(wait);
 }
 
+static void process_device_reset_msg(MPQemuMsg *msg)
+{
+    qemu_devices_reset();
+}
+
 static int setup_device(MPQemuMsg *msg, Error **errp)
 {
     QObject *obj;
@@ -406,6 +414,12 @@ static void process_msg(GIOCondition cond, MPQemuChannel *chan)
     case REMOTE_PING:
         wait = msg->fds[0];
         notify_proxy(wait, (uint32_t)getpid());
+        break;
+    case DEVICE_RESET:
+        process_device_reset_msg(msg);
+        if (msg->num_fds == 1) {
+            notify_proxy(msg->fds[0], 0);
+        }
         break;
     default:
         error_setg(&err, "Unknown command");
