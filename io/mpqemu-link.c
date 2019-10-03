@@ -385,6 +385,11 @@ bool mpqemu_msg_valid(MPQemuMsg *msg)
             return false;
         }
         break;
+    case REMOTE_PING:
+        if (msg->size != 0) {
+            return false;
+        }
+        break;
     default:
         break;
     }

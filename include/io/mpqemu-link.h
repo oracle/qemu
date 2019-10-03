@@ -60,6 +60,7 @@ typedef enum {
     DEVICE_DEL,
     GET_PCI_INFO,
     RET_PCI_INFO,
+    REMOTE_PING,
     MAX,
 } mpqemu_cmd_t;
 
