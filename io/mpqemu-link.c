@@ -390,6 +390,7 @@ bool mpqemu_msg_valid(MPQemuMsg *msg)
         }
         break;
     case REMOTE_PING:
+    case START_MIG_OUT:
         if (msg->size != 0) {
             return false;
         }
