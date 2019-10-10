@@ -377,6 +377,7 @@ bool mpqemu_msg_valid(MPQemuMsg *msg)
     case SET_IRQFD:
     case MMIO_RETURN:
     case DEVICE_RESET:
+    case RUNSTATE_SET:
         if (msg->size != sizeof(msg->data1)) {
             return false;
         }

@@ -40,8 +40,10 @@
 #include "remote/remote-opts.h"
 #include "include/qemu-common.h"
 #include "monitor/monitor.h"
+#include "sysemu/runstate.h"
 
 #include "vl.h"
+
 /*
  * In remote process, we parse only subset of options. The code
  * taken from vl.c to re-use in remote command line parser.
@@ -86,6 +88,17 @@ void parse_cmdline(int argc, char **argv, char **envp)
                 if (!qemu_opts_parse_noisily(qemu_find_opts("device"),
                                              optarg, true)) {
                     exit(1);
+            case QEMU_OPTION_qmp:
+                monitor_parse(optarg, "control", false);
+                break;
+            case QEMU_OPTION_incoming:
+                remote_runstate_set(RUN_STATE_INMIGRATE);
+                break;
+            case QEMU_OPTION_monitor:
+                if (!strncmp(optarg, "stdio", 5)) {
+                    warn_report("STDIO not supported in remote process");
+                } else if (strncmp(optarg, "none", 4)) {
+                    monitor_parse(optarg, "readline", false);
                 }
                 break;
             default:
