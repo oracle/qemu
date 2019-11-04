@@ -2076,6 +2076,17 @@ static void virtio_pci_class_init(ObjectClass *klass, void *data)
     k->realize = virtio_pci_realize;
     k->exit = virtio_pci_exit;
     k->vendor_id = PCI_VENDOR_ID_REDHAT_QUMRANET;
+    /*
+     * Set the virtio device's PCI subsystem vendor ID to Oracle's
+     * vendor ID so Microsoft's Windows Update matches Oracle's
+     * Windows virtio drivers to this device instead of some other
+     * vendor's Windows virtio drivers. Also set the PCI subsystem
+     * ID to the virtio default value since QEMU's PCI device
+     * registration code won't set it to the default if a
+     * subsystem vendor ID is set.
+     */
+    k->subsystem_vendor_id = 0x108E;
+    k->subsystem_id = PCI_SUBDEVICE_ID_QEMU;
     k->revision = VIRTIO_PCI_ABI_VERSION;
     k->class_id = PCI_CLASS_OTHERS;
     device_class_set_parent_realize(dc, virtio_pci_dc_realize,
