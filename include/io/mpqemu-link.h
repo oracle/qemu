@@ -134,5 +134,6 @@ void mpqemu_destroy_channel(MPQemuChannel *chan);
 void mpqemu_link_set_callback(MPQemuLinkState *s,
                               mpqemu_link_callback callback);
 void mpqemu_start_coms(MPQemuLinkState *s);
+bool mpqemu_msg_valid(MPQemuMsg *msg);
 
 #endif

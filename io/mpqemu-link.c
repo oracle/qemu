@@ -63,7 +63,7 @@ void mpqemu_link_finalize(MPQemuLinkState *s)
 void mpqemu_msg_send(MPQemuMsg *msg, MPQemuChannel *chan)
 {
     int rc;
-    uint8_t *data;
+    uint8_t *data = NULL;
     union {
         char control[CMSG_SPACE(REMOTE_MAX_FDS * sizeof(int))];
         struct cmsghdr align;
@@ -291,4 +291,47 @@ void mpqemu_start_coms(MPQemuLinkState *s)
     g_assert(g_source_attach(&s->com->gsrc, s->ctx));
 
     g_main_loop_run(s->loop);
+}
+
+bool mpqemu_msg_valid(MPQemuMsg *msg)
+{
+    if (msg->cmd >= MAX) {
+        return false;
+    }
+
+    if (msg->bytestream) {
+        if (!msg->data2) {
+            return false;
+        }
+    } else {
+        if (msg->data2) {
+            return false;
+        }
+    }
+
+    /* Verify FDs. */
+    if (msg->num_fds >= REMOTE_MAX_FDS) {
+        return false;
+    }
+    if (msg->num_fds > 0) {
+        for (int i = 0; i < msg->num_fds; i++) {
+            if (fcntl(msg->fds[i], F_GETFL) == -1) {
+                return false;
+            }
+        }
+    }
+
+    /* Verify message specific fields. */
+    switch (msg->cmd) {
+    case PCI_CONFIG_WRITE:
+    case PCI_CONFIG_READ:
+        if (msg->size != sizeof(struct conf_data_msg)) {
+            return false;
+        }
+        break;
+    default:
+        break;
+    }
+
+    return true;
 }
