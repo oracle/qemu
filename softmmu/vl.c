@@ -2040,11 +2040,6 @@ static int fsdev_init_func(void *opaque, QemuOpts *opts, Error **errp)
 }
 #endif
 
-static int mon_init_func(void *opaque, QemuOpts *opts, Error **errp)
-{
-    return monitor_init_opts(opts, errp);
-}
-
 struct device_config {
     enum {
         DEV_USB,       /* -usbdevice     */

@@ -88,6 +88,7 @@ void parse_cmdline(int argc, char **argv, char **envp)
                 if (!qemu_opts_parse_noisily(qemu_find_opts("device"),
                                              optarg, true)) {
                     exit(1);
+                }
             case QEMU_OPTION_qmp:
                 monitor_parse(optarg, "control", false);
                 break;
