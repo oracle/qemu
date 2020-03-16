@@ -116,7 +116,7 @@ static PCIProxyDev *create_proxy(Object *obj, Error **errp)
     ds = qdev_proxy_add(rid, id, (char *)bus, (char *)command,
                          (char *)exec_name,
                          socket ? socket : -1,
-                         socket != -1 ? true : false, &local_err);
+                         socket != 0 ? true : false, &local_err);
     if (!ds) {
         fprintf(stderr, "qdev_proxy_add error.");
         error_setg(errp, "qdev_proxy_add error.");
