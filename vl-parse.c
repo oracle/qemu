@@ -26,6 +26,7 @@
 #include "sysemu/arch_init.h"
 
 #include "vl.h"
+#include "softmmu/remote-dev.h"
 
 /***********************************************************/
 /* QEMU Block devices */
@@ -99,13 +100,39 @@ int drive_init_func(void *opaque, QemuOpts *opts, Error **errp)
 #if defined(CONFIG_MPQEMU)
 int rdevice_init_func(void *opaque, QemuOpts *opts, Error **errp)
 {
-    DeviceState *dev;
+    Object *obj;
+    RemoteDev *rdev;
 
-    dev = qdev_remote_add(opts, errp);
-    if (!dev) {
-        error_setg(errp, "qdev_remote_add failed for device.");
-        return -1;
+    const char *rid = qemu_opt_get(opts, "remote-device");
+    if (!rid) {
+
+        fprintf(stderr, "Cant find rid\n");
+        return -EINVAL;
     }
+
+    obj = object_resolve_path_component(
+        object_get_objects_root(), rid);
+
+    rdev = REMOTE_DEV(obj);
+    if (!rdev) {
+        error_setg(errp, "Could not get proxy object");
+        return -EINVAL;
+    }
+
+    fprintf(stderr, "qemu: Created new remote dev object!\n");
+    if (!rdev->create_proxy) {
+        error_setg(errp, "Object method create_proxy is not set");
+        return -EINVAL;
+    }
+
+    rdev->proxy = rdev->create_proxy(obj, errp);
+    if (!rdev->proxy) {
+        error_setg(errp, "qdev_remote_add failed for device.");
+        return -EINVAL;
+    }
+    qdev_remote_add(opts, rdev->proxy, errp);
+    
+    //qemu_opt_del(opts, "remote-device");
     return 0;
 }
 #endif
@@ -115,8 +142,17 @@ int device_init_func(void *opaque, QemuOpts *opts, Error **errp)
     DeviceState *dev;
 
 #if defined(CONFIG_MPQEMU)
-    const char *remote = qemu_opt_get(opts, "rid");
-    if (remote) {
+    const char *drive_name;
+
+    drive_name = qemu_opt_get(opts, "driver");
+    fprintf(stderr, "drive name is %s\n", drive_name); 
+    if (strcmp(drive_name, "remote-pci-dev") == 0) {
+        if (!qemu_opt_get(opts, "remote-device")) {
+            fprintf(stderr, "no remote-device id specified\n");
+            return -EINVAL;
+        }
+
+        rdevice_init_func(opaque, opts, errp);
         return 0;
     }
 #endif
