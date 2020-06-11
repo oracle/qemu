@@ -42,6 +42,7 @@ typedef enum {
     BAR_WRITE,
     BAR_READ,
     SET_IRQFD,
+    GET_PCI_INFO,
     MAX = INT_MAX,
 } MOQemuCmd;
 
@@ -67,6 +68,13 @@ typedef struct {
 typedef struct {
     int intx;
 } SetIrqFdMsg;
+
+typedef struct {
+    uint16_t vendor_id;
+    uint16_t device_id;
+    uint16_t class_id;
+    uint16_t subsystem_id;
+} RetPCIInfoMsg;
 
 /**
  * Maximum size of data2 field in the message to be transmitted.
@@ -97,6 +105,7 @@ typedef struct {
         SyncSysMemMsg sync_sysmem;
         BarAccessMsg bar_access;
         SetIrqFdMsg set_irqfd;
+        RetPCIInfoMsg ret_pci_info;
     } data1;
 
     int fds[REMOTE_MAX_FDS];
