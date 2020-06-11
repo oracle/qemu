@@ -39,6 +39,8 @@ typedef enum {
     RET_MSG,
     PCI_CONFIG_WRITE,
     PCI_CONFIG_READ,
+    BAR_WRITE,
+    BAR_READ,
     MAX = INT_MAX,
 } MOQemuCmd;
 
@@ -53,6 +55,13 @@ struct conf_data_msg {
     uint32_t val;
     int l;
 };
+
+typedef struct {
+    hwaddr addr;
+    uint64_t val;
+    unsigned size;
+    bool memory;
+} BarAccessMsg;
 
 /**
  * Maximum size of data2 field in the message to be transmitted.
@@ -81,6 +90,7 @@ typedef struct {
     union {
         uint64_t u64;
         SyncSysMemMsg sync_sysmem;
+        BarAccessMsg bar_access;
     } data1;
 
     int fds[REMOTE_MAX_FDS];
