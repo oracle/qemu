@@ -167,18 +167,24 @@ typedef struct VFIOProxy {
     QTAILQ_HEAD(, VFIOUserReply) free;
     QTAILQ_HEAD(, VFIOUserReply) pending;
     int socket;
+    int flags;
     char *sockname;
     QemuMutex lock;
+    void (*request)(void *opaque, char *buf);
+    void *reqarg;
 } VFIOProxy;
+
+#define VFIO_PROXY_CLIENT	0x1
+#define VFIO_PROXY_SECURE	0x2
 
 
 #define TYPE_VFIO_USER_PCI "vfio-user-pci"
 #define PCI_VFIOU(obj)    OBJECT_CHECK(VFIOPCIDevice, obj, TYPE_VFIO_USER_PCI)
 
 int vfio_user_validate_version(VFIODevice *vbasedev, Error **errp);
-int vfio_user_dma_map(VFIODevice *vbasedev, struct vfio_user_map *map, VFIOUserFDs *fds,
+int vfio_user_dma_map(VFIOProxy *proxy, struct vfio_user_map *map, VFIOUserFDs *fds,
                       uint64_t nelem);
-int vfio_user_dma_unmap(VFIODevice *vbasedev, struct vfio_user_map *map, uint64_t nelem);
+int vfio_user_dma_unmap(VFIOProxy *proxy, struct vfio_user_map *map, uint64_t nelem);
 int vfio_user_get_info(VFIODevice *vbasedev);
 int vfio_user_get_region_info(VFIODevice *vbasedev, int index, struct vfio_region_info *info,
                               VFIOUserFDs *fds);

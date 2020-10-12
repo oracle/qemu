@@ -54,7 +54,8 @@ typedef struct VFIORegion {
     uint32_t flags; /* VFIO region flags (rd/wr/mmap) */
     uint32_t nr_mmaps;
     VFIOMmap *mmaps;
-    uint8_t nr; /* cache the region number for debug */
+    uint8_t nr;
+    int remfd; /* fd if remote */
 } VFIORegion;
 
 typedef struct VFIOAddressSpace {
@@ -64,6 +65,7 @@ typedef struct VFIOAddressSpace {
 } VFIOAddressSpace;
 
 struct VFIOGroup;
+typedef struct VFIOProxy VFIOProxy;
 
 typedef struct VFIOContainer {
     VFIOAddressSpace *space;
@@ -74,6 +76,7 @@ typedef struct VFIOContainer {
     Error *error;
     bool initialized;
     unsigned long pgsizes;
+    VFIOProxy *proxy;
     QLIST_HEAD(, VFIOGuestIOMMU) giommu_list;
     QLIST_HEAD(, VFIOHostDMAWindow) hostwin_list;
     QLIST_HEAD(, VFIOGroup) group_list;
@@ -113,6 +116,9 @@ typedef struct VFIODevice {
     unsigned int num_irqs;
     unsigned int num_regions;
     unsigned int flags;
+    VFIOProxy *proxy;
+    struct vfio_region_info **regions;
+    int *regfds;
 } VFIODevice;
 
 struct VFIODeviceOps {
@@ -174,12 +180,15 @@ void vfio_region_mmaps_set_enabled(VFIORegion *region, bool enabled);
 void vfio_region_exit(VFIORegion *region);
 void vfio_region_finalize(VFIORegion *region);
 void vfio_reset_handler(void *opaque);
+VFIOAddressSpace *vfio_get_address_space(AddressSpace *as);
+void vfio_put_address_space(VFIOAddressSpace *space);
 VFIOGroup *vfio_get_group(int groupid, AddressSpace *as, Error **errp);
 void vfio_put_group(VFIOGroup *group);
 int vfio_get_device(VFIOGroup *group, const char *name,
                     VFIODevice *vbasedev, Error **errp);
 
 extern const MemoryRegionOps vfio_region_ops;
+extern const MemoryListener vfio_memory_listener;
 typedef QLIST_HEAD(VFIOGroupList, VFIOGroup) VFIOGroupList;
 extern VFIOGroupList vfio_group_list;
 

@@ -170,6 +170,10 @@ typedef struct VFIOPCIDevice {
     VFIODisplay *dpy;
     Error *migration_blocker;
     Notifier irqchip_change_notifier;
+    struct {
+        char *sock_name;
+        bool secure;
+    } vfuser;
 } VFIOPCIDevice;
 
 /* Use uin32_t for vendor & device so PCI_ANY_ID expands and cannot match hw */

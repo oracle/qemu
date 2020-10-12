@@ -38,6 +38,7 @@
 #include "sysemu/reset.h"
 #include "trace.h"
 #include "qapi/error.h"
+#include "user.h"
 
 VFIOGroupList vfio_group_list =
     QLIST_HEAD_INITIALIZER(vfio_group_list);
@@ -68,7 +69,11 @@ void vfio_disable_irqindex(VFIODevice *vbasedev, int index)
         .count = 0,
     };
 
-    ioctl(vbasedev->fd, VFIO_DEVICE_SET_IRQS, &irq_set);
+    if (vbasedev->proxy != NULL) {
+        vfio_user_set_irq_info(vbasedev, &irq_set);
+    } else {
+        ioctl(vbasedev->fd, VFIO_DEVICE_SET_IRQS, &irq_set);
+    }
 }
 
 void vfio_unmask_single_irqindex(VFIODevice *vbasedev, int index)
@@ -81,7 +86,11 @@ void vfio_unmask_single_irqindex(VFIODevice *vbasedev, int index)
         .count = 1,
     };
 
-    ioctl(vbasedev->fd, VFIO_DEVICE_SET_IRQS, &irq_set);
+    if (vbasedev->proxy != NULL) {
+        vfio_user_set_irq_info(vbasedev, &irq_set);
+    } else {
+        ioctl(vbasedev->fd, VFIO_DEVICE_SET_IRQS, &irq_set);
+    }
 }
 
 void vfio_mask_single_irqindex(VFIODevice *vbasedev, int index)
@@ -94,7 +103,11 @@ void vfio_mask_single_irqindex(VFIODevice *vbasedev, int index)
         .count = 1,
     };
 
-    ioctl(vbasedev->fd, VFIO_DEVICE_SET_IRQS, &irq_set);
+    if (vbasedev->proxy != NULL) {
+        vfio_user_set_irq_info(vbasedev, &irq_set);
+    } else {
+        ioctl(vbasedev->fd, VFIO_DEVICE_SET_IRQS, &irq_set);
+    }
 }
 
 static inline const char *action_to_str(int action)
@@ -152,8 +165,12 @@ int vfio_set_irq_signaling(VFIODevice *vbasedev, int index, int subindex,
     pfd = (int32_t *)&irq_set->data;
     *pfd = fd;
 
-    if (ioctl(vbasedev->fd, VFIO_DEVICE_SET_IRQS, irq_set)) {
-        ret = -errno;
+    if (vbasedev->proxy != NULL) {
+        ret = vfio_user_set_irq_info(vbasedev, irq_set);
+    } else {
+        if (ioctl(vbasedev->fd, VFIO_DEVICE_SET_IRQS, irq_set)) {
+            ret = -errno;
+        }
     }
     g_free(irq_set);
 
@@ -161,7 +178,7 @@ int vfio_set_irq_signaling(VFIODevice *vbasedev, int index, int subindex,
         return 0;
     }
 
-    error_setg_errno(errp, -ret, "VFIO_DEVICE_SET_IRQS failure");
+    error_setg_errno(errp, ret, "VFIO_DEVICE_SET_IRQS failure");
 
     name = index_to_str(vbasedev, index);
     if (name) {
@@ -172,7 +189,7 @@ int vfio_set_irq_signaling(VFIODevice *vbasedev, int index, int subindex,
     error_prepend(errp,
                   "Failed to %s %s eventfd signaling for interrupt ",
                   fd < 0 ? "tear down" : "set up", action_to_str(action));
-    return ret;
+    return -ret;
 }
 
 /*
@@ -189,6 +206,7 @@ void vfio_region_write(void *opaque, hwaddr addr,
         uint32_t dword;
         uint64_t qword;
     } buf;
+    int ret;
 
     switch (size) {
     case 1:
@@ -208,7 +226,12 @@ void vfio_region_write(void *opaque, hwaddr addr,
         break;
     }
 
-    if (pwrite(vbasedev->fd, &buf, size, region->fd_offset + addr) != size) {
+    if (vbasedev->proxy!= NULL) {
+        ret = vfio_user_region_write(vbasedev, region->nr, addr, size, &data);
+    } else {
+        ret = pwrite(vbasedev->fd, &buf, size, region->fd_offset + addr);
+    }
+    if (ret != size) {
         error_report("%s(%s:region%d+0x%"HWADDR_PRIx", 0x%"PRIx64
                      ",%d) failed: %m",
                      __func__, vbasedev->name, region->nr,
@@ -240,13 +263,20 @@ uint64_t vfio_region_read(void *opaque,
         uint64_t qword;
     } buf;
     uint64_t data = 0;
+    int ret;
 
-    if (pread(vbasedev->fd, &buf, size, region->fd_offset + addr) != size) {
+    if (vbasedev->proxy != NULL) {
+        ret = vfio_user_region_read(vbasedev, region->nr, addr, size, &buf);
+    } else {
+        ret = pread(vbasedev->fd, &buf, size, region->fd_offset + addr);
+    }
+    if (ret != size) {
         error_report("%s(%s:region%d+0x%"HWADDR_PRIx", %d) failed: %m",
                      __func__, vbasedev->name, region->nr,
                      addr, size);
         return (uint64_t)-1;
     }
+
     switch (size) {
     case 1:
         data = buf.byte;
@@ -293,67 +323,110 @@ const MemoryRegionOps vfio_region_ops = {
 static int vfio_dma_unmap(VFIOContainer *container,
                           hwaddr iova, ram_addr_t size)
 {
-    struct vfio_iommu_type1_dma_unmap unmap = {
-        .argsz = sizeof(unmap),
-        .flags = 0,
-        .iova = iova,
-        .size = size,
-    };
+    int ret = 0;
 
-    while (ioctl(container->fd, VFIO_IOMMU_UNMAP_DMA, &unmap)) {
-        /*
-         * The type1 backend has an off-by-one bug in the kernel (71a7d3d78e3c
-         * v4.15) where an overflow in its wrap-around check prevents us from
-         * unmapping the last page of the address space.  Test for the error
-         * condition and re-try the unmap excluding the last page.  The
-         * expectation is that we've never mapped the last page anyway and this
-         * unmap request comes via vIOMMU support which also makes it unlikely
-         * that this page is used.  This bug was introduced well after type1 v2
-         * support was introduced, so we shouldn't need to test for v1.  A fix
-         * is queued for kernel v5.0 so this workaround can be removed once
-         * affected kernels are sufficiently deprecated.
-         */
-        if (errno == EINVAL && unmap.size && !(unmap.iova + unmap.size) &&
-            container->iommu_type == VFIO_TYPE1v2_IOMMU) {
-            trace_vfio_dma_unmap_overflow_workaround();
-            unmap.size -= 1ULL << ctz64(container->pgsizes);
-            continue;
+    if (container->proxy != NULL) {
+        struct vfio_user_map unmap = {
+            .address = iova,
+            .size = size,
+            .offset = 0,
+            .protection = 0,
+            .flags = 0,
+        };
+        ret = vfio_user_dma_unmap(container->proxy, &unmap, 1);
+    } else {
+        struct vfio_iommu_type1_dma_unmap unmap = {
+            .argsz = sizeof(unmap),
+            .flags = 0,
+            .iova = iova,
+            .size = size,
+        };
+
+        while (ioctl(container->fd, VFIO_IOMMU_UNMAP_DMA, &unmap)) {
+            /*
+             * The type1 backend has an off-by-one bug in the kernel (71a7d3d78e3c
+             * v4.15) where an overflow in its wrap-around check prevents us from
+             * unmapping the last page of the address space.  Test for the error
+             * condition and re-try the unmap excluding the last page.  The
+             * expectation is that we've never mapped the last page anyway and this
+             * unmap request comes via vIOMMU support which also makes it unlikely
+             * that this page is used.  This bug was introduced well after type1 v2
+             * support was introduced, so we shouldn't need to test for v1.  A fix
+             * is queued for kernel v5.0 so this workaround can be removed once
+             * affected kernels are sufficiently deprecated.
+             */
+            if (errno == EINVAL && unmap.size && !(unmap.iova + unmap.size) &&
+                container->iommu_type == VFIO_TYPE1v2_IOMMU) {
+                trace_vfio_dma_unmap_overflow_workaround();
+                unmap.size -= 1ULL << ctz64(container->pgsizes);
+                continue;
+            }
+            error_report("VFIO_UNMAP_DMA failed: %s", strerror(errno));
+            return -errno;
         }
-        error_report("VFIO_UNMAP_DMA failed: %s", strerror(errno));
-        return -errno;
     }
 
-    return 0;
+    return ret;
 }
 
-static int vfio_dma_map(VFIOContainer *container, hwaddr iova,
+static int vfio_dma_map(VFIOContainer *container, MemoryRegion *mr, hwaddr iova,
                         ram_addr_t size, void *vaddr, bool readonly)
 {
-    struct vfio_iommu_type1_dma_map map = {
-        .argsz = sizeof(map),
-        .flags = VFIO_DMA_MAP_FLAG_READ,
-        .vaddr = (__u64)(uintptr_t)vaddr,
-        .iova = iova,
-        .size = size,
-    };
+    int ret;
 
-    if (!readonly) {
-        map.flags |= VFIO_DMA_MAP_FLAG_WRITE;
+    if (container->proxy != NULL) {
+        struct vfio_user_map map = {
+            .address = iova,
+            .size = size,
+            .offset = 0,
+            .protection = PROT_READ,
+            .flags = 0,
+        };
+        VFIOUserFDs fds;
+        int fd;
+
+        if (!readonly) {
+            map.protection |= PROT_WRITE;
+        }
+        fd = memory_region_get_fd(mr);
+        if (fd != -1 && !(container->proxy->flags & VFIO_PROXY_SECURE)) {
+            fds.numfds = fds.maxfds = 1;
+            fds.fds = &fd;
+            map.offset = qemu_ram_block_host_offset(mr->ram_block, vaddr);
+            map.flags = VFIO_USER_MAPPABLE;
+
+            ret = vfio_user_dma_map(container->proxy, &map, &fds, 1);
+        } else {
+            ret = vfio_user_dma_map(container->proxy, &map, NULL, 1);
+        }
+     } else {
+        struct vfio_iommu_type1_dma_map map = {
+            .argsz = sizeof(map),
+            .flags = VFIO_DMA_MAP_FLAG_READ,
+            .vaddr = (__u64)(uintptr_t)vaddr,
+            .iova = iova,
+            .size = size,
+        };
+
+        if (!readonly) {
+            map.flags |= VFIO_DMA_MAP_FLAG_WRITE;
+        }
+
+        /*
+         * Try the mapping, if it fails with EBUSY, unmap the region and try
+         * again.  This shouldn't be necessary, but we sometimes see it in
+         * the VGA ROM space.
+         */
+        if (ioctl(container->fd, VFIO_IOMMU_MAP_DMA, &map) == 0 ||
+            (errno == EBUSY && vfio_dma_unmap(container, iova, size) == 0 &&
+             ioctl(container->fd, VFIO_IOMMU_MAP_DMA, &map) == 0)) {
+            return 0;
+        }
+
+        error_report("VFIO_MAP_DMA failed: %s", strerror(errno));
+        ret = -errno;
     }
-
-    /*
-     * Try the mapping, if it fails with EBUSY, unmap the region and try
-     * again.  This shouldn't be necessary, but we sometimes see it in
-     * the VGA ROM space.
-     */
-    if (ioctl(container->fd, VFIO_IOMMU_MAP_DMA, &map) == 0 ||
-        (errno == EBUSY && vfio_dma_unmap(container, iova, size) == 0 &&
-         ioctl(container->fd, VFIO_IOMMU_MAP_DMA, &map) == 0)) {
-        return 0;
-    }
-
-    error_report("VFIO_MAP_DMA failed: %s", strerror(errno));
-    return -errno;
+    return ret;
 }
 
 static void vfio_host_win_add(VFIOContainer *container,
@@ -409,7 +482,7 @@ static bool vfio_listener_skipped_section(MemoryRegionSection *section)
 
 /* Called with rcu_read_lock held.  */
 static bool vfio_get_vaddr(IOMMUTLBEntry *iotlb, void **vaddr,
-                           bool *read_only)
+                           MemoryRegion **mrp, bool *read_only)
 {
     MemoryRegion *mr;
     hwaddr xlat;
@@ -441,6 +514,7 @@ static bool vfio_get_vaddr(IOMMUTLBEntry *iotlb, void **vaddr,
     }
 
     *vaddr = memory_region_get_ram_ptr(mr) + xlat;
+    *mrp = mr;
     *read_only = !writable || mr->readonly;
 
     return true;
@@ -450,6 +524,7 @@ static void vfio_iommu_map_notify(IOMMUNotifier *n, IOMMUTLBEntry *iotlb)
 {
     VFIOGuestIOMMU *giommu = container_of(n, VFIOGuestIOMMU, n);
     VFIOContainer *container = giommu->container;
+    MemoryRegion *mr;
     hwaddr iova = iotlb->iova + giommu->iommu_offset;
     bool read_only;
     void *vaddr;
@@ -467,7 +542,7 @@ static void vfio_iommu_map_notify(IOMMUNotifier *n, IOMMUTLBEntry *iotlb)
     rcu_read_lock();
 
     if ((iotlb->perm & IOMMU_RW) != IOMMU_NONE) {
-        if (!vfio_get_vaddr(iotlb, &vaddr, &read_only)) {
+        if (!vfio_get_vaddr(iotlb, &vaddr, &mr, &read_only)) {
             goto out;
         }
         /*
@@ -477,7 +552,7 @@ static void vfio_iommu_map_notify(IOMMUNotifier *n, IOMMUTLBEntry *iotlb)
          * of vaddr will always be there, even if the memory object is
          * destroyed and its backing memory munmap-ed.
          */
-        ret = vfio_dma_map(container, iova,
+        ret = vfio_dma_map(container, mr, iova,
                            iotlb->addr_mask + 1, vaddr,
                            read_only);
         if (ret) {
@@ -672,7 +747,7 @@ static void vfio_listener_region_add(MemoryListener *listener,
         }
     }
 
-    ret = vfio_dma_map(container, iova, int128_get64(llsize),
+    ret = vfio_dma_map(container, section->mr, iova, int128_get64(llsize),
                        vaddr, section->readonly);
     if (ret) {
         error_setg(&err, "vfio_dma_map(%p, 0x%"HWADDR_PRIx", "
@@ -813,7 +888,7 @@ static void vfio_listener_region_del(MemoryListener *listener,
     }
 }
 
-static const MemoryListener vfio_memory_listener = {
+const MemoryListener vfio_memory_listener = {
     .region_add = vfio_listener_region_add,
     .region_del = vfio_listener_region_del,
 };
@@ -843,6 +918,16 @@ vfio_get_region_info_cap(struct vfio_region_info *info, uint16_t id)
     }
 
     return NULL;
+}
+
+static int vfio_get_region_info_remfd(VFIODevice *vbasedev, int index)
+{
+    struct vfio_region_info *info;
+
+    if (vbasedev->regions == NULL || vbasedev->regions[index] == NULL) {
+        vfio_get_region_info(vbasedev, index, &info);
+    }
+    return vbasedev->regfds != NULL ? vbasedev->regfds[index] : -1;
 }
 
 static int vfio_setup_region_sparse_mmaps(VFIORegion *region,
@@ -886,18 +971,21 @@ int vfio_region_setup(Object *obj, VFIODevice *vbasedev, VFIORegion *region,
                       int index, const char *name)
 {
     struct vfio_region_info *info;
-    int ret;
+    int fd, ret;
 
     ret = vfio_get_region_info(vbasedev, index, &info);
     if (ret) {
         return ret;
     }
 
+    fd = vfio_get_region_info_remfd(vbasedev, index);
+
     region->vbasedev = vbasedev;
     region->flags = info->flags;
     region->size = info->size;
     region->fd_offset = info->offset;
     region->nr = index;
+    region->remfd = fd;
 
     if (region->size) {
         region->mem = g_new0(MemoryRegion, 1);
@@ -929,6 +1017,7 @@ int vfio_region_mmap(VFIORegion *region)
 {
     int i, prot = 0;
     char *name;
+    int fd;
 
     if (!region->mem) {
         return 0;
@@ -937,9 +1026,11 @@ int vfio_region_mmap(VFIORegion *region)
     prot |= region->flags & VFIO_REGION_INFO_FLAG_READ ? PROT_READ : 0;
     prot |= region->flags & VFIO_REGION_INFO_FLAG_WRITE ? PROT_WRITE : 0;
 
+    fd = region->remfd != -1 ? region->remfd : region->vbasedev->fd;
+
     for (i = 0; i < region->nr_mmaps; i++) {
         region->mmaps[i].mmap = mmap(NULL, region->mmaps[i].size, prot,
-                                     MAP_SHARED, region->vbasedev->fd,
+                                     MAP_SHARED, fd,
                                      region->fd_offset +
                                      region->mmaps[i].offset);
         if (region->mmaps[i].mmap == MAP_FAILED) {
@@ -1123,7 +1214,7 @@ static void vfio_kvm_device_del_group(VFIOGroup *group)
 #endif
 }
 
-static VFIOAddressSpace *vfio_get_address_space(AddressSpace *as)
+VFIOAddressSpace *vfio_get_address_space(AddressSpace *as)
 {
     VFIOAddressSpace *space;
 
@@ -1143,7 +1234,7 @@ static VFIOAddressSpace *vfio_get_address_space(AddressSpace *as)
     return space;
 }
 
-static void vfio_put_address_space(VFIOAddressSpace *space)
+void vfio_put_address_space(VFIOAddressSpace *space)
 {
     if (QLIST_EMPTY(&space->containers)) {
         QLIST_REMOVE(space, list);
@@ -1614,6 +1705,22 @@ int vfio_get_region_info(VFIODevice *vbasedev, int index,
                          struct vfio_region_info **info)
 {
     size_t argsz = sizeof(struct vfio_region_info);
+    int fd = -1;
+    int ret;
+
+    /* create region cache */
+    if (vbasedev->regions == NULL) {
+        vbasedev->regions = g_new0(struct vfio_region_info *, vbasedev->num_regions);
+        if (vbasedev->proxy != NULL) {
+            vbasedev->regfds = g_new0(int, vbasedev->num_regions);
+        }
+    }
+    /* check cache */
+    if (vbasedev->regions[index] != NULL) {
+        *info = g_malloc0(vbasedev->regions[index]->argsz);
+        **info = *vbasedev->regions[index];
+        return 0;
+    }
 
     *info = g_malloc0(argsz);
 
@@ -1621,17 +1728,37 @@ int vfio_get_region_info(VFIODevice *vbasedev, int index,
 retry:
     (*info)->argsz = argsz;
 
-    if (ioctl(vbasedev->fd, VFIO_DEVICE_GET_REGION_INFO, *info)) {
+    if (vbasedev->proxy != NULL) {
+        VFIOUserFDs fds = { 1, 1, &fd};
+
+        ret = vfio_user_get_region_info(vbasedev, index, *info, &fds);
+    } else {
+        ret = ioctl(vbasedev->fd, VFIO_DEVICE_GET_REGION_INFO, *info);
+        if (ret < 0) {
+            ret = -errno;
+        }
+    }
+    if (ret != 0) {
         g_free(*info);
         *info = NULL;
-        return -errno;
+        return ret;
     }
 
     if ((*info)->argsz > argsz) {
         argsz = (*info)->argsz;
         *info = g_realloc(*info, argsz);
-
+        if (fd != -1) {
+            close(fd);
+            fd = -1;
+        }
         goto retry;
+    }
+
+    /* fill cache */
+    vbasedev->regions[index] = g_malloc0(argsz);
+    *vbasedev->regions[index] = **info;
+    if (vbasedev->regfds != NULL) {
+        vbasedev->regfds[index] = fd;
     }
 
     return 0;

@@ -42,7 +42,7 @@ static void vfio_user_request_msg(vfio_user_hdr_t *hdr, uint16_t cmd, uint32_t s
 static void vfio_user_dma_read(VFIOPCIDevice *vdev, struct vfio_user_dma_rw *msg);
 static void vfio_user_dma_write(VFIOPCIDevice *vdev, struct vfio_user_dma_rw *msg);
 static void vfio_user_vm_intr(VFIOPCIDevice *vdev, struct vfio_user_vm_intr *msg);
-static void vfio_user_process_req(VFIOPCIDevice *vdev, char *buf);
+static void vfio_user_process_req(void *opaque, char *buf);
 
 static void vfio_user_recv(void *opaque);
 static void vfio_user_send_locked(VFIOProxy *proxy, vfio_user_hdr_t *msg, VFIOUserFDs *fds);
@@ -121,8 +121,9 @@ static void vfio_user_vm_intr(VFIOPCIDevice *vdev, struct vfio_user_vm_intr *msg
     }
 }
 
-static void vfio_user_process_req(VFIOPCIDevice *vdev, char *buf)
+static void vfio_user_process_req(void *opaque, char *buf)
 {
+    VFIOPCIDevice *vdev = opaque;
     vfio_user_hdr_t *hdr = (vfio_user_hdr_t *)buf;
 
     switch (hdr->command) {
@@ -145,8 +146,9 @@ static void vfio_user_recv(void *opaque)
     VFIOPCIDevice *vdev = opaque;
     VFIOProxy *proxy = vdev->vbasedev.proxy;
     VFIOUserReply *reply = NULL;
+    int fdarray[REMOTE_MAX_FDS];
+    VFIOUserFDs reqfds = { 0, REMOTE_MAX_FDS, fdarray };
     VFIOUserFDs *fds = NULL;
-    VFIOUserFDs reqfds = { 0, 0, NULL };
     vfio_user_hdr_t msg;
     union {
         char control[CMSG_SPACE(REMOTE_MAX_FDS * sizeof(int))];
@@ -210,6 +212,9 @@ static void vfio_user_recv(void *opaque)
          * reqfds.maxfds is 0 here to catch this below
          * they will be expected on the server, however
          */
+        if (proxy->flags & VFIO_PROXY_CLIENT) {
+            reqfds.maxfds = 0;
+        }
         fds = &reqfds;
     }
 
@@ -270,7 +275,7 @@ static void vfio_user_recv(void *opaque)
         qemu_mutex_lock_iothread();
     } else {
         qemu_mutex_lock_iothread();
-        vfio_user_process_req(vdev, buf);
+        proxy->request(proxy->reqarg, buf);
     }
     return;
 
@@ -399,10 +404,16 @@ VFIOProxy *vfio_user_connect_dev(VFIOPCIDevice *vdev, char *sockname, Error **er
     proxy = g_malloc0(sizeof(VFIOProxy));
     proxy->socket = sockfd;
     proxy->sockname = sockname;
+    proxy->flags = VFIO_PROXY_CLIENT;
+    if (vdev->vfuser.secure) {
+        proxy->flags |= VFIO_PROXY_SECURE;
+    }
 
     qemu_mutex_init(&proxy->lock);
     QTAILQ_INIT(&proxy->free);
     QTAILQ_INIT(&proxy->pending);
+    proxy->request = vfio_user_process_req;
+    proxy->reqarg = vdev;
     qemu_set_fd_handler(proxy->socket, vfio_user_recv, NULL, vdev);
 
     return proxy;
@@ -442,7 +453,7 @@ int vfio_user_validate_version(VFIODevice *vbasedev, Error **errp)
     return 0;
 }
 
-int vfio_user_dma_map(VFIODevice *vbasedev, struct vfio_user_map *map, VFIOUserFDs *fds,
+int vfio_user_dma_map(VFIOProxy *proxy, struct vfio_user_map *map, VFIOUserFDs *fds,
                       uint64_t nelem)
 {
     struct vfio_user_dma_map *msgp;
@@ -451,20 +462,20 @@ int vfio_user_dma_map(VFIODevice *vbasedev, struct vfio_user_map *map, VFIOUserF
 
     if (fds->numfds != nelem) {
         error_printf("vfio_user_dma_map mismatch of FDs and table elements\n");
-        return -1;
+        return -EINVAL;
     }
     msgp = g_malloc0(size);
     vfio_user_request_msg(&msgp->hdr, VFIO_USER_DMA_MAP, size, 0);
     memcpy(&msgp->table, map, nelem * sizeof(*map));
 
-    vfio_user_send_recv(vbasedev->proxy, &msgp->hdr, fds, 0);
-    ret = (msgp->hdr.flags & VFIO_USER_ERROR) ? -1 : 0;
+    vfio_user_send_recv(proxy, &msgp->hdr, fds, 0);
+    ret = (msgp->hdr.flags & VFIO_USER_ERROR) ? -msgp->hdr.error_reply : 0;
 
     g_free(msgp);
     return ret;
 }
 
-int vfio_user_dma_unmap(VFIODevice *vbasedev, struct vfio_user_map *map,
+int vfio_user_dma_unmap(VFIOProxy *proxy, struct vfio_user_map *map,
                                uint64_t nelem)
 {
     struct vfio_user_dma_map *msgp;
@@ -475,8 +486,8 @@ int vfio_user_dma_unmap(VFIODevice *vbasedev, struct vfio_user_map *map,
     vfio_user_request_msg(&msgp->hdr, VFIO_USER_DMA_UNMAP, size, 0);
     memcpy(&msgp->table, map, nelem * sizeof(*map));
 
-    vfio_user_send_recv(vbasedev->proxy, &msgp->hdr, NULL, 0);
-    ret = (msgp->hdr.flags & VFIO_USER_ERROR) ? -1 : 0;
+    vfio_user_send_recv(proxy, &msgp->hdr, NULL, 0);
+    ret = (msgp->hdr.flags & VFIO_USER_ERROR) ? -msgp->hdr.error_reply : 0;
 
     g_free(msgp);
     return ret;
@@ -512,7 +523,7 @@ int vfio_user_get_region_info(VFIODevice *vbasedev, int index,
     /* data returned can be larger than vfio_region_info */
     if (info->argsz < sizeof(*info)) {
         error_printf("vfio_user_get_region_info argsz too small\n");
-        return -1;
+        return -EINVAL;
     }
     size = info->argsz + sizeof(vfio_user_hdr_t);
     msgp = g_malloc0(size);
@@ -552,7 +563,7 @@ int vfio_user_set_irq_info(VFIODevice *vbasedev, struct vfio_irq_set *irq)
     /* only allocate if sending data array with set message */
     if (irq->argsz < sizeof(*irq)) {
         error_printf("vfio_user_set_irq_info argsz too small\n");
-        return -1;
+        return -EINVAL;
     }
     msgp = irq->argsz > sizeof(smallmsg) ? g_malloc0(irq->argsz) : &smallmsg;
 
@@ -578,7 +589,7 @@ int vfio_user_region_read(VFIODevice *vbasedev, uint32_t index, uint64_t offset,
         char buf[8];
     } smallmsg;
     struct vfio_user_region_rw *msgp;
-    int size = sizeof(*msgp) + count;
+    int ret, size = sizeof(*msgp) + count;
 
     /* most reads are just registers, only allocate for larger ones */
     msgp = count > 8 ? g_malloc0(size) : &smallmsg.msg;
@@ -589,18 +600,18 @@ int vfio_user_region_read(VFIODevice *vbasedev, uint32_t index, uint64_t offset,
 
     vfio_user_send_recv(vbasedev->proxy, &msgp->hdr, NULL, size);
     if (msgp->hdr.flags & VFIO_USER_ERROR) {
-        errno = msgp->hdr.error_reply;
+        ret = -msgp->hdr.error_reply;
     } else if (msgp->count > count) {
-        errno = E2BIG;
+        ret = -E2BIG;
     } else {
-        errno = 0;
+        ret = 0;
         memcpy(data, (char *)msgp + sizeof(*msgp), msgp->count);
     }
 
     if (msgp != &smallmsg.msg) {
         g_free(msgp);
     }
-    return errno ? -1: msgp->count;
+    return ret < 0 ? ret : msgp->count;
 }
 
 int vfio_user_region_write(VFIODevice *vbasedev, uint32_t index, uint64_t offset,

@@ -38,6 +38,7 @@
 #include "sysemu/runstate.h"
 #include "sysemu/sysemu.h"
 #include "pci.h"
+#include "user.h"
 #include "trace.h"
 #include "qapi/error.h"
 #include "migration/blocker.h"
@@ -414,7 +415,11 @@ static int vfio_enable_vectors(VFIOPCIDevice *vdev, bool msix)
         fds[i] = fd;
     }
 
-    ret = ioctl(vdev->vbasedev.fd, VFIO_DEVICE_SET_IRQS, irq_set);
+    if (vdev->vbasedev.proxy != NULL) {
+        ret = vfio_user_set_irq_info(&vdev->vbasedev, irq_set);
+     } else {
+        ret = ioctl(vdev->vbasedev.fd, VFIO_DEVICE_SET_IRQS, irq_set);
+    }
 
     g_free(irq_set);
 
@@ -804,8 +809,14 @@ static void vfio_pci_load_rom(VFIOPCIDevice *vdev)
     memset(vdev->rom, 0xff, size);
 
     while (size) {
-        bytes = pread(vdev->vbasedev.fd, vdev->rom + off,
-                      size, vdev->rom_offset + off);
+        if (vdev->vbasedev.proxy != NULL) {
+            bytes = vfio_user_region_read(&vdev->vbasedev,
+                                          VFIO_PCI_ROM_REGION_INDEX,
+                                          off, size, vdev->rom + off);
+        } else {
+            bytes = pread(vdev->vbasedev.fd, vdev->rom + off,
+                          size, vdev->rom_offset + off);
+        }
         if (bytes == 0) {
             break;
         } else if (bytes > 0) {
@@ -924,12 +935,26 @@ static void vfio_pci_size_rom(VFIOPCIDevice *vdev)
      * Use the same size ROM BAR as the physical device.  The contents
      * will get filled in later when the guest tries to read it.
      */
-    if (pread(fd, &orig, 4, offset) != 4 ||
-        pwrite(fd, &size, 4, offset) != 4 ||
-        pread(fd, &size, 4, offset) != 4 ||
-        pwrite(fd, &orig, 4, offset) != 4) {
-        error_report("%s(%s) failed: %m", __func__, vdev->vbasedev.name);
-        return;
+    if (vdev->vbasedev.proxy != NULL) {
+        if (vfio_user_region_read(&vdev->vbasedev, VFIO_PCI_CONFIG_REGION_INDEX,
+                                  PCI_ROM_ADDRESS, 4, &orig) != 4 ||
+            vfio_user_region_write(&vdev->vbasedev, VFIO_PCI_CONFIG_REGION_INDEX,
+                                   PCI_ROM_ADDRESS, 4, &size) != 4 ||
+            vfio_user_region_read(&vdev->vbasedev, VFIO_PCI_CONFIG_REGION_INDEX,
+                              PCI_ROM_ADDRESS, 4, &size) != 4 ||
+            vfio_user_region_write(&vdev->vbasedev, VFIO_PCI_CONFIG_REGION_INDEX,
+                                   PCI_ROM_ADDRESS, 4, &orig) != 4) {
+            error_report("%s(%s) failed: %m", __func__, vdev->vbasedev.name);
+            return;
+        }
+    } else {
+        if (pread(fd, &orig, 4, offset) != 4 ||
+            pwrite(fd, &size, 4, offset) != 4 ||
+            pread(fd, &size, 4, offset) != 4 ||
+            pwrite(fd, &orig, 4, offset) != 4) {
+            error_report("%s(%s) failed: %m", __func__, vdev->vbasedev.name);
+            return;
+        }
     }
 
     size = ~(le32_to_cpu(size) & PCI_ROM_ADDRESS_MASK) + 1;
@@ -1120,13 +1145,25 @@ uint32_t vfio_pci_read_config(PCIDevice *pdev, uint32_t addr, int len)
     if (~emu_bits & (0xffffffffU >> (32 - len * 8))) {
         ssize_t ret;
 
-        ret = pread(vdev->vbasedev.fd, &phys_val, len,
-                    vdev->config_offset + addr);
-        if (ret != len) {
-            error_report("%s(%s, 0x%x, 0x%x) failed: %m",
-                         __func__, vdev->vbasedev.name, addr, len);
-            return -errno;
+        if (vdev->vbasedev.proxy != NULL) {
+            ret = vfio_user_region_read(&vdev->vbasedev,
+                                        VFIO_PCI_CONFIG_REGION_INDEX,
+                                        addr, len, &phys_val);
+            if (ret != len) {
+                error_report("%s(%s, 0x%x, 0x%x) failed: %m",
+                             __func__, vdev->vbasedev.name, addr, len);
+                return ret;
+            }
+        } else {
+            ret = pread(vdev->vbasedev.fd, &phys_val, len,
+                        vdev->config_offset + addr);
+            if (ret != len) {
+                error_report("%s(%s, 0x%x, 0x%x) failed: %m",
+                             __func__, vdev->vbasedev.name, addr, len);
+                return -errno;
+            }
         }
+
         phys_val = le32_to_cpu(phys_val);
     }
 
@@ -1142,12 +1179,18 @@ void vfio_pci_write_config(PCIDevice *pdev,
 {
     VFIOPCIDevice *vdev = PCI_VFIO(pdev);
     uint32_t val_le = cpu_to_le32(val);
+    int ret;
 
     trace_vfio_pci_write_config(vdev->vbasedev.name, addr, val, len);
 
     /* Write everything to VFIO, let it filter out what we can't write */
-    if (pwrite(vdev->vbasedev.fd, &val_le, len, vdev->config_offset + addr)
-                != len) {
+    if (vdev->vbasedev.proxy != NULL) {
+        ret = vfio_user_region_write(&vdev->vbasedev, VFIO_PCI_CONFIG_REGION_INDEX,
+           addr, len, &val_le);
+    } else {
+        ret = pwrite(vdev->vbasedev.fd, &val_le, len, vdev->config_offset + addr);
+    }
+    if (ret != len) {
         error_report("%s(%s, 0x%x, 0x%x, 0x%x) failed: %m",
                      __func__, vdev->vbasedev.name, addr, val, len);
     }
@@ -1207,6 +1250,7 @@ void vfio_pci_write_config(PCIDevice *pdev,
         /* Write everything to QEMU to keep emulated bits correct */
         pci_default_write_config(pdev, addr, val, len);
     }
+
 }
 
 /*
@@ -1237,10 +1281,15 @@ static int vfio_msi_setup(VFIOPCIDevice *vdev, int pos, Error **errp)
     int ret, entries;
     Error *err = NULL;
 
-    if (pread(vdev->vbasedev.fd, &ctrl, sizeof(ctrl),
-              vdev->config_offset + pos + PCI_CAP_FLAGS) != sizeof(ctrl)) {
-        error_setg_errno(errp, errno, "failed reading MSI PCI_CAP_FLAGS");
-        return -errno;
+    if (vdev->vbasedev.proxy != NULL ) {
+        /* during setup, config space was initialized from remote */
+        memcpy(&ctrl, vdev->pdev.config + pos + PCI_CAP_FLAGS, sizeof(ctrl));
+    } else {
+        if (pread(vdev->vbasedev.fd, &ctrl, sizeof(ctrl),
+                  vdev->config_offset + pos + PCI_CAP_FLAGS) != sizeof(ctrl)) {
+            error_setg_errno(errp, errno, "failed reading MSI PCI_CAP_FLAGS");
+            return -errno;
+        }
     }
     ctrl = le16_to_cpu(ctrl);
 
@@ -1453,22 +1502,29 @@ static void vfio_msix_early_setup(VFIOPCIDevice *vdev, Error **errp)
         return;
     }
 
-    if (pread(fd, &ctrl, sizeof(ctrl),
-              vdev->config_offset + pos + PCI_MSIX_FLAGS) != sizeof(ctrl)) {
-        error_setg_errno(errp, errno, "failed to read PCI MSIX FLAGS");
-        return;
-    }
+    if (vdev->vbasedev.proxy != NULL) {
+        /* during setup, config space was initialized from remote */
+        memcpy(&ctrl, vdev->pdev.config + pos + PCI_MSIX_FLAGS, sizeof(ctrl));
+        memcpy(&table, vdev->pdev.config + pos + PCI_MSIX_TABLE, sizeof(table));
+        memcpy(&pba, vdev->pdev.config + pos + PCI_MSIX_PBA, sizeof(pba));
+    } else {
+        if (pread(fd, &ctrl, sizeof(ctrl),
+                  vdev->config_offset + pos + PCI_MSIX_FLAGS) != sizeof(ctrl)) {
+            error_setg_errno(errp, errno, "failed to read PCI MSIX FLAGS");
+            return;
+        }
 
-    if (pread(fd, &table, sizeof(table),
-              vdev->config_offset + pos + PCI_MSIX_TABLE) != sizeof(table)) {
-        error_setg_errno(errp, errno, "failed to read PCI MSIX TABLE");
-        return;
-    }
+        if (pread(fd, &table, sizeof(table),
+                  vdev->config_offset + pos + PCI_MSIX_TABLE) != sizeof(table)) {
+            error_setg_errno(errp, errno, "failed to read PCI MSIX TABLE");
+            return;
+        }
 
-    if (pread(fd, &pba, sizeof(pba),
-              vdev->config_offset + pos + PCI_MSIX_PBA) != sizeof(pba)) {
-        error_setg_errno(errp, errno, "failed to read PCI MSIX PBA");
-        return;
+        if (pread(fd, &pba, sizeof(pba),
+                  vdev->config_offset + pos + PCI_MSIX_PBA) != sizeof(pba)) {
+            error_setg_errno(errp, errno, "failed to read PCI MSIX PBA");
+            return;
+        }
     }
 
     ctrl = le16_to_cpu(ctrl);
@@ -1598,7 +1654,6 @@ static void vfio_mmap_set_enabled(VFIOPCIDevice *vdev, bool enabled)
 static void vfio_bar_prepare(VFIOPCIDevice *vdev, int nr)
 {
     VFIOBAR *bar = &vdev->bars[nr];
-
     uint32_t pci_bar;
     int ret;
 
@@ -1608,11 +1663,17 @@ static void vfio_bar_prepare(VFIOPCIDevice *vdev, int nr)
     }
 
     /* Determine what type of BAR this is for registration */
-    ret = pread(vdev->vbasedev.fd, &pci_bar, sizeof(pci_bar),
-                vdev->config_offset + PCI_BASE_ADDRESS_0 + (4 * nr));
-    if (ret != sizeof(pci_bar)) {
-        error_report("vfio: Failed to read BAR %d (%m)", nr);
-        return;
+    if (vdev->vbasedev.proxy != NULL) {
+        /* during setup, config space was initialized from remote */
+        memcpy(&pci_bar, vdev->pdev.config + PCI_BASE_ADDRESS_0 + (4 * nr),
+               sizeof(pci_bar));
+    } else {
+        ret = pread(vdev->vbasedev.fd, &pci_bar, sizeof(pci_bar),
+                    vdev->config_offset + PCI_BASE_ADDRESS_0 + (4 * nr));
+        if (ret != sizeof(pci_bar)) {
+            error_report("vfio: Failed to read BAR %d (%m)", nr);
+            return;
+        }
     }
 
     pci_bar = le32_to_cpu(pci_bar);
@@ -2551,7 +2612,12 @@ static void vfio_populate_device(VFIOPCIDevice *vdev, Error **errp)
 
     irq_info.index = VFIO_PCI_ERR_IRQ_INDEX;
 
-    ret = ioctl(vdev->vbasedev.fd, VFIO_DEVICE_GET_IRQ_INFO, &irq_info);
+    if (vbasedev->proxy != NULL) {
+        ret = vfio_user_get_irq_info(vbasedev, &irq_info);
+    } else {
+        ret = ioctl(vdev->vbasedev.fd, VFIO_DEVICE_GET_IRQ_INFO, &irq_info);
+    }
+
     if (ret) {
         /* This can fail for an old kernel or legacy PCI dev */
         trace_vfio_populate_device_get_irq_info_failure(strerror(errno));
@@ -2670,8 +2736,16 @@ static void vfio_register_req_notifier(VFIOPCIDevice *vdev)
         return;
     }
 
-    if (ioctl(vdev->vbasedev.fd,
-              VFIO_DEVICE_GET_IRQ_INFO, &irq_info) < 0 || irq_info.count < 1) {
+    if (vdev->vbasedev.proxy != NULL) {
+        if (vfio_user_get_irq_info(&vdev->vbasedev, &irq_info) < 0) {
+            return;
+        }
+    } else {
+        if (ioctl(vdev->vbasedev.fd, VFIO_DEVICE_GET_IRQ_INFO, &irq_info) < 0) {
+            return;
+        }
+    }
+    if (irq_info.count < 1) {
         return;
     }
 
@@ -3249,3 +3323,247 @@ static void register_vfio_pci_dev_type(void)
 }
 
 type_init(register_vfio_pci_dev_type)
+
+
+/*
+ * VFIO over UNIX socket
+ */
+
+VFIOProxy *vfio_user_connect_dev(VFIOPCIDevice *vdev, char *sockname, Error **errp);
+void vfio_user_disconnect(VFIOProxy *proxy);
+
+static void vfio_user_pci_realize(PCIDevice *pdev, Error **errp)
+{
+    VFIOPCIDevice *vdev = PCI_VFIOU(pdev);
+    VFIODevice *vbasedev = &vdev->vbasedev;
+    VFIOGroup *group = NULL;
+    VFIOAddressSpace *space = NULL;
+    VFIOContainer *container = NULL;
+    VFIOProxy *proxy;
+    int ret;
+    Error *err = NULL;
+
+    if (!vdev->vfuser.sock_name) {
+        error_setg(errp, "No socket specified");
+        error_append_hint(errp, "Use -device vfio-user-pci,socket=<name>\n");
+        return;
+    }
+
+    proxy = vfio_user_connect_dev(vdev, vdev->vfuser.sock_name, &err);
+    if (!proxy) {
+        error_setg(errp, "Remote proxy not found");
+        return;
+    }
+    vbasedev->proxy = proxy;
+
+    vfio_user_validate_version(vbasedev, &err);
+    if (err != NULL) {
+        error_propagate(errp, err);
+        goto error;
+    }
+
+    vbasedev->name = g_strdup_printf("VFIO user <%s>", vdev->vfuser.sock_name);
+    vbasedev->dev = DEVICE(vdev);
+    vbasedev->fd = -1;
+    vbasedev->type = VFIO_DEVICE_TYPE_PCI;
+    vbasedev->no_mmap = false;
+    vbasedev->balloon_allowed = false;
+    vbasedev->ops = &vfio_pci_ops;
+
+    /*
+     * each device gets its own group and container
+     * make them unrelated to any host IOMMU groupings
+     */
+    group = g_malloc0(sizeof(*group));
+    group->fd = -1;
+    group->groupid = -1;
+    QLIST_INIT(&group->device_list);
+    QLIST_INSERT_HEAD(&group->device_list, vbasedev, next);
+    vbasedev->group = group;
+
+    space = vfio_get_address_space(pci_device_iommu_address_space(pdev));
+
+    container = g_malloc0(sizeof(*container));
+    container->space = space;
+    container->fd = -1;
+    container->iommu_type = VFIO_TYPE1_IOMMU;
+    container->proxy = proxy;
+    container->pgsizes = 4096;
+    QLIST_INIT(&container->giommu_list);
+    QLIST_INIT(&container->group_list);
+    QLIST_INSERT_HEAD(&container->group_list, group, container_next);
+
+    QLIST_INSERT_HEAD(&space->containers, container, next);
+    group->container = container;
+
+    container->listener = vfio_memory_listener;
+    memory_listener_register(&container->listener, container->space->as);
+    container->initialized = true;
+
+    ret = vfio_user_get_info(&vdev->vbasedev);
+    if (ret) {
+        error_setg_errno(errp, -ret, "get info failure");
+        goto error;
+    }
+    
+    vfio_populate_device(vdev, &err);
+    if (err) {
+        error_propagate(errp, err);
+        goto error;
+    }
+
+    /* Get a copy of config space */
+    ret = vfio_user_region_read(vbasedev, VFIO_PCI_CONFIG_REGION_INDEX,
+                                vdev->config_offset,
+                                MIN(pci_config_size(pdev), vdev->config_size),
+                                pdev->config);
+    if (ret < 0) {
+        goto error;
+    }
+
+    /* vfio emulates a lot for us, but some bits need extra love */
+    vdev->emulated_config_bits = g_malloc0(vdev->config_size);
+
+    /* QEMU can also add or extend BARs */
+    memset(vdev->emulated_config_bits + PCI_BASE_ADDRESS_0, 0xff, 6 * 4);
+
+    /*
+     * Local QEMU overrides aren't allowed
+     * They must be done in the device process
+     */
+    if (pdev->cap_present & QEMU_PCI_CAP_MULTIFUNCTION) {
+        error_setg(errp, "Multi-function must be specified by device process");
+        goto error;
+    }
+    if (pdev->romfile) {
+        error_setg(errp, "Romfile must be specified by device process");
+        goto error;
+    }
+
+    vfio_bars_prepare(vdev);
+
+    vfio_msix_early_setup(vdev, &err);
+    if (err) {
+        error_propagate(errp, err);
+        goto error;
+    }
+
+    vfio_bars_register(vdev);
+
+    ret = vfio_add_capabilities(vdev, errp);
+    if (ret) {
+        goto out_teardown;
+    }
+
+    /* QEMU emulates all of MSI & MSIX */
+    if (pdev->cap_present & QEMU_PCI_CAP_MSIX) {
+        memset(vdev->emulated_config_bits + pdev->msix_cap, 0xff,
+               MSIX_CAP_LENGTH);
+    }
+
+    if (pdev->cap_present & QEMU_PCI_CAP_MSI) {
+        memset(vdev->emulated_config_bits + pdev->msi_cap, 0xff,
+               vdev->msi_cap_size);
+    }
+
+    if (vfio_pci_read_config(&vdev->pdev, PCI_INTERRUPT_PIN, 1)) {
+        pci_device_set_intx_routing_notifier(&vdev->pdev,
+                                             vfio_intx_routing_notifier);
+        vdev->irqchip_change_notifier.notify = vfio_irqchip_change;
+        kvm_irqchip_add_change_notifier(&vdev->irqchip_change_notifier);
+        ret = vfio_intx_enable(vdev, errp);
+        if (ret) {
+            goto out_deregister;
+        }
+    }
+
+    vfio_register_err_notifier(vdev);
+    vfio_register_req_notifier(vdev);
+
+    return;
+
+out_deregister:
+    pci_device_set_intx_routing_notifier(&vdev->pdev, NULL);
+    kvm_irqchip_remove_change_notifier(&vdev->irqchip_change_notifier);
+out_teardown:
+    vfio_teardown_msi(vdev);
+    vfio_bars_exit(vdev);
+error:
+    vfio_user_disconnect(proxy);
+    error_prepend(errp, VFIO_MSG_PREFIX, vdev->vbasedev.name);
+}
+
+static void vfio_user_pci_instance_finalize(Object *obj)
+{
+    VFIOPCIDevice *vdev = PCI_VFIO(obj);
+    VFIODevice *vbasedev = &vdev->vbasedev;
+    VFIOGroup *group = vbasedev->group;
+    VFIOContainer *container = group->container;
+    VFIOAddressSpace *space = container->space;
+    VFIOGuestIOMMU *giommu, *tmp;
+
+    vfio_bars_finalize(vdev);
+    g_free(vdev->emulated_config_bits);
+    g_free(vdev->rom);
+ 
+    memory_listener_unregister(&container->listener);
+    QLIST_REMOVE(container, next);
+    QLIST_FOREACH_SAFE(giommu, &container->giommu_list, giommu_next, tmp) {
+        memory_region_unregister_iommu_notifier(
+            MEMORY_REGION(giommu->iommu), &giommu->n);
+        QLIST_REMOVE(giommu, giommu_next);
+        g_free(giommu);
+    }
+    vfio_put_address_space(space);
+    g_free(container);
+
+    g_free(group);
+    vbasedev->group = NULL;
+    vfio_put_device(vdev);
+
+    vfio_user_disconnect(vbasedev->proxy);
+}
+
+static Property vfio_user_pci_dev_properties[] = {
+    DEFINE_PROP_STRING("socket", VFIOPCIDevice, vfuser.sock_name),
+    DEFINE_PROP_BOOL("secure-dma", VFIOPCIDevice, vfuser.secure, false),
+    DEFINE_PROP_END_OF_LIST(),
+};
+
+static void vfio_user_pci_dev_class_init(ObjectClass *klass, void *data)
+{
+    DeviceClass *dc = DEVICE_CLASS(klass);
+    PCIDeviceClass *pdc = PCI_DEVICE_CLASS(klass);
+
+    dc->reset = vfio_user_reset;
+    device_class_set_props(dc, vfio_user_pci_dev_properties);
+    dc->desc = "VFIO over socket PCI device assignment";
+    set_bit(DEVICE_CATEGORY_MISC, dc->categories);
+    pdc->realize = vfio_user_pci_realize;
+    pdc->exit = vfio_exitfn;
+    pdc->config_read = vfio_pci_read_config;
+    pdc->config_write = vfio_pci_write_config;
+}
+
+
+static const TypeInfo vfio_user_pci_dev_info = {
+    .name = TYPE_VFIO_USER_PCI,
+    .parent = TYPE_PCI_DEVICE,
+    .instance_size = sizeof(VFIOPCIDevice),
+    .class_init = vfio_user_pci_dev_class_init,
+    .instance_init = vfio_instance_init,
+    .instance_finalize = vfio_user_pci_instance_finalize,
+    .interfaces = (InterfaceInfo[]) {
+        { INTERFACE_PCIE_DEVICE },
+        { INTERFACE_CONVENTIONAL_PCI_DEVICE },
+        { }
+    },
+};
+
+
+static void register_vfio_user_dev_type(void)
+{
+    type_register_static(&vfio_user_pci_dev_info);
+}
+
+type_init(register_vfio_user_dev_type)
