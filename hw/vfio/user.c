@@ -35,23 +35,13 @@
 #include "migration/blocker.h"
 
 
-static void vfio_user_reply_msg(vfio_user_hdr_t *hdr, uint32_t size, uint32_t error);
 static void vfio_user_request_msg(vfio_user_hdr_t *hdr, uint16_t cmd, uint32_t size,
                                   uint32_t flags);
 
-static void vfio_user_dma_read(VFIOPCIDevice *vdev, struct vfio_user_dma_rw *msg);
-static void vfio_user_dma_write(VFIOPCIDevice *vdev, struct vfio_user_dma_rw *msg);
-static void vfio_user_vm_intr(VFIOPCIDevice *vdev, struct vfio_user_vm_intr *msg);
-static void vfio_user_process_req(void *opaque, char *buf);
-
-static void vfio_user_recv(void *opaque);
 static void vfio_user_send_locked(VFIOProxy *proxy, vfio_user_hdr_t *msg, VFIOUserFDs *fds);
 static void vfio_user_send(VFIOProxy *proxy, vfio_user_hdr_t *msg, VFIOUserFDs *fds);
 static void vfio_user_send_recv(VFIOProxy *proxy, vfio_user_hdr_t *msg, VFIOUserFDs *fds,
                                int rsize);
-
-VFIOProxy *vfio_user_connect_dev(VFIOPCIDevice *vdev, char *sockname, Error **errp);
-void vfio_user_disconnect(VFIOProxy *proxy);
 
 static void vfio_user_request_msg(vfio_user_hdr_t *hdr, uint16_t cmd, uint32_t size,
                                   uint32_t flags)
@@ -65,83 +55,25 @@ static void vfio_user_request_msg(vfio_user_hdr_t *hdr, uint16_t cmd, uint32_t s
     hdr->error_reply = 0;
 }
 
-static void vfio_user_reply_msg(vfio_user_hdr_t *hdr, uint32_t size, uint32_t error)
+void vfio_user_send_reply(VFIOProxy *proxy, char *buf, int ret)
 {
-    /* convert header to associated reply */
-    hdr->flags = VFIO_USER_REPLY;
-    if (size) {
-        hdr->size = size;
-    }
-    if (error) {
-        hdr->flags |= VFIO_USER_ERROR;
-        hdr->error_reply = error;
-    }
-}
-
-static void vfio_user_dma_read(VFIOPCIDevice *vdev, struct vfio_user_dma_rw *msg)
-{
-    PCIDevice *pdev = &vdev->pdev;
-    vfio_user_hdr_t *hdr;
-    char *buf;
-    int size = msg->count + sizeof(struct vfio_user_dma_rw);
-
-    buf = g_malloc0(size);
-    memcpy(buf, msg, sizeof(*msg));
-
-    pci_dma_read(pdev, msg->offset, buf + sizeof(*msg), msg->count);
-
-    hdr = (vfio_user_hdr_t *)buf;
-    vfio_user_reply_msg(hdr, size, 0);
-    vfio_user_send(vdev->vbasedev.proxy, hdr, NULL);
-
-    g_free(buf);
-}
-
-static void vfio_user_dma_write(VFIOPCIDevice *vdev, struct vfio_user_dma_rw *msg)
-{
-    PCIDevice *pdev = &vdev->pdev;
-    char *buf = (char *)msg + sizeof(*msg);
-
-    pci_dma_write(pdev, msg->offset, buf, msg->count);
-
-    vfio_user_reply_msg(&msg->hdr, sizeof (*msg), 0);
-    vfio_user_send(vdev->vbasedev.proxy, &msg->hdr, NULL);
-}
-
-static void vfio_user_vm_intr(VFIOPCIDevice *vdev, struct vfio_user_vm_intr *msg)
-{
-
-    /* TODO */
-    switch (msg->index) {
-    case VFIO_PCI_INTX_IRQ_INDEX:
-    case VFIO_PCI_MSI_IRQ_INDEX:
-    case VFIO_PCI_MSIX_IRQ_INDEX:
-    default:
-        break;
-    }
-}
-
-static void vfio_user_process_req(void *opaque, char *buf)
-{
-    VFIOPCIDevice *vdev = opaque;
     vfio_user_hdr_t *hdr = (vfio_user_hdr_t *)buf;
 
-    switch (hdr->command) {
-    case VFIO_USER_DMA_READ:
-        vfio_user_dma_read(vdev, (struct vfio_user_dma_rw *)hdr);
-        break;
-    case VFIO_USER_DMA_WRITE:
-        vfio_user_dma_write(vdev, (struct vfio_user_dma_rw *)hdr);
-        break;
-    case VFIO_USER_VM_INTERRUPT:
-        vfio_user_vm_intr(vdev, (struct vfio_user_vm_intr *)hdr);
-        break;
-    default:
-        error_printf("vfio_user_process_req unknown cmd %d\n", hdr->command);
+    /*
+     * convert header to associated reply
+     * positive ret is reply size, negative is error code
+     */
+    hdr->flags = VFIO_USER_REPLY;
+    if (ret > 0) {
+        hdr->size = ret;
+    } else if (ret < 0) {
+        hdr->flags |= VFIO_USER_ERROR;
+        hdr->error_reply = -ret;
     }
+    vfio_user_send(proxy, hdr, NULL);
 }
 
-static void vfio_user_recv(void *opaque)
+void vfio_user_recv(void *opaque)
 {
     VFIOPCIDevice *vdev = opaque;
     VFIOProxy *proxy = vdev->vbasedev.proxy;
@@ -262,20 +194,22 @@ static void vfio_user_recv(void *opaque)
         error_printf("short read of msg body\n");
         goto err;
     }
-    qemu_mutex_unlock(&proxy->lock);
 
     /*
      * Replies signal a waiter, requests get processed by vfio code
      * that may assume the iothread lock is held.
-     * Either way, make sure the iothread is locked before we return.
      */
+    qemu_mutex_unlock(&proxy->lock);
+    qemu_mutex_lock_iothread();
     if (isreply) {
         reply->complete = 1;
         qemu_cond_signal(&reply->cv);
-        qemu_mutex_lock_iothread();
     } else {
-        qemu_mutex_lock_iothread();
-        proxy->request(proxy->reqarg, buf);
+        ret = proxy->request(proxy->reqarg, buf, fds);
+        if (ret < 0) {
+            vfio_user_send_reply(proxy, buf, ret);
+        }
+        g_free(buf);
     }
     return;
 
@@ -391,7 +325,7 @@ static void vfio_user_send_recv(VFIOProxy *proxy, vfio_user_hdr_t *msg, VFIOUser
     qemu_mutex_lock_iothread();
 }
 
-VFIOProxy *vfio_user_connect_dev(VFIOPCIDevice *vdev, char *sockname, Error **errp)
+VFIOProxy *vfio_user_connect_dev(char *sockname, Error **errp)
 {
     VFIOProxy *proxy;
     int sockfd;
@@ -405,16 +339,10 @@ VFIOProxy *vfio_user_connect_dev(VFIOPCIDevice *vdev, char *sockname, Error **er
     proxy->socket = sockfd;
     proxy->sockname = sockname;
     proxy->flags = VFIO_PROXY_CLIENT;
-    if (vdev->vfuser.secure) {
-        proxy->flags |= VFIO_PROXY_SECURE;
-    }
 
     qemu_mutex_init(&proxy->lock);
     QTAILQ_INIT(&proxy->free);
     QTAILQ_INIT(&proxy->pending);
-    proxy->request = vfio_user_process_req;
-    proxy->reqarg = vdev;
-    qemu_set_fd_handler(proxy->socket, vfio_user_recv, NULL, vdev);
 
     return proxy;
 }
@@ -640,14 +568,13 @@ int vfio_user_region_write(VFIODevice *vbasedev, uint32_t index, uint64_t offset
     return count;
 }
 
-void vfio_user_reset(DeviceState *dev)
+void vfio_user_reset(VFIODevice *vbasedev)
 {
-    VFIOPCIDevice *vdev = PCI_VFIOU(dev);
     vfio_user_hdr_t msg;
     
     vfio_user_request_msg(&msg, VFIO_USER_DEVICE_RESET, sizeof(msg), 0);
 
-    vfio_user_send_recv(vdev->vbasedev.proxy, &msg, NULL, 0);
+    vfio_user_send_recv(vbasedev->proxy, &msg, NULL, 0);
     if (msg.flags & VFIO_USER_ERROR) {
         error_printf("reset reply error %d\n", msg.error_reply);
     }

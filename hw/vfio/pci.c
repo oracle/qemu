@@ -46,6 +46,29 @@
 #define TYPE_VFIO_PCI "vfio-pci"
 #define PCI_VFIO(obj)    OBJECT_CHECK(VFIOPCIDevice, obj, TYPE_VFIO_PCI)
 
+#define TYPE_VFIO_USER_PCI "vfio-user-pci"
+#define PCI_VFIOU(obj)    OBJECT_CHECK(VFIOPCIDevice, obj, TYPE_VFIO_USER_PCI)
+
+/* this can resolve to either type so we can share more code */
+static VFIOPCIDevice *vfio_object_check(Object *obj, const char *file,
+                                        int line, const char *func)
+{
+    if (object_dynamic_cast(OBJECT(obj), TYPE_VFIO_PCI)) {
+        return (VFIOPCIDevice *)obj;
+    } else if (object_dynamic_cast(OBJECT(obj), TYPE_VFIO_USER_PCI)) {
+        return (VFIOPCIDevice *)obj;
+    } else {
+        fprintf(stderr, "%s:%d:%s: Object %p is not a VFIO type\n",
+                file, line, func, obj);
+        abort();
+        return NULL;
+    }
+}
+
+#define PCI_VFIOX(obj)	\
+    vfio_object_check(OBJECT(obj), __FILE__, __LINE__, __func__)
+
+
 #define TYPE_VFIO_PCI_NOHOTPLUG "vfio-pci-nohotplug"
 
 static void vfio_disable_interrupts(VFIOPCIDevice *vdev);
@@ -243,7 +266,7 @@ static void vfio_intx_update(VFIOPCIDevice *vdev, PCIINTxRoute *route)
 
 static void vfio_intx_routing_notifier(PCIDevice *pdev)
 {
-    VFIOPCIDevice *vdev = PCI_VFIO(pdev);
+    VFIOPCIDevice *vdev = PCI_VFIOX(pdev);
     PCIINTxRoute route;
 
     if (vdev->interrupt != VFIO_INT_INTx) {
@@ -267,11 +290,17 @@ static void vfio_irqchip_change(Notifier *notify, void *data)
 
 static int vfio_intx_enable(VFIOPCIDevice *vdev, Error **errp)
 {
-    uint8_t pin = vfio_pci_read_config(&vdev->pdev, PCI_INTERRUPT_PIN, 1);
+    uint8_t pin;
     Error *err = NULL;
     int32_t fd;
     int ret;
 
+
+    if (vdev->vbasedev.proxy != NULL) {
+        pin = vdev->pdev.config[PCI_INTERRUPT_PIN];
+    } else {
+        pin = vfio_pci_read_config(&vdev->pdev, PCI_INTERRUPT_PIN, 1);
+    }
 
     if (!pin) {
         return 0;
@@ -471,10 +500,10 @@ static void vfio_update_kvm_msi_virq(VFIOMSIVector *vector, MSIMessage msg,
     kvm_irqchip_commit_routes(kvm_state);
 }
 
-static int vfio_msix_vector_do_use(PCIDevice *pdev, unsigned int nr,
+static int vfio_msix_vector_do_use(VFIOPCIDevice *vdev, unsigned int nr,
                                    MSIMessage *msg, IOHandler *handler)
 {
-    VFIOPCIDevice *vdev = PCI_VFIO(pdev);
+    PCIDevice *pdev = &vdev->pdev;
     VFIOMSIVector *vector;
     int ret;
 
@@ -554,7 +583,7 @@ static int vfio_msix_vector_do_use(PCIDevice *pdev, unsigned int nr,
 static int vfio_msix_vector_use(PCIDevice *pdev,
                                 unsigned int nr, MSIMessage msg)
 {
-    return vfio_msix_vector_do_use(pdev, nr, &msg, vfio_msi_interrupt);
+    return vfio_msix_vector_do_use(PCI_VFIOX(pdev), nr, &msg, vfio_msi_interrupt);
 }
 
 static void vfio_msix_vector_release(PCIDevice *pdev, unsigned int nr)
@@ -604,7 +633,7 @@ static void vfio_msix_enable(VFIOPCIDevice *vdev)
      * the physical device with no vectors enabled, but MSI-X enabled, just
      * like the guest view.
      */
-    vfio_msix_vector_do_use(&vdev->pdev, 0, NULL, NULL);
+    vfio_msix_vector_do_use(vdev, 0, NULL, NULL);
     vfio_msix_vector_release(&vdev->pdev, 0);
 
     if (msix_set_vector_notifiers(&vdev->pdev, vfio_msix_vector_use,
@@ -1084,9 +1113,9 @@ static const MemoryRegionOps vfio_vga_ops = {
  * size of this sub-page BAR when its base address is changed in guest
  * and not page aligned any more.
  */
-static void vfio_sub_page_bar_update_mapping(PCIDevice *pdev, int bar)
+static void vfio_sub_page_bar_update_mapping(VFIOPCIDevice *vdev, int bar)
 {
-    VFIOPCIDevice *vdev = PCI_VFIO(pdev);
+    PCIDevice *pdev = &vdev->pdev;
     VFIORegion *region = &vdev->bars[bar].region;
     MemoryRegion *mmap_mr, *region_mr, *base_mr;
     PCIIORegion *r;
@@ -1145,25 +1174,14 @@ uint32_t vfio_pci_read_config(PCIDevice *pdev, uint32_t addr, int len)
     if (~emu_bits & (0xffffffffU >> (32 - len * 8))) {
         ssize_t ret;
 
-        if (vdev->vbasedev.proxy != NULL) {
-            ret = vfio_user_region_read(&vdev->vbasedev,
-                                        VFIO_PCI_CONFIG_REGION_INDEX,
-                                        addr, len, &phys_val);
-            if (ret != len) {
-                error_report("%s(%s, 0x%x, 0x%x) failed: %m",
-                             __func__, vdev->vbasedev.name, addr, len);
-                return ret;
-            }
-        } else {
-            ret = pread(vdev->vbasedev.fd, &phys_val, len,
-                        vdev->config_offset + addr);
-            if (ret != len) {
-                error_report("%s(%s, 0x%x, 0x%x) failed: %m",
-                             __func__, vdev->vbasedev.name, addr, len);
-                return -errno;
-            }
+        ret = pread(vdev->vbasedev.fd, &phys_val, len,
+                    vdev->config_offset + addr);
+        if (ret != len) {
+            error_report("%s(%s, 0x%x, 0x%x) failed: %m",
+                         __func__, vdev->vbasedev.name, addr, len);
+            return -errno;
         }
-
+ 
         phys_val = le32_to_cpu(phys_val);
     }
 
@@ -1179,18 +1197,12 @@ void vfio_pci_write_config(PCIDevice *pdev,
 {
     VFIOPCIDevice *vdev = PCI_VFIO(pdev);
     uint32_t val_le = cpu_to_le32(val);
-    int ret;
 
     trace_vfio_pci_write_config(vdev->vbasedev.name, addr, val, len);
 
     /* Write everything to VFIO, let it filter out what we can't write */
-    if (vdev->vbasedev.proxy != NULL) {
-        ret = vfio_user_region_write(&vdev->vbasedev, VFIO_PCI_CONFIG_REGION_INDEX,
-           addr, len, &val_le);
-    } else {
-        ret = pwrite(vdev->vbasedev.fd, &val_le, len, vdev->config_offset + addr);
-    }
-    if (ret != len) {
+    if (pwrite(vdev->vbasedev.fd, &val_le, len, vdev->config_offset + addr)
+                != len) {
         error_report("%s(%s, 0x%x, 0x%x, 0x%x) failed: %m",
                      __func__, vdev->vbasedev.name, addr, val, len);
     }
@@ -1243,7 +1255,7 @@ void vfio_pci_write_config(PCIDevice *pdev,
             if (old_addr[bar] != pdev->io_regions[bar].addr &&
                 vdev->bars[bar].region.size > 0 &&
                 vdev->bars[bar].region.size < qemu_real_host_page_size) {
-                vfio_sub_page_bar_update_mapping(pdev, bar);
+                vfio_sub_page_bar_update_mapping(vdev, bar);
             }
         }
     } else {
@@ -3145,7 +3157,7 @@ static void vfio_instance_finalize(Object *obj)
 
 static void vfio_exitfn(PCIDevice *pdev)
 {
-    VFIOPCIDevice *vdev = PCI_VFIO(pdev);
+    VFIOPCIDevice *vdev = PCI_VFIOX(pdev);
 
     vfio_unregister_req_notifier(vdev);
     vfio_unregister_err_notifier(vdev);
@@ -3203,7 +3215,7 @@ post_reset:
 static void vfio_instance_init(Object *obj)
 {
     PCIDevice *pci_dev = PCI_DEVICE(obj);
-    VFIOPCIDevice *vdev = PCI_VFIO(obj);
+    VFIOPCIDevice *vdev = PCI_VFIOX(obj);
 
     device_add_bootindex_property(obj, &vdev->bootindex,
                                   "bootindex", NULL,
@@ -3328,9 +3340,82 @@ type_init(register_vfio_pci_dev_type)
 /*
  * VFIO over UNIX socket
  */
+static int vfio_user_dma_read(VFIOPCIDevice *vdev, struct vfio_user_dma_rw *msg)
+{
+    PCIDevice *pdev = &vdev->pdev;
+    char *buf;
+    int size = msg->count + sizeof(struct vfio_user_dma_rw);
 
-VFIOProxy *vfio_user_connect_dev(VFIOPCIDevice *vdev, char *sockname, Error **errp);
-void vfio_user_disconnect(VFIOProxy *proxy);
+    if (msg->hdr.flags & VFIO_USER_NO_REPLY) {
+        return -EINVAL;
+    }
+
+    buf = g_malloc0(size);
+    memcpy(buf, msg, sizeof(*msg));
+
+    pci_dma_read(pdev, msg->offset, buf + sizeof(*msg), msg->count);
+
+    vfio_user_send_reply(vdev->vbasedev.proxy, buf, size);
+    g_free(buf);
+    return 0;
+}
+
+static int vfio_user_dma_write(VFIOPCIDevice *vdev, struct vfio_user_dma_rw *msg)
+{
+    PCIDevice *pdev = &vdev->pdev;
+    char *buf = (char *)msg + sizeof(*msg);
+
+    pci_dma_write(pdev, msg->offset, buf, msg->count);
+
+    if ((msg->hdr.flags & VFIO_USER_NO_REPLY) == 0) {
+        vfio_user_send_reply(vdev->vbasedev.proxy, buf, 0);
+    }
+    return 0;
+}
+
+static int vfio_user_vm_intr(VFIOPCIDevice *vdev, struct vfio_user_vm_intr *msg)
+{
+
+    /* TODO */
+    switch (msg->index) {
+    case VFIO_PCI_INTX_IRQ_INDEX:
+    case VFIO_PCI_MSI_IRQ_INDEX:
+    case VFIO_PCI_MSIX_IRQ_INDEX:
+    default:
+        break;
+    }
+
+    if ((msg->hdr.flags & VFIO_USER_NO_REPLY) == 0) {
+        vfio_user_send_reply(vdev->vbasedev.proxy, (char *)msg, 0);
+    }
+    return 0;
+}
+
+static int vfio_user_process_req(void *opaque, char *buf, VFIOUserFDs *fds)
+{
+    VFIOPCIDevice *vdev = opaque;
+    vfio_user_hdr_t *hdr = (vfio_user_hdr_t *)buf;
+    int ret;
+
+    if (fds != NULL) {
+       return -EINVAL;
+    }
+    switch (hdr->command) {
+    case VFIO_USER_DMA_READ:
+        ret = vfio_user_dma_read(vdev, (struct vfio_user_dma_rw *)hdr);
+        break;
+    case VFIO_USER_DMA_WRITE:
+        ret = vfio_user_dma_write(vdev, (struct vfio_user_dma_rw *)hdr);
+        break;
+    case VFIO_USER_VM_INTERRUPT:
+        ret = vfio_user_vm_intr(vdev, (struct vfio_user_vm_intr *)hdr);
+        break;
+    default:
+        error_printf("vfio_user_process_req unknown cmd %d\n", hdr->command);
+        ret = -ENOSYS;
+    }
+    return ret;
+}
 
 static void vfio_user_pci_realize(PCIDevice *pdev, Error **errp)
 {
@@ -3349,10 +3434,16 @@ static void vfio_user_pci_realize(PCIDevice *pdev, Error **errp)
         return;
     }
 
-    proxy = vfio_user_connect_dev(vdev, vdev->vfuser.sock_name, &err);
+    proxy = vfio_user_connect_dev(vdev->vfuser.sock_name, &err);
     if (!proxy) {
         error_setg(errp, "Remote proxy not found");
         return;
+    }
+    proxy->request = vfio_user_process_req;
+    proxy->reqarg = vdev;
+    qemu_set_fd_handler(proxy->socket, vfio_user_recv, NULL, vdev);
+    if (vdev->vfuser.secure) {
+        proxy->flags |= VFIO_PROXY_SECURE;
     }
     vbasedev->proxy = proxy;
 
@@ -3466,7 +3557,9 @@ static void vfio_user_pci_realize(PCIDevice *pdev, Error **errp)
                vdev->msi_cap_size);
     }
 
-    if (vfio_pci_read_config(&vdev->pdev, PCI_INTERRUPT_PIN, 1)) {
+    if (vdev->pdev.config[PCI_INTERRUPT_PIN] != 0) {
+        vdev->intx.mmap_timer = timer_new_ms(QEMU_CLOCK_VIRTUAL,
+                                             vfio_intx_mmap_enable, vdev);
         pci_device_set_intx_routing_notifier(&vdev->pdev,
                                              vfio_intx_routing_notifier);
         vdev->irqchip_change_notifier.notify = vfio_irqchip_change;
@@ -3524,6 +3617,125 @@ static void vfio_user_pci_instance_finalize(Object *obj)
     vfio_user_disconnect(vbasedev->proxy);
 }
 
+static void vfio_user_pci_reset(DeviceState *dev)
+{
+    VFIOPCIDevice *vdev = PCI_VFIOU(dev);
+
+    vfio_user_reset(&vdev->vbasedev);
+}
+
+/*
+ * PCI config space
+ */
+static uint32_t vfio_user_pci_read_config(PCIDevice *pdev, uint32_t addr, int len)
+{
+    VFIOPCIDevice *vdev = PCI_VFIOU(pdev);
+    uint32_t emu_bits = 0, emu_val = 0, phys_val = 0, val;
+
+    memcpy(&emu_bits, vdev->emulated_config_bits + addr, len);
+    emu_bits = le32_to_cpu(emu_bits);
+
+    if (emu_bits) {
+        emu_val = pci_default_read_config(pdev, addr, len);
+    }
+
+    if (~emu_bits & (0xffffffffU >> (32 - len * 8))) {
+        ssize_t ret;
+
+        ret = vfio_user_region_read(&vdev->vbasedev,
+                                    VFIO_PCI_CONFIG_REGION_INDEX,
+                                    addr, len, &phys_val);
+        if (ret != len) {
+            error_report("%s(%s, 0x%x, 0x%x) failed: %m",
+                         __func__, vdev->vbasedev.name, addr, len);
+            return ret;
+        }
+
+        phys_val = le32_to_cpu(phys_val);
+    }
+
+    val = (emu_val & emu_bits) | (phys_val & ~emu_bits);
+
+    trace_vfio_pci_read_config(vdev->vbasedev.name, addr, len, val);
+
+    return val;
+}
+
+static void vfio_user_pci_write_config(PCIDevice *pdev,
+                           uint32_t addr, uint32_t val, int len)
+{
+    VFIOPCIDevice *vdev = PCI_VFIOU(pdev);
+    uint32_t val_le = cpu_to_le32(val);
+    int ret;
+
+    trace_vfio_pci_write_config(vdev->vbasedev.name, addr, val, len);
+
+    /* Write everything to VFIO, let it filter out what we can't write */
+    ret = vfio_user_region_write(&vdev->vbasedev, VFIO_PCI_CONFIG_REGION_INDEX,
+                                 addr, len, &val_le);
+    if (ret != len) {
+        error_report("%s(%s, 0x%x, 0x%x, 0x%x) failed: %m",
+                     __func__, vdev->vbasedev.name, addr, val, len);
+    }
+
+    /* MSI/MSI-X Enabling/Disabling */
+    if (pdev->cap_present & QEMU_PCI_CAP_MSI &&
+        ranges_overlap(addr, len, pdev->msi_cap, vdev->msi_cap_size)) {
+        int is_enabled, was_enabled = msi_enabled(pdev);
+
+        pci_default_write_config(pdev, addr, val, len);
+
+        is_enabled = msi_enabled(pdev);
+
+        if (!was_enabled) {
+            if (is_enabled) {
+                vfio_msi_enable(vdev);
+            }
+        } else {
+            if (!is_enabled) {
+                vfio_msi_disable(vdev);
+            } else {
+                vfio_update_msi(vdev);
+            }
+        }
+    } else if (pdev->cap_present & QEMU_PCI_CAP_MSIX &&
+        ranges_overlap(addr, len, pdev->msix_cap, MSIX_CAP_LENGTH)) {
+        int is_enabled, was_enabled = msix_enabled(pdev);
+
+        pci_default_write_config(pdev, addr, val, len);
+
+        is_enabled = msix_enabled(pdev);
+
+        if (!was_enabled && is_enabled) {
+            vfio_msix_enable(vdev);
+        } else if (was_enabled && !is_enabled) {
+            vfio_msix_disable(vdev);
+        }
+    } else if (ranges_overlap(addr, len, PCI_BASE_ADDRESS_0, 24) ||
+        range_covers_byte(addr, len, PCI_COMMAND)) {
+        pcibus_t old_addr[PCI_NUM_REGIONS - 1];
+        int bar;
+
+        for (bar = 0; bar < PCI_ROM_SLOT; bar++) {
+            old_addr[bar] = pdev->io_regions[bar].addr;
+        }
+
+        pci_default_write_config(pdev, addr, val, len);
+
+        for (bar = 0; bar < PCI_ROM_SLOT; bar++) {
+            if (old_addr[bar] != pdev->io_regions[bar].addr &&
+                vdev->bars[bar].region.size > 0 &&
+                vdev->bars[bar].region.size < qemu_real_host_page_size) {
+                vfio_sub_page_bar_update_mapping(vdev, bar);
+            }
+        }
+    } else {
+        /* Write everything to QEMU to keep emulated bits correct */
+        pci_default_write_config(pdev, addr, val, len);
+    }
+
+}
+
 static Property vfio_user_pci_dev_properties[] = {
     DEFINE_PROP_STRING("socket", VFIOPCIDevice, vfuser.sock_name),
     DEFINE_PROP_BOOL("secure-dma", VFIOPCIDevice, vfuser.secure, false),
@@ -3535,14 +3747,14 @@ static void vfio_user_pci_dev_class_init(ObjectClass *klass, void *data)
     DeviceClass *dc = DEVICE_CLASS(klass);
     PCIDeviceClass *pdc = PCI_DEVICE_CLASS(klass);
 
-    dc->reset = vfio_user_reset;
+    dc->reset = vfio_user_pci_reset;
     device_class_set_props(dc, vfio_user_pci_dev_properties);
     dc->desc = "VFIO over socket PCI device assignment";
     set_bit(DEVICE_CATEGORY_MISC, dc->categories);
     pdc->realize = vfio_user_pci_realize;
     pdc->exit = vfio_exitfn;
-    pdc->config_read = vfio_pci_read_config;
-    pdc->config_write = vfio_pci_write_config;
+    pdc->config_read = vfio_user_pci_read_config;
+    pdc->config_write = vfio_user_pci_write_config;
 }
 
 

@@ -170,7 +170,7 @@ typedef struct VFIOProxy {
     int flags;
     char *sockname;
     QemuMutex lock;
-    void (*request)(void *opaque, char *buf);
+    int (*request)(void *opaque, char *buf, VFIOUserFDs *fds);
     void *reqarg;
 } VFIOProxy;
 
@@ -178,8 +178,10 @@ typedef struct VFIOProxy {
 #define VFIO_PROXY_SECURE	0x2
 
 
-#define TYPE_VFIO_USER_PCI "vfio-user-pci"
-#define PCI_VFIOU(obj)    OBJECT_CHECK(VFIOPCIDevice, obj, TYPE_VFIO_USER_PCI)
+VFIOProxy *vfio_user_connect_dev(char *sockname, Error **errp);
+void vfio_user_disconnect(VFIOProxy *proxy);
+void vfio_user_recv(void *opaque);
+void vfio_user_send_reply(VFIOProxy *proxy, char *buf, int ret);
 
 int vfio_user_validate_version(VFIODevice *vbasedev, Error **errp);
 int vfio_user_dma_map(VFIOProxy *proxy, struct vfio_user_map *map, VFIOUserFDs *fds,
@@ -194,4 +196,4 @@ int vfio_user_region_read(VFIODevice *vbasedev, uint32_t index, uint64_t offset,
                           uint32_t count, void *data);
 int vfio_user_region_write(VFIODevice *vbasedev, uint32_t index, uint64_t offset,
                            uint32_t count, void *data);
-void vfio_user_reset(DeviceState *dev);
+void vfio_user_reset(VFIODevice *vbasedev);
