@@ -33,6 +33,7 @@
 #include "qemu/error-report.h"
 #include "qemu/main-loop.h"
 #include "qemu/range.h"
+#include "io/channel.h"
 #include "sysemu/balloon.h"
 #include "sysemu/kvm.h"
 #include "sysemu/reset.h"
@@ -390,7 +391,7 @@ static int vfio_dma_map(VFIOContainer *container, MemoryRegion *mr, hwaddr iova,
         }
         fd = memory_region_get_fd(mr);
         if (fd != -1 && !(container->proxy->flags & VFIO_PROXY_SECURE)) {
-            fds.numfds = fds.maxfds = 1;
+            fds.numfds = 1;
             fds.fds = &fd;
             map.offset = qemu_ram_block_host_offset(mr->ram_block, vaddr);
             map.flags = VFIO_USER_MAPPABLE;
@@ -971,21 +972,19 @@ int vfio_region_setup(Object *obj, VFIODevice *vbasedev, VFIORegion *region,
                       int index, const char *name)
 {
     struct vfio_region_info *info;
-    int fd, ret;
+    int ret;
 
     ret = vfio_get_region_info(vbasedev, index, &info);
     if (ret) {
         return ret;
     }
 
-    fd = vfio_get_region_info_remfd(vbasedev, index);
-
     region->vbasedev = vbasedev;
     region->flags = info->flags;
     region->size = info->size;
     region->fd_offset = info->offset;
     region->nr = index;
-    region->remfd = fd;
+    region->remfd = vfio_get_region_info_remfd(vbasedev, index);
 
     if (region->size) {
         region->mem = g_new0(MemoryRegion, 1);
@@ -1692,6 +1691,22 @@ int vfio_get_device(VFIOGroup *group, const char *name,
 
 void vfio_put_base_device(VFIODevice *vbasedev)
 {
+    if (vbasedev->regions != NULL) {
+        int i;
+
+        for (i = 0; i < vbasedev->num_regions; i++) {
+            if (vbasedev->regfds != NULL && vbasedev->regfds[i] != -1) {
+                close(vbasedev->regfds[i]);
+            }
+            g_free(vbasedev->regions[i]);
+        }
+        g_free(vbasedev->regions);
+        vbasedev->regions = NULL;
+        if (vbasedev->regfds != NULL) {
+            g_free(vbasedev->regfds);
+        }
+    }
+
     if (!vbasedev->group) {
         return;
     }
@@ -1729,7 +1744,7 @@ retry:
     (*info)->argsz = argsz;
 
     if (vbasedev->proxy != NULL) {
-        VFIOUserFDs fds = { 1, 1, &fd};
+        VFIOUserFDs fds = { 1, &fd};
 
         ret = vfio_user_get_region_info(vbasedev, index, *info, &fds);
     } else {

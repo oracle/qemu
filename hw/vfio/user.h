@@ -56,10 +56,16 @@ struct vfio_user_version {
     vfio_user_hdr_t hdr;
     uint16_t major;
     uint16_t minor;
+    char capabilities[];
 };
 
 #define VFIO_USER_MAJOR_VER	1
 #define VFIO_USER_MINOR_VER	0
+
+#define VFIO_USER_CAP_MAX_FDS	"max_fds"
+#define VFIO_USER_CAP_MIGR	"migration"
+
+#define VFIO_USER_CAP_PGSIZE	"pgsize"
 
 /*
  * VFIO_USER_DMA_MAP
@@ -122,7 +128,7 @@ struct vfio_user_region_rw {
     uint64_t offset;
     uint32_t region;
     uint32_t count;
-    /* data */
+    char data[];
 };
 
 /*
@@ -133,7 +139,7 @@ struct vfio_user_dma_rw {
     vfio_user_hdr_t hdr;
     uint64_t offset;
     uint32_t count;
-    /* data */
+    char data[];
 };
 
 /*
@@ -145,11 +151,11 @@ struct vfio_user_vm_intr {
     uint32_t subindex;
 };
 
-#define REMOTE_MAX_FDS	10
+/* match channel-socket.c definition */
+#define REMOTE_MAX_FDS	16
 
 typedef struct VFIOUserFDs {
     int numfds;
-    int maxfds;
     int *fds;
 } VFIOUserFDs;
 
@@ -166,10 +172,11 @@ typedef struct VFIOUserReply {
 typedef struct VFIOProxy {
     QTAILQ_HEAD(, VFIOUserReply) free;
     QTAILQ_HEAD(, VFIOUserReply) pending;
-    int socket;
+    QLIST_ENTRY(VFIOProxy) next;
     int flags;
     char *sockname;
     QemuMutex lock;
+    struct QIOChannel *ioc;
     int (*request)(void *opaque, char *buf, VFIOUserFDs *fds);
     void *reqarg;
 } VFIOProxy;
@@ -179,6 +186,9 @@ typedef struct VFIOProxy {
 
 
 VFIOProxy *vfio_user_connect_dev(char *sockname, Error **errp);
+void vfio_user_set_reqhandler(VFIODevice *vbasdev,
+                              int (*handler)(void *opaque, char *buf, VFIOUserFDs *fds),
+                              void *reqarg);
 void vfio_user_disconnect(VFIOProxy *proxy);
 void vfio_user_recv(void *opaque);
 void vfio_user_send_reply(VFIOProxy *proxy, char *buf, int ret);

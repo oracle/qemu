@@ -53,9 +53,9 @@
 static VFIOPCIDevice *vfio_object_check(Object *obj, const char *file,
                                         int line, const char *func)
 {
-    if (object_dynamic_cast(OBJECT(obj), TYPE_VFIO_PCI)) {
+    if (object_dynamic_cast(obj, TYPE_VFIO_PCI)) {
         return (VFIOPCIDevice *)obj;
-    } else if (object_dynamic_cast(OBJECT(obj), TYPE_VFIO_USER_PCI)) {
+    } else if (object_dynamic_cast(obj, TYPE_VFIO_USER_PCI)) {
         return (VFIOPCIDevice *)obj;
     } else {
         fprintf(stderr, "%s:%d:%s: Object %p is not a VFIO type\n",
@@ -3368,7 +3368,7 @@ static int vfio_user_dma_write(VFIOPCIDevice *vdev, struct vfio_user_dma_rw *msg
     pci_dma_write(pdev, msg->offset, buf, msg->count);
 
     if ((msg->hdr.flags & VFIO_USER_NO_REPLY) == 0) {
-        vfio_user_send_reply(vdev->vbasedev.proxy, buf, 0);
+        vfio_user_send_reply(vdev->vbasedev.proxy, (char *)msg, sizeof(msg->hdr));
     }
     return 0;
 }
@@ -3391,13 +3391,13 @@ static int vfio_user_vm_intr(VFIOPCIDevice *vdev, struct vfio_user_vm_intr *msg)
     return 0;
 }
 
-static int vfio_user_process_req(void *opaque, char *buf, VFIOUserFDs *fds)
+static int vfio_user_pci_process_req(void *opaque, char *buf, VFIOUserFDs *fds)
 {
     VFIOPCIDevice *vdev = opaque;
     vfio_user_hdr_t *hdr = (vfio_user_hdr_t *)buf;
     int ret;
 
-    if (fds != NULL) {
+    if (fds->numfds != 0) {
        return -EINVAL;
     }
     switch (hdr->command) {
@@ -3439,9 +3439,7 @@ static void vfio_user_pci_realize(PCIDevice *pdev, Error **errp)
         error_setg(errp, "Remote proxy not found");
         return;
     }
-    proxy->request = vfio_user_process_req;
-    proxy->reqarg = vdev;
-    qemu_set_fd_handler(proxy->socket, vfio_user_recv, NULL, vdev);
+    vfio_user_set_reqhandler(vbasedev, vfio_user_pci_process_req, vdev); 
     if (vdev->vfuser.secure) {
         proxy->flags |= VFIO_PROXY_SECURE;
     }
