@@ -225,4 +225,9 @@ void vfio_display_reset(VFIOPCIDevice *vdev);
 int vfio_display_probe(VFIOPCIDevice *vdev, Error **errp);
 void vfio_display_finalize(VFIOPCIDevice *vdev);
 
+// FIXME
+void vfio_host_win_add(VFIOContainer *container,
+                       hwaddr min_iova, hwaddr max_iova,
+                       uint64_t iova_pgsizes);
+
 #endif /* HW_VFIO_VFIO_PCI_H */

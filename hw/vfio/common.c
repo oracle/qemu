@@ -25,6 +25,7 @@
 #endif
 #include <linux/vfio.h>
 
+#include "hw/vfio/pci.h"
 #include "hw/vfio/vfio-common.h"
 #include "hw/vfio/vfio.h"
 #include "exec/address-spaces.h"
@@ -430,7 +431,7 @@ static int vfio_dma_map(VFIOContainer *container, MemoryRegion *mr, hwaddr iova,
     return ret;
 }
 
-static void vfio_host_win_add(VFIOContainer *container,
+void vfio_host_win_add(VFIOContainer *container,
                               hwaddr min_iova, hwaddr max_iova,
                               uint64_t iova_pgsizes)
 {

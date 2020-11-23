@@ -97,7 +97,7 @@ void vfio_user_recv(void *opaque)
     int isreply, i, ret;
     size_t msgleft, numfds = 0;
     char *data, *buf = NULL;
-    Error *local_err;
+    Error *local_err = NULL;
 
     qemu_mutex_lock(&proxy->lock);
 
@@ -126,12 +126,13 @@ void vfio_user_recv(void *opaque)
         }
         QTAILQ_REMOVE(&proxy->pending, reply, next);
 
-        reply->fds->numfds = numfds;
+        // FIXME: what if unexpected fds?
         if (numfds != 0) {
+            reply->fds->numfds = numfds;
             memcpy(reply->fds->fds, fdp, numfds * sizeof(int));
         }
     } else {
-        /* 
+        /*
          * The client doesn't expect any FDs in requests, but
          * they will be expected on the server
          */
@@ -159,13 +160,15 @@ void vfio_user_recv(void *opaque)
         data = buf + sizeof(msg);
     }
 
-    ret = qio_channel_read(proxy->ioc, data, msgleft, &local_err);
-    if (ret < 0) {
-        goto err;
-    }
-    if (ret != msgleft) {
-        error_setg(&local_err, "vfio_user_recv short read of msg body");
-        goto err;
+    if (msgleft != 0) {
+        ret = qio_channel_read(proxy->ioc, data, msgleft, &local_err);
+        if (ret < 0) {
+            goto err;
+        }
+        if (ret != msgleft) {
+            error_setg(&local_err, "vfio_user_recv short read of msg body");
+            goto err;
+        }
     }
 
     /*
@@ -203,7 +206,7 @@ err:
         g_free(buf);
     }
     if (reply != NULL) {
-        /* force an error to keep sending thread from hanging */ 
+        /* force an error to keep sending thread from hanging */
         reply->msg->flags |= VFIO_USER_ERROR;
         reply->msg->error_reply = EINVAL;
         reply->complete = 1;
@@ -211,8 +214,7 @@ err:
     }
     error_report_err(local_err);
 }
-    
-            
+
 static void vfio_user_send_locked(VFIOProxy *proxy, vfio_user_hdr_t *msg, VFIOUserFDs *fds)
 {
     struct iovec iov = {
@@ -222,7 +224,7 @@ static void vfio_user_send_locked(VFIOProxy *proxy, vfio_user_hdr_t *msg, VFIOUs
     size_t numfds = 0;
     int msgleft, ret, *fdp = NULL;
     char *buf;
-    Error *local_err;
+    Error *local_err = NULL;
 
     if (fds != NULL) {
         numfds = fds->numfds;
@@ -386,18 +388,11 @@ static int caps_parse(QDict *qdict, struct cap_entry caps[], Error **errp)
         qobj = qdict_get(qdict, p->name);
         if (qobj != NULL) {
             if (p->check(qobj, errp)) {
-                qobject_unref(qdict);
                 return -1;
             }
-            qdict_del(qdict, p->name);
         }
     }
-   if (qdict_size(qdict) != 0) {
-        error_setg(errp, "spurious capabilities");
-        qobject_unref(qdict);
-        return -1;
-   }
-   qobject_unref(qdict);
+
    return 0;
 }
 
@@ -449,6 +444,8 @@ static struct cap_entry ver_1_0[] = {
 
 static int caps_check(int minor, const char *caps, Error **errp)
 {
+    QObject *qcapsobj;
+    QDict *qcapsdict;
     QObject *qobj;
     QDict *qdict;
 
@@ -459,16 +456,37 @@ static int caps_check(int minor, const char *caps, Error **errp)
     }
     qdict = qobject_to(QDict, qobj);
     if (qdict == NULL) {
-        error_setg(errp, "capbilities %s not an object", caps);
+        error_setg(errp, "capabilities %s not an object", caps);
         qobject_unref(qobj);
         return -1;
     }
 
-    return (caps_parse(qdict, ver_1_0, errp));
+    /* See if we have "capabilities". */
+    qcapsobj = qdict_get(qdict, VFIO_USER_CAP);
+
+    if (qobj == NULL) {
+        qobject_unref(qobj);
+        return 0;
+    }
+
+    qcapsdict = qobject_to(QDict, qcapsobj);
+    if (qcapsdict == NULL) {
+        error_setg(errp, "malformed capabilities %s", caps);
+        qobject_unref(qobj);
+        return -1;
+    }
+
+    // FIXME: unref of top qobj?
+    int ret = caps_parse(qcapsdict, ver_1_0, errp);
+
+    qobject_unref(qobj);
+
+    return ret;
 }
 
 static QString *caps_json(void)
 {
+    QDict *dict = qdict_new();
     QDict *capdict = qdict_new();
     QDict *migdict = qdict_new();
     QString *str;
@@ -478,8 +496,10 @@ static QString *caps_json(void)
     qdict_put_obj(capdict, VFIO_USER_CAP_MIGR, QOBJECT(migdict));
     qdict_put_int(capdict, VFIO_USER_CAP_MAX_FDS, REMOTE_MAX_FDS);
 
-    str = qobject_to_json(QOBJECT(capdict));
-    qobject_unref(capdict);
+    qdict_put_obj(dict, VFIO_USER_CAP, QOBJECT(capdict));
+
+    str = qobject_to_json(QOBJECT(dict));
+    qobject_unref(dict);
     return str;
 }
 
@@ -490,7 +510,8 @@ int vfio_user_validate_version(VFIODevice *vbasedev, Error **errp)
     int size, caplen;
 
     caps = caps_json();
-    caplen = qstring_get_length(caps);
+    /* Include trailing NUL. */
+    caplen = qstring_get_length(caps) + 1;
     size = sizeof (*msgp) + caplen;
     msgp = g_malloc0(size);
 
@@ -513,7 +534,7 @@ int vfio_user_validate_version(VFIODevice *vbasedev, Error **errp)
     if (caps_check(msgp->minor, (char *)msgp + sizeof(*msgp), errp) != 0) {
         goto err;
     }
-        
+
     g_free(msgp);
     return 0;
 
@@ -600,7 +621,13 @@ int vfio_user_get_region_info(VFIODevice *vbasedev, int index,
     vfio_user_request_msg(&msgp->hdr, VFIO_USER_DEVICE_GET_REGION_INFO, sizeof(*msgp), 0);
     msgp->reg_info = *info;
 
+    // FIXME: this was trying to pass in -1 fds - here, we want fds filled in
+    // from the *received message*.
+#if 0
     vfio_user_send_recv(vbasedev->proxy, &msgp->hdr, fds, size);
+#else
+    vfio_user_send_recv(vbasedev->proxy, &msgp->hdr, NULL, 0);
+#endif
     if (msgp->hdr.flags & VFIO_USER_ERROR) {
         return -msgp->hdr.error_reply;
     }
@@ -614,8 +641,10 @@ int vfio_user_get_irq_info(VFIODevice *vbasedev, struct vfio_irq_info *info)
     struct vfio_user_irq_info msg;
 
     memset(&msg, 0, sizeof(msg));
+    msg.irq_info.argsz = sizeof(msg.irq_info);
     vfio_user_request_msg(&msg.hdr, VFIO_USER_DEVICE_GET_IRQ_INFO, sizeof(msg), 0);
 
+    // FIXME: error message seems to be ignored?
     vfio_user_send_recv(vbasedev->proxy, &msg.hdr, NULL, 0);
     if (msg.hdr.flags & VFIO_USER_ERROR) {
         return -msg.hdr.error_reply;

@@ -59,8 +59,10 @@ struct vfio_user_version {
     char capabilities[];
 };
 
-#define VFIO_USER_MAJOR_VER	1
+#define VFIO_USER_MAJOR_VER	0
 #define VFIO_USER_MINOR_VER	0
+
+#define VFIO_USER_CAP "capabilities"
 
 #define VFIO_USER_CAP_MAX_FDS	"max_fds"
 #define VFIO_USER_CAP_MIGR	"migration"

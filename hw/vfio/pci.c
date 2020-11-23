@@ -3439,11 +3439,13 @@ static void vfio_user_pci_realize(PCIDevice *pdev, Error **errp)
         error_setg(errp, "Remote proxy not found");
         return;
     }
-    vfio_user_set_reqhandler(vbasedev, vfio_user_pci_process_req, vdev); 
+
+    vbasedev->proxy = proxy;
+
+    vfio_user_set_reqhandler(vbasedev, vfio_user_pci_process_req, vdev);
     if (vdev->vfuser.secure) {
         proxy->flags |= VFIO_PROXY_SECURE;
     }
-    vbasedev->proxy = proxy;
 
     vfio_user_validate_version(vbasedev, &err);
     if (err != NULL) {
@@ -3485,6 +3487,9 @@ static void vfio_user_pci_realize(PCIDevice *pdev, Error **errp)
     QLIST_INSERT_HEAD(&space->containers, container, next);
     group->container = container;
 
+    // FIXME?
+    vfio_host_win_add(container, 0, (hwaddr)-1, container->pgsizes);
+
     container->listener = vfio_memory_listener;
     memory_listener_register(&container->listener, container->space->as);
     container->initialized = true;
@@ -3494,7 +3499,7 @@ static void vfio_user_pci_realize(PCIDevice *pdev, Error **errp)
         error_setg_errno(errp, -ret, "get info failure");
         goto error;
     }
-    
+
     vfio_populate_device(vdev, &err);
     if (err) {
         error_propagate(errp, err);
@@ -3502,8 +3507,7 @@ static void vfio_user_pci_realize(PCIDevice *pdev, Error **errp)
     }
 
     /* Get a copy of config space */
-    ret = vfio_user_region_read(vbasedev, VFIO_PCI_CONFIG_REGION_INDEX,
-                                vdev->config_offset,
+    ret = vfio_user_region_read(vbasedev, VFIO_PCI_CONFIG_REGION_INDEX, 0,
                                 MIN(pci_config_size(pdev), vdev->config_size),
                                 pdev->config);
     if (ret < 0) {
