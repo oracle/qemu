@@ -550,10 +550,11 @@ int vfio_user_dma_map(VFIOProxy *proxy, struct vfio_user_map *map, VFIOUserFDs *
     int size = sizeof(*msgp) + (nelem * sizeof(struct vfio_user_map));
     int ret;
 
-    if (fds->numfds != nelem) {
+    if (fds != NULL && fds->numfds != nelem) {
         error_printf("vfio_user_dma_map mismatch of FDs and table elements\n");
         return -EINVAL;
     }
+
     msgp = g_malloc0(size);
     vfio_user_request_msg(&msgp->hdr, VFIO_USER_DMA_MAP, size, 0);
     memcpy(&msgp->table, map, nelem * sizeof(*map));
