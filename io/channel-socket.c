@@ -541,7 +541,6 @@ static ssize_t qio_channel_socket_writev(QIOChannel *ioc,
     msg.msg_iovlen = niov;
 
     if (nfds) {
-        error_report("jlevon nfds %zu\n", nfds);
         if (nfds > SOCKET_MAX_FDS) {
             error_setg_errno(errp, EINVAL,
                              "Only %d FDs can be sent, got %zu",
@@ -549,9 +548,6 @@ static ssize_t qio_channel_socket_writev(QIOChannel *ioc,
             return -1;
         }
 
-        for (size_t i =0; i < nfds; i++) {
-            error_report("jlevon fds[%zu] %d\n", i, fds[i]);
-        }
         msg.msg_control = control;
         msg.msg_controllen = CMSG_SPACE(sizeof(int) * nfds);
 
