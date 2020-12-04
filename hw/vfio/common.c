@@ -72,7 +72,7 @@ void vfio_disable_irqindex(VFIODevice *vbasedev, int index)
     };
 
     if (vbasedev->proxy != NULL) {
-        vfio_user_set_irq_info(vbasedev, &irq_set);
+        vfio_user_set_irqs(vbasedev, &irq_set);
     } else {
         ioctl(vbasedev->fd, VFIO_DEVICE_SET_IRQS, &irq_set);
     }
@@ -89,7 +89,7 @@ void vfio_unmask_single_irqindex(VFIODevice *vbasedev, int index)
     };
 
     if (vbasedev->proxy != NULL) {
-        vfio_user_set_irq_info(vbasedev, &irq_set);
+        vfio_user_set_irqs(vbasedev, &irq_set);
     } else {
         ioctl(vbasedev->fd, VFIO_DEVICE_SET_IRQS, &irq_set);
     }
@@ -106,7 +106,7 @@ void vfio_mask_single_irqindex(VFIODevice *vbasedev, int index)
     };
 
     if (vbasedev->proxy != NULL) {
-        vfio_user_set_irq_info(vbasedev, &irq_set);
+        vfio_user_set_irqs(vbasedev, &irq_set);
     } else {
         ioctl(vbasedev->fd, VFIO_DEVICE_SET_IRQS, &irq_set);
     }
@@ -168,7 +168,7 @@ int vfio_set_irq_signaling(VFIODevice *vbasedev, int index, int subindex,
     *pfd = fd;
 
     if (vbasedev->proxy != NULL) {
-        ret = vfio_user_set_irq_info(vbasedev, irq_set);
+        ret = vfio_user_set_irqs(vbasedev, irq_set);
     } else {
         if (ioctl(vbasedev->fd, VFIO_DEVICE_SET_IRQS, irq_set)) {
             ret = -errno;

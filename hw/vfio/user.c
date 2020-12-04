@@ -655,28 +655,40 @@ int vfio_user_get_irq_info(VFIODevice *vbasedev, struct vfio_irq_info *info)
     return 0;
 }
 
-int vfio_user_set_irq_info(VFIODevice *vbasedev, struct vfio_irq_set *irq)
+int vfio_user_set_irqs(VFIODevice *vbasedev, struct vfio_irq_set *irq)
 {
-    struct vfio_user_irq_set smallmsg, *msgp;
+    struct vfio_user_irq_set *msgp = NULL;
+    VFIOUserFDs fds = { 0, NULL };
+    uint32_t size;
 
-    /* only allocate if sending data array with set message */
     if (irq->argsz < sizeof(*irq)) {
-        error_printf("vfio_user_set_irq_info argsz too small\n");
+        error_printf("vfio_user_set_irqs argsz too small\n");
         return -EINVAL;
     }
-    msgp = irq->argsz > sizeof(smallmsg) ? g_malloc0(irq->argsz) : &smallmsg;
 
-    vfio_user_request_msg(&msgp->hdr, VFIO_USER_DEVICE_GET_IRQ_INFO, irq->argsz, 0);
+    /*
+     * Extract the file descriptors and adjust argsz.
+     */
+    if (irq->flags & VFIO_IRQ_SET_DATA_EVENTFD) {
+        fds.numfds = (irq->argsz - sizeof(*irq)) / sizeof (int);
+        fds.fds = (int *)irq->data;
+        irq->argsz = sizeof(*irq);
+    }
+
+    size = sizeof (vfio_user_hdr_t) + irq->argsz;
+    msgp = g_malloc0(size);
+
+    vfio_user_request_msg(&msgp->hdr, VFIO_USER_DEVICE_SET_IRQS, size, 0);
     memcpy(&msgp->irq_set, irq, irq->argsz);
 
-    vfio_user_send_recv(vbasedev->proxy, &msgp->hdr, NULL, 0);
+    vfio_user_send_recv(vbasedev->proxy, &msgp->hdr, &fds, 0);
+
     if (msgp->hdr.flags & VFIO_USER_ERROR) {
+        g_free(msgp);
         return -msgp->hdr.error_reply;
     }
 
-    if (msgp != &smallmsg) {
-        g_free(msgp);
-    }
+    g_free(msgp);
     return 0;
 }
 

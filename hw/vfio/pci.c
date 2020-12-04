@@ -445,7 +445,7 @@ static int vfio_enable_vectors(VFIOPCIDevice *vdev, bool msix)
     }
 
     if (vdev->vbasedev.proxy != NULL) {
-        ret = vfio_user_set_irq_info(&vdev->vbasedev, irq_set);
+        ret = vfio_user_set_irqs(&vdev->vbasedev, irq_set);
      } else {
         ret = ioctl(vdev->vbasedev.fd, VFIO_DEVICE_SET_IRQS, irq_set);
     }
