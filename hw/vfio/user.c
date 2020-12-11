@@ -46,7 +46,8 @@ static void vfio_user_request_msg(vfio_user_hdr_t *hdr, uint16_t cmd, uint32_t s
 
 static void vfio_user_send_locked(VFIOProxy *proxy, vfio_user_hdr_t *msg, VFIOUserFDs *fds);
 static void vfio_user_send(VFIOProxy *proxy, vfio_user_hdr_t *msg, VFIOUserFDs *fds);
-static void vfio_user_send_recv(VFIOProxy *proxy, vfio_user_hdr_t *msg, VFIOUserFDs *fds,
+static void vfio_user_send_recv(VFIOProxy *proxy, vfio_user_hdr_t *msg,
+                                VFIOUserFDs *send_fds, VFIOUserFDs *recv_fds,
                                int rsize);
 
 static uint64_t max_send_fds = REMOTE_MAX_FDS;
@@ -149,7 +150,8 @@ void vfio_user_recv(void *opaque)
     msgleft = msg.size - sizeof(msg);
     if (isreply) {
         if (msg.size > reply->rsize) {
-            error_setg(&local_err, "vfio_user_recv reply larger than recv buffer");
+            error_setg(&local_err, "vfio_user_recv msg=%d cmd=%d reply (%d) larger than recv buffer (%d)",
+                       msg.id, msg.command, msg.size, reply->rsize);
             goto err;
         }
         *reply->msg = msg;
@@ -263,8 +265,9 @@ static void vfio_user_send(VFIOProxy *proxy, vfio_user_hdr_t *msg, VFIOUserFDs *
     qemu_mutex_lock_iothread();
 }
 
-static void vfio_user_send_recv(VFIOProxy *proxy, vfio_user_hdr_t *msg, VFIOUserFDs *fds,
-                               int rsize)
+static void vfio_user_send_recv(VFIOProxy *proxy, vfio_user_hdr_t *msg,
+                                VFIOUserFDs *send_fds, VFIOUserFDs *recv_fds,
+                                int rsize)
 {
     VFIOUserReply *reply;
 
@@ -289,12 +292,12 @@ static void vfio_user_send_recv(VFIOProxy *proxy, vfio_user_hdr_t *msg, VFIOUser
         qemu_cond_init(&reply->cv);
     }
     reply->msg = msg;
-    reply->fds = fds;
+    reply->fds = recv_fds;
     reply->id = msg->id;
     reply->rsize = rsize ? rsize : msg->size;
     QTAILQ_INSERT_TAIL(&proxy->pending, reply, next);
 
-    vfio_user_send_locked(proxy, msg, fds);
+    vfio_user_send_locked(proxy, msg, send_fds);
     while (reply->complete == 0) {
         qemu_cond_wait(&reply->cv, &proxy->lock);
     }
@@ -521,7 +524,7 @@ int vfio_user_validate_version(VFIODevice *vbasedev, Error **errp)
     memcpy(&msgp->capabilities, qstring_get_str(caps), caplen);
     qobject_unref(caps);
 
-    vfio_user_send_recv(vbasedev->proxy, &msgp->hdr, NULL, 0);
+    vfio_user_send_recv(vbasedev->proxy, &msgp->hdr, NULL, NULL, 0);
     if (msgp->hdr.flags & VFIO_USER_ERROR) {
         error_setg_errno(errp, msgp->hdr.error_reply, "version reply");
         goto err;
@@ -559,7 +562,7 @@ int vfio_user_dma_map(VFIOProxy *proxy, struct vfio_user_map *map, VFIOUserFDs *
     vfio_user_request_msg(&msgp->hdr, VFIO_USER_DMA_MAP, size, 0);
     memcpy(&msgp->table, map, nelem * sizeof(*map));
 
-    vfio_user_send_recv(proxy, &msgp->hdr, fds, 0);
+    vfio_user_send_recv(proxy, &msgp->hdr, fds, NULL, 0);
     ret = (msgp->hdr.flags & VFIO_USER_ERROR) ? -msgp->hdr.error_reply : 0;
 
     g_free(msgp);
@@ -577,7 +580,7 @@ int vfio_user_dma_unmap(VFIOProxy *proxy, struct vfio_user_map *map,
     vfio_user_request_msg(&msgp->hdr, VFIO_USER_DMA_UNMAP, size, 0);
     memcpy(&msgp->table, map, nelem * sizeof(*map));
 
-    vfio_user_send_recv(proxy, &msgp->hdr, NULL, 0);
+    vfio_user_send_recv(proxy, &msgp->hdr, NULL, NULL, 0);
     ret = (msgp->hdr.flags & VFIO_USER_ERROR) ? -msgp->hdr.error_reply : 0;
 
     g_free(msgp);
@@ -592,7 +595,7 @@ int vfio_user_get_info(VFIODevice *vbasedev)
     memset(&msg, 0, sizeof(msg));
     vfio_user_request_msg(&msg.hdr, VFIO_USER_DEVICE_GET_INFO, sizeof(msg), 0);
 
-    vfio_user_send_recv(vbasedev->proxy, &msg.hdr, NULL, 0);
+    vfio_user_send_recv(vbasedev->proxy, &msg.hdr, NULL, NULL, 0);
     if (msg.hdr.flags & VFIO_USER_ERROR) {
         return -msg.hdr.error_reply;
     }
@@ -624,8 +627,8 @@ int vfio_user_get_region_info(VFIODevice *vbasedev, int index,
 
     // FIXME: this was trying to pass in -1 fds - here, we want fds filled in
     // from the *received message*.
-#if 0
-    vfio_user_send_recv(vbasedev->proxy, &msgp->hdr, fds, size);
+#if 1
+    vfio_user_send_recv(vbasedev->proxy, &msgp->hdr, NULL, fds, size);
 #else
     vfio_user_send_recv(vbasedev->proxy, &msgp->hdr, NULL, 0);
 #endif
@@ -646,7 +649,7 @@ int vfio_user_get_irq_info(VFIODevice *vbasedev, struct vfio_irq_info *info)
     vfio_user_request_msg(&msg.hdr, VFIO_USER_DEVICE_GET_IRQ_INFO, sizeof(msg), 0);
 
     // FIXME: error message seems to be ignored?
-    vfio_user_send_recv(vbasedev->proxy, &msg.hdr, NULL, 0);
+    vfio_user_send_recv(vbasedev->proxy, &msg.hdr, NULL, NULL, 0);
     if (msg.hdr.flags & VFIO_USER_ERROR) {
         return -msg.hdr.error_reply;
     }
@@ -681,7 +684,7 @@ int vfio_user_set_irqs(VFIODevice *vbasedev, struct vfio_irq_set *irq)
     vfio_user_request_msg(&msgp->hdr, VFIO_USER_DEVICE_SET_IRQS, size, 0);
     memcpy(&msgp->irq_set, irq, irq->argsz);
 
-    vfio_user_send_recv(vbasedev->proxy, &msgp->hdr, &fds, 0);
+    vfio_user_send_recv(vbasedev->proxy, &msgp->hdr, &fds, NULL, 0);
 
     if (msgp->hdr.flags & VFIO_USER_ERROR) {
         g_free(msgp);
@@ -709,7 +712,7 @@ int vfio_user_region_read(VFIODevice *vbasedev, uint32_t index, uint64_t offset,
     msgp->region = index;
     msgp->count = count;
 
-    vfio_user_send_recv(vbasedev->proxy, &msgp->hdr, NULL, size);
+    vfio_user_send_recv(vbasedev->proxy, &msgp->hdr, NULL, NULL, size);
     if (msgp->hdr.flags & VFIO_USER_ERROR) {
         ret = -msgp->hdr.error_reply;
     } else if (msgp->count > count) {
@@ -757,7 +760,7 @@ void vfio_user_reset(VFIODevice *vbasedev)
     
     vfio_user_request_msg(&msg, VFIO_USER_DEVICE_RESET, sizeof(msg), 0);
 
-    vfio_user_send_recv(vbasedev->proxy, &msg, NULL, 0);
+    vfio_user_send_recv(vbasedev->proxy, &msg, NULL, NULL, 0);
     if (msg.flags & VFIO_USER_ERROR) {
         error_printf("reset reply error %d\n", msg.error_reply);
     }
