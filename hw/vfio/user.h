@@ -37,7 +37,8 @@ typedef struct vfio_user_hdr {
 #define VFIO_USER_DMA_WRITE			11
 #define VFIO_USER_VM_INTERRUPT			12
 #define VFIO_USER_DEVICE_RESET			13
-
+#define VFIO_USER_DIRTY_PAGES			14
+#define VFIO_USER_UNMAP_DIRTY			15
 
 /* flags */
 #define VFIO_USER_REQUEST	0x0
@@ -162,6 +163,36 @@ struct vfio_user_vm_intr {
     uint32_t subindex;
 };
 
+/*
+ * VFIO_USER_DIRTY_PAGES
+ */
+struct vfio_user_bitmap {
+    uint64_t pgsize;
+    uint64_t size;
+    char data[];
+};
+
+struct vfio_user_bitmap_range {
+    uint64_t iova;
+    uint64_t size;
+    struct vfio_user_bitmap bitmap;
+};
+
+struct vfio_user_dirty_pages {
+    vfio_user_hdr_t hdr;
+    struct vfio_iommu_type1_dirty_bitmap command;
+};
+
+/*
+ * VFIO_USER_UNMAP_DIRTY
+ */
+struct vfio_user_unmap_dirty {
+    vfio_user_hdr_t hdr;
+    struct vfio_iommu_type1_dma_unmap unmap;
+    struct vfio_user_bitmap bitmap;
+};
+
+
 typedef struct VFIOUserFDs {
     int send_fds;
     int recv_fds;
@@ -216,3 +247,10 @@ int vfio_user_region_read(VFIODevice *vbasedev, uint32_t index, uint64_t offset,
 int vfio_user_region_write(VFIODevice *vbasedev, uint32_t index, uint64_t offset,
                            uint32_t count, void *data);
 void vfio_user_reset(VFIODevice *vbasedev);
+
+int vfio_user_dirty_bitmap(VFIOProxy *proxy,
+                           struct vfio_iommu_type1_dirty_bitmap *bitmap,
+                           struct vfio_iommu_type1_dirty_bitmap_get *range);
+int vfio_user_unmap_dirty(VFIOProxy *proxy,
+                          struct vfio_iommu_type1_dma_unmap *unmap,
+                          struct vfio_bitmap *bitmap);

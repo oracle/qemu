@@ -367,21 +367,32 @@ void vfio_user_disconnect(VFIOProxy *proxy)
 {
     VFIOUserReply *r1, *r2;
 
+    qio_channel_shutdown(proxy->ioc, QIO_CHANNEL_SHUTDOWN_READ, NULL);
     qio_channel_set_aio_fd_handler(proxy->ioc,
                                    iothread_get_aio_context(vfio_user_iothread),
                                    NULL, NULL, NULL);
-    qio_channel_close(proxy->ioc, NULL);
 
+    qemu_mutex_lock(&proxy->lock);
     QTAILQ_FOREACH_SAFE(r1, &proxy->free, next, r2) {
+        qemu_cond_destroy(&r1->cv);
         QTAILQ_REMOVE(&proxy->free, r1, next);
         g_free(r1);
     }
+    QTAILQ_FOREACH_SAFE(r1, &proxy->pending, next, r2) {
+        qemu_cond_destroy(&r1->cv);
+        QTAILQ_REMOVE(&proxy->pending, r1, next);
+        g_free(r1);
+    }
+    qemu_mutex_unlock(&proxy->lock);
+    qemu_mutex_destroy(&proxy->lock);
 
     QLIST_REMOVE(proxy, next);
     if (QLIST_EMPTY(&vfio_user_sockets)) {
         iothread_destroy(vfio_user_iothread);
         vfio_user_iothread = NULL;
     }
+
+    qio_channel_close(proxy->ioc, NULL);
     g_free(proxy);
 }
 
@@ -693,10 +704,12 @@ int vfio_user_get_region_info(VFIODevice *vbasedev, int index,
 
     vfio_user_send_recv(vbasedev->proxy, &msgp->hdr, fds, size);
     if (msgp->hdr.flags & VFIO_USER_ERROR) {
+        g_free(msgp);
         return -msgp->hdr.error_reply;
     }
 
     memcpy(info, &msgp->reg_info, info->argsz);
+    g_free(msgp);
     return 0;
 }
 
@@ -851,4 +864,76 @@ void vfio_user_reset(VFIODevice *vbasedev)
     if (msg.flags & VFIO_USER_ERROR) {
         error_printf("reset reply error %d\n", msg.error_reply);
     }
+}
+
+int vfio_user_dirty_bitmap(VFIOProxy *proxy,
+                           struct vfio_iommu_type1_dirty_bitmap *cmd,
+                           struct vfio_iommu_type1_dirty_bitmap_get *dbitmap)
+{
+    struct {
+        struct vfio_user_dirty_pages msg;
+        struct vfio_user_bitmap_range range;
+    } *msgp;
+    int msize, rsize;
+
+    /*
+     * If just the command is sent, the returned bitmap isn't needed.
+     * The bitmap structs are different from the ioctl() versions,
+     * ioctl() returns the bitmap in a local VA
+     */
+    if (dbitmap != NULL) {
+        msize = sizeof(*msgp);
+        rsize = msize + dbitmap->bitmap.size;
+        msgp = g_malloc0(rsize);
+        msgp->range.iova = dbitmap->iova;
+        msgp->range.size = dbitmap->size;
+        msgp->range.bitmap.pgsize = dbitmap->bitmap.pgsize;
+        msgp->range.bitmap.size = dbitmap->bitmap.size;
+    } else {
+        msize = rsize = sizeof(struct vfio_user_dirty_pages);
+        msgp = g_malloc0(rsize);
+    }
+
+    vfio_user_request_msg(&msgp->msg.hdr, VFIO_USER_DIRTY_PAGES, msize, 0);
+    msgp->msg.command = *cmd;
+
+    vfio_user_send_recv(proxy, &msgp->msg.hdr, NULL, rsize);
+    if (msgp->msg.hdr.flags & VFIO_USER_ERROR) {
+        g_free(msgp);
+        return -msgp->msg.hdr.error_reply;
+    }
+
+    if (dbitmap != NULL) {
+        memcpy(dbitmap->bitmap.data, &msgp->range.bitmap.data, dbitmap->bitmap.size);
+    }
+
+    g_free(msgp);
+    return 0;
+}
+
+int vfio_user_unmap_dirty(VFIOProxy *proxy,
+                          struct vfio_iommu_type1_dma_unmap *unmap,
+                          struct vfio_bitmap *bitmap)
+{
+    struct vfio_user_unmap_dirty *msgp;
+    int size;
+
+    size = unmap->argsz + bitmap->size;
+    msgp = g_malloc0(size);
+    msgp->unmap = *unmap;
+    msgp->bitmap.pgsize = bitmap->pgsize;
+    msgp->bitmap.size = bitmap->size;
+
+    vfio_user_request_msg(&msgp->hdr, VFIO_USER_UNMAP_DIRTY, unmap->size, 0);
+    
+    vfio_user_send_recv(proxy, &msgp->hdr, NULL, size);
+    if (msgp->hdr.flags & VFIO_USER_ERROR) {
+        g_free(msgp);
+        return -msgp->hdr.error_reply;
+    }
+
+    memcpy(bitmap->data, &msgp->bitmap.data, bitmap->size);
+
+    g_free(msgp);
+    return 0;
 }

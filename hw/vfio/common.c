@@ -442,7 +442,11 @@ static int vfio_dma_unmap_bitmap(VFIOContainer *container,
         goto unmap_exit;
     }
 
-    ret = ioctl(container->fd, VFIO_IOMMU_UNMAP_DMA, unmap);
+    if (container->proxy != NULL) {
+        ret = vfio_user_unmap_dirty(container->proxy, unmap, bitmap);
+    } else {
+        ret = ioctl(container->fd, VFIO_IOMMU_UNMAP_DMA, unmap);
+    }
     if (!ret) {
         cpu_physical_memory_set_dirty_lebitmap((unsigned long *)bitmap->data,
                 iotlb->translated_addr, pages);
@@ -1095,7 +1099,11 @@ static int vfio_get_dirty_bitmap(VFIOContainer *container, uint64_t iova,
         goto err_out;
     }
 
-    ret = ioctl(container->fd, VFIO_IOMMU_DIRTY_PAGES, dbitmap);
+    if (container->proxy != NULL) {
+        ret = vfio_user_dirty_bitmap(container->proxy, dbitmap, range);
+    } else {
+        ret = ioctl(container->fd, VFIO_IOMMU_DIRTY_PAGES, dbitmap);
+    }
     if (ret) {
         error_report("Failed to get dirty bitmap for iova: 0x%"PRIx64
                 " size: 0x%"PRIx64" err: %d", (uint64_t)range->iova,
@@ -1976,6 +1984,12 @@ void vfio_connect_proxy(VFIOProxy *proxy, VFIOGroup *group, AddressSpace *as)
     VFIOAddressSpace *space;
     VFIOContainer *container;
 
+    if (QLIST_EMPTY(&vfio_group_list)) {
+        qemu_register_reset(vfio_reset_handler, NULL);
+    }
+
+    QLIST_INSERT_HEAD(&vfio_group_list, group, next);
+
     /*
      * try to mirror vfio_connect_container()
      * as much as possible
@@ -1986,17 +2000,25 @@ void vfio_connect_proxy(VFIOProxy *proxy, VFIOGroup *group, AddressSpace *as)
     container = g_malloc0(sizeof(*container));
     container->space = space;
     container->fd = -1;
+    QLIST_INIT(&container->giommu_list);
     QLIST_INIT(&container->hostwin_list);
     container->proxy = proxy;
 
+    /*
+     * The proxy uses a SW IOMMU in lieu of the HW one
+     * used in the ioctl() version.  Use TYPE1 with the
+     * target's page size for maximum capatibility
+     */
     container->iommu_type = VFIO_TYPE1_IOMMU;
-    vfio_host_win_add(container, 0, (hwaddr)-1, 4096);
-    container->pgsizes = 4096;
+    vfio_host_win_add(container, 0, (hwaddr)-1, TARGET_PAGE_SIZE);
+    container->pgsizes = TARGET_PAGE_SIZE;
+
+    container->dirty_pages_supported = true;
+    container->max_dirty_bitmap_size = VFIO_USER_DEF_MAX_MSG;
+    container->dirty_pgsizes = TARGET_PAGE_SIZE;
 
     QLIST_INIT(&container->group_list);
     QLIST_INSERT_HEAD(&space->containers, container, next);
-
-    QLIST_INIT(&container->giommu_list);
 
     group->container = container;
     QLIST_INSERT_HEAD(&container->group_list, group, container_next);
