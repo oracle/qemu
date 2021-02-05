@@ -324,6 +324,7 @@ static QLIST_HEAD(, VFIOProxy) vfio_user_sockets =
 VFIOProxy *vfio_user_connect_dev(char *sockname, Error **errp)
 {
     VFIOProxy *proxy;
+    struct QIOChannel *ioc;
     int sockfd;
 
     sockfd = unix_connect(sockname, errp);
@@ -331,12 +332,17 @@ VFIOProxy *vfio_user_connect_dev(char *sockname, Error **errp)
         return NULL;
     }
 
+    ioc = qio_channel_new_fd(sockfd, errp);
+    if (ioc == NULL) {
+        close(sockfd);
+        return NULL;
+    }
+    qio_channel_set_blocking(ioc, true, NULL);
+
     proxy = g_malloc0(sizeof(VFIOProxy));
     proxy->sockname = sockname;
+    proxy->ioc = ioc;
     proxy->flags = VFIO_PROXY_CLIENT;
-
-    proxy->ioc = qio_channel_new_fd(sockfd, errp);
-    qio_channel_set_blocking(proxy->ioc, true, NULL);
 
     if (vfio_user_iothread == NULL) {
         vfio_user_iothread = iothread_create("VFIO user", errp);
@@ -373,16 +379,16 @@ void vfio_user_disconnect(VFIOProxy *proxy)
                                    NULL, NULL, NULL);
 
     qemu_mutex_lock(&proxy->lock);
+
+    if (!QTAILQ_EMPTY(&proxy->pending)) {
+        error_printf("vfio_user_disconnect: outstanding requests\n");
+    }
     QTAILQ_FOREACH_SAFE(r1, &proxy->free, next, r2) {
         qemu_cond_destroy(&r1->cv);
         QTAILQ_REMOVE(&proxy->free, r1, next);
         g_free(r1);
     }
-    QTAILQ_FOREACH_SAFE(r1, &proxy->pending, next, r2) {
-        qemu_cond_destroy(&r1->cv);
-        QTAILQ_REMOVE(&proxy->pending, r1, next);
-        g_free(r1);
-    }
+
     qemu_mutex_unlock(&proxy->lock);
     qemu_mutex_destroy(&proxy->lock);
 
@@ -419,7 +425,7 @@ static int caps_parse(QDict *qdict, struct cap_entry caps[], Error **errp)
 
     /* warning, for now */
     if (qdict_size(qdict) != 0) {
-        error_printf("spurious capabilities\n");
+        error_printf("vfio-user: spurious capabilities\n");
     }
     return 0;
 }
@@ -662,7 +668,6 @@ int vfio_user_dma_unmap(VFIOProxy *proxy, struct vfio_user_map *map,
 int vfio_user_get_info(VFIODevice *vbasedev)
 {
     struct vfio_user_device_info msg;
-    struct vfio_device_info *info;
 
     memset(&msg, 0, sizeof(msg));
     vfio_user_request_msg(&msg.hdr, VFIO_USER_DEVICE_GET_INFO, sizeof(msg), 0);
@@ -672,11 +677,10 @@ int vfio_user_get_info(VFIODevice *vbasedev)
         return -msg.hdr.error_reply;
     }
 
-    info = &msg.dev_info;
-    vbasedev->num_irqs = info->num_irqs;
-    vbasedev->num_regions = info->num_regions;
-    vbasedev->flags = info->flags;
-    vbasedev->reset_works = !!(info->flags & VFIO_DEVICE_FLAGS_RESET);
+    vbasedev->num_irqs = msg.num_irqs;
+    vbasedev->num_regions = msg.num_regions;
+    vbasedev->flags = msg.flags;
+    vbasedev->reset_works = !!(msg.flags & VFIO_DEVICE_FLAGS_RESET);
     return 0;
 }
 
@@ -700,15 +704,16 @@ int vfio_user_get_region_info(VFIODevice *vbasedev, int index,
     msgp = g_malloc0(size);
 
     vfio_user_request_msg(&msgp->hdr, VFIO_USER_DEVICE_GET_REGION_INFO, sizeof(*msgp), 0);
-    msgp->reg_info = *info;
-
+    msgp->argsz = info->argsz;
+    msgp->index = info->index;
+ 
     vfio_user_send_recv(vbasedev->proxy, &msgp->hdr, fds, size);
     if (msgp->hdr.flags & VFIO_USER_ERROR) {
         g_free(msgp);
         return -msgp->hdr.error_reply;
     }
 
-    memcpy(info, &msgp->reg_info, info->argsz);
+    memcpy(info, &msgp->argsz, info->argsz);
     g_free(msgp);
     return 0;
 }
@@ -719,13 +724,15 @@ int vfio_user_get_irq_info(VFIODevice *vbasedev, struct vfio_irq_info *info)
 
     memset(&msg, 0, sizeof(msg));
     vfio_user_request_msg(&msg.hdr, VFIO_USER_DEVICE_GET_IRQ_INFO, sizeof(msg), 0);
+    msg.argsz = info->argsz;
+    msg.index = info->index;
 
     vfio_user_send_recv(vbasedev->proxy, &msg.hdr, NULL, 0);
     if (msg.hdr.flags & VFIO_USER_ERROR) {
         return -msg.hdr.error_reply;
     }
 
-    *info = msg.irq_info;
+    memcpy(info, &msg.argsz, sizeof(*info));
     return 0;
 }
 
@@ -747,7 +754,11 @@ int vfio_user_set_irqs(VFIODevice *vbasedev, struct vfio_irq_set *irq)
         msgp = g_malloc0(size);
 
         vfio_user_request_msg(&msgp->hdr, VFIO_USER_DEVICE_SET_IRQS, size, 0);
-        memcpy(&msgp->irq_set, irq, irq->argsz);
+        msgp->argsz = irq->argsz;
+        msgp->flags = irq->flags;
+        msgp->index = irq->index;
+        msgp->start = irq->start;
+        msgp->count = irq->count;
 
         vfio_user_send_recv(vbasedev->proxy, &msgp->hdr, NULL, 0);
         if (msgp->hdr.flags & VFIO_USER_ERROR) {
@@ -776,9 +787,11 @@ int vfio_user_set_irqs(VFIODevice *vbasedev, struct vfio_irq_set *irq)
         send_fds = MIN(nfds - sent_fds, max_send_fds);
 
         vfio_user_request_msg(&msgp->hdr, VFIO_USER_DEVICE_SET_IRQS, sizeof(*msgp), 0);
-        memcpy(&msgp->irq_set, irq, irq->argsz);
-        msgp->irq_set.start += sent_fds;
-        msgp->irq_set.count = send_fds;
+        msgp->argsz = irq->argsz;
+        msgp->flags = irq->flags;
+        msgp->index = irq->index;
+        msgp->start = irq->start + sent_fds;
+        msgp->count = send_fds;
 
         loop_fds.send_fds = send_fds;
         loop_fds.recv_fds = 0;
@@ -895,7 +908,8 @@ int vfio_user_dirty_bitmap(VFIOProxy *proxy,
     }
 
     vfio_user_request_msg(&msgp->msg.hdr, VFIO_USER_DIRTY_PAGES, msize, 0);
-    msgp->msg.command = *cmd;
+    msgp->msg.argsz = cmd->argsz;
+    msgp->msg.flags = cmd->flags;
 
     vfio_user_send_recv(proxy, &msgp->msg.hdr, NULL, rsize);
     if (msgp->msg.hdr.flags & VFIO_USER_ERROR) {
@@ -911,20 +925,23 @@ int vfio_user_dirty_bitmap(VFIOProxy *proxy,
     return 0;
 }
 
-int vfio_user_unmap_dirty(VFIOProxy *proxy,
-                          struct vfio_iommu_type1_dma_unmap *unmap,
-                          struct vfio_bitmap *bitmap)
+int vfio_user_dma_unmap_dirty(VFIOProxy *proxy,
+                              struct vfio_iommu_type1_dma_unmap *unmap,
+                              struct vfio_bitmap *bitmap)
 {
-    struct vfio_user_unmap_dirty *msgp;
+    struct vfio_user_dma_unmap_dirty *msgp;
     int size;
 
     size = unmap->argsz + bitmap->size;
     msgp = g_malloc0(size);
-    msgp->unmap = *unmap;
+
+    vfio_user_request_msg(&msgp->hdr, VFIO_USER_DMA_UNMAP_DIRTY, unmap->size, 0);
+    msgp->argsz = unmap->argsz;
+    msgp->flags = unmap->size;
+    msgp->iova = unmap->iova;
+    msgp->size = unmap->size;
     msgp->bitmap.pgsize = bitmap->pgsize;
     msgp->bitmap.size = bitmap->size;
-
-    vfio_user_request_msg(&msgp->hdr, VFIO_USER_UNMAP_DIRTY, unmap->size, 0);
     
     vfio_user_send_recv(proxy, &msgp->hdr, NULL, size);
     if (msgp->hdr.flags & VFIO_USER_ERROR) {

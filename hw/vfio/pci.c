@@ -2208,8 +2208,9 @@ static void vfio_pci_pre_reset(VFIOPCIDevice *vdev)
 
 static void vfio_pci_post_reset(VFIOPCIDevice *vdev)
 {
+    VFIODevice *vbasedev = &vdev->vbasedev;
     Error *err = NULL;
-    int nr;
+    int ret, nr;
 
     vfio_intx_enable(vdev, &err);
     if (err) {
@@ -2217,11 +2218,17 @@ static void vfio_pci_post_reset(VFIOPCIDevice *vdev)
     }
 
     for (nr = 0; nr < PCI_NUM_REGIONS - 1; ++nr) {
-        off_t addr = vdev->config_offset + PCI_BASE_ADDRESS_0 + (4 * nr);
+        off_t addr = PCI_BASE_ADDRESS_0 + (4 * nr);
         uint32_t val = 0;
         uint32_t len = sizeof(val);
 
-        if (pwrite(vdev->vbasedev.fd, &val, len, addr) != len) {
+        if (vbasedev->proxy != NULL) {
+            ret = vfio_user_region_write(vbasedev, VFIO_PCI_CONFIG_REGION_INDEX,
+                                         addr, len, &val);
+        } else {
+            ret = pwrite(vdev->vbasedev.fd, &val, len, vdev->config_offset + addr);
+        }
+        if (ret != len) {
             error_report("%s(%s) reset bar %d failed: %m", __func__,
                          vdev->vbasedev.name, nr);
         }
@@ -3461,6 +3468,29 @@ static int vfio_user_pci_process_req(void *opaque, char *buf, VFIOUserFDs *fds)
     return ret;
 }
 
+/*
+ * Emulated devices don't use host hot reset
+ */
+static int vfio_user_pci_no_reset(VFIODevice *vbasedev)
+{
+    error_printf("vfio-user - no hot reset\n");
+    return 0;
+}
+
+static void vfio_user_pci_not_needed(VFIODevice *vbasedev)
+{
+    vbasedev->needs_reset = false;
+}
+
+static VFIODeviceOps vfio_user_pci_ops = {
+    .vfio_compute_needs_reset = vfio_user_pci_not_needed,
+    .vfio_hot_reset_multi = vfio_user_pci_no_reset,
+    .vfio_eoi = vfio_intx_eoi,
+    .vfio_get_object = vfio_pci_get_object,
+    .vfio_save_config = vfio_pci_save_config,
+    .vfio_load_config = vfio_pci_load_config,
+};
+
 static void vfio_user_pci_realize(PCIDevice *pdev, Error **errp)
 {
     VFIOUserPCIDevice *udev = VFIO_USER_PCI(pdev);
@@ -3500,7 +3530,7 @@ static void vfio_user_pci_realize(PCIDevice *pdev, Error **errp)
     vbasedev->fd = -1;
     vbasedev->type = VFIO_DEVICE_TYPE_PCI;
     vbasedev->no_mmap = false;
-    vbasedev->ops = &vfio_pci_ops;
+    vbasedev->ops = &vfio_user_pci_ops;
 
     /*
      * each device gets its own group and container
@@ -3593,6 +3623,13 @@ static void vfio_user_pci_realize(PCIDevice *pdev, Error **errp)
         }
     }
 
+    if (!pdev->failover_pair_id) {
+        ret = vfio_migration_probe(&vdev->vbasedev, errp);
+        if (ret) {
+            error_report("%s: Migration disabled", vdev->vbasedev.name);
+        }
+    }
+
     vfio_register_err_notifier(vdev);
     vfio_register_req_notifier(vdev);
 
@@ -3631,13 +3668,22 @@ static void vfio_user_instance_finalize(Object *obj)
 static void vfio_user_pci_reset(DeviceState *dev)
 {
     VFIOPCIDevice *vdev = VFIO_PCI_BASE(dev);
+    VFIODevice *vbasedev = &vdev->vbasedev;
 
-    vfio_user_reset(&vdev->vbasedev);
+    vfio_pci_pre_reset(vdev);
+
+    if (vbasedev->reset_works) {
+        vfio_user_reset(vbasedev);
+    }
+
+    vfio_pci_post_reset(vdev);
 }
 
 static Property vfio_user_pci_dev_properties[] = {
     DEFINE_PROP_STRING("socket", VFIOUserPCIDevice, sock_name),
     DEFINE_PROP_BOOL("secure-dma", VFIOUserPCIDevice, secure, false),
+    DEFINE_PROP_BOOL("x-enable-migration", VFIOPCIDevice,
+                     vbasedev.enable_migration, false),
     DEFINE_PROP_END_OF_LIST(),
 };
 

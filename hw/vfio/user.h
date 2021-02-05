@@ -38,7 +38,7 @@ typedef struct vfio_user_hdr {
 #define VFIO_USER_VM_INTERRUPT			12
 #define VFIO_USER_DEVICE_RESET			13
 #define VFIO_USER_DIRTY_PAGES			14
-#define VFIO_USER_UNMAP_DIRTY			15
+#define VFIO_USER_DMA_UNMAP_DIRTY		15
 
 /* flags */
 #define VFIO_USER_REQUEST	0x0
@@ -100,34 +100,54 @@ struct vfio_user_dma_map {
 
 /*
  * VFIO_USER_DEVICE_GET_INFO
+ * imported from struct_device_info
  */
 struct vfio_user_device_info {
     vfio_user_hdr_t hdr;
-    struct vfio_device_info dev_info;
+    uint32_t argsz;
+    uint32_t flags;
+    uint32_t num_regions;
+    uint32_t num_irqs;
+    uint32_t cap_offset;
 };
 
 /*
  * VFIO_USER_DEVICE_GET_REGION_INFO
+ * imported from struct_vfio_region_info
  */
 struct vfio_user_region_info {
     vfio_user_hdr_t hdr;
-    struct vfio_region_info reg_info;
+    uint32_t argsz;
+    uint32_t flags;
+    uint32_t index;
+    uint32_t cap_offset;
+    uint64_t size;
+    uint64_t offset;
 };
 
 /*
  * VFIO_USER_DEVICE_GET_IRQ_INFO
+ * imported from struct vfio_irq_info
  */
 struct vfio_user_irq_info {
     vfio_user_hdr_t hdr;
-    struct vfio_irq_info irq_info;
+    uint32_t argsz;
+    uint32_t flags;
+    uint32_t index;
+    uint32_t count;
 };
 
 /*
  * VFIO_USER_DEVICE_SET_IRQS
+ * imported from struct vfio_irq_set
  */
 struct vfio_user_irq_set {
     vfio_user_hdr_t hdr;
-    struct vfio_irq_set irq_set;
+    uint32_t argsz;
+    uint32_t flags;
+    uint32_t index;
+    uint32_t start;
+    uint32_t count;
 };
 
 
@@ -165,6 +185,7 @@ struct vfio_user_vm_intr {
 
 /*
  * VFIO_USER_DIRTY_PAGES
+ * imported from struct vfio_bitmap
  */
 struct vfio_user_bitmap {
     uint64_t pgsize;
@@ -172,23 +193,30 @@ struct vfio_user_bitmap {
     char data[];
 };
 
+/* imported from struct vfio_iommu_type1_dirty_bitmap_get */
 struct vfio_user_bitmap_range {
     uint64_t iova;
     uint64_t size;
     struct vfio_user_bitmap bitmap;
 };
 
+/* imported from struct vfio_iommu_type1_dirty_bitmap */
 struct vfio_user_dirty_pages {
     vfio_user_hdr_t hdr;
-    struct vfio_iommu_type1_dirty_bitmap command;
+    uint32_t argsz;
+    uint32_t flags;
 };
 
 /*
- * VFIO_USER_UNMAP_DIRTY
+ * VFIO_USER_DMA_UNMAP_DIRTY
+ * imported from struct vfio_iommu_type1_dma_unmap
  */
-struct vfio_user_unmap_dirty {
+struct vfio_user_dma_unmap_dirty {
     vfio_user_hdr_t hdr;
-    struct vfio_iommu_type1_dma_unmap unmap;
+    uint32_t argsz;
+    uint32_t flags;
+    uint64_t iova;
+    uint64_t size;
     struct vfio_user_bitmap bitmap;
 };
 
@@ -251,6 +279,6 @@ void vfio_user_reset(VFIODevice *vbasedev);
 int vfio_user_dirty_bitmap(VFIOProxy *proxy,
                            struct vfio_iommu_type1_dirty_bitmap *bitmap,
                            struct vfio_iommu_type1_dirty_bitmap_get *range);
-int vfio_user_unmap_dirty(VFIOProxy *proxy,
-                          struct vfio_iommu_type1_dma_unmap *unmap,
-                          struct vfio_bitmap *bitmap);
+int vfio_user_dma_unmap_dirty(VFIOProxy *proxy,
+                              struct vfio_iommu_type1_dma_unmap *unmap,
+                              struct vfio_bitmap *bitmap);

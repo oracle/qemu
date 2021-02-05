@@ -443,7 +443,7 @@ static int vfio_dma_unmap_bitmap(VFIOContainer *container,
     }
 
     if (container->proxy != NULL) {
-        ret = vfio_user_unmap_dirty(container->proxy, unmap, bitmap);
+        ret = vfio_user_dma_unmap_dirty(container->proxy, unmap, bitmap);
     } else {
         ret = ioctl(container->fd, VFIO_IOMMU_UNMAP_DMA, unmap);
     }
