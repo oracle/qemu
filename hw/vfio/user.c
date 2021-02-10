@@ -279,6 +279,7 @@ static void vfio_user_send_recv(VFIOProxy *proxy, vfio_user_hdr_t *msg, VFIOUser
                                int rsize)
 {
     VFIOUserReply *reply;
+    bool iolock = qemu_mutex_iothread_locked();
 
     if (msg->flags & VFIO_USER_NO_REPLY) {
         error_printf("vfio_user_send_recv on async message\n");
@@ -289,7 +290,9 @@ static void vfio_user_send_recv(VFIOProxy *proxy, vfio_user_hdr_t *msg, VFIOUser
      * We will block later, so use a per-proxy lock and let
      * the iothreads run while we sleep.
      */
-    qemu_mutex_unlock_iothread();
+    if (iolock) {
+        qemu_mutex_unlock_iothread();
+    }
     qemu_mutex_lock(&proxy->lock);
 
     reply = QTAILQ_FIRST(&proxy->free);
@@ -313,7 +316,9 @@ static void vfio_user_send_recv(VFIOProxy *proxy, vfio_user_hdr_t *msg, VFIOUser
 
     QTAILQ_INSERT_HEAD(&proxy->free, reply, next);
     qemu_mutex_unlock(&proxy->lock);
-    qemu_mutex_lock_iothread();
+    if (iolock) {
+        qemu_mutex_lock_iothread();
+    }
 }
 
 static IOThread *vfio_user_iothread;
