@@ -268,11 +268,16 @@ err:
 static void vfio_user_send(VFIOProxy *proxy, vfio_user_hdr_t *msg, VFIOUserFDs *fds)
 {
     /* Use the same locking protocol as vfio_user_send_recv() below */
-    qemu_mutex_unlock_iothread();
+    bool iolock = qemu_mutex_iothread_locked();
+    if (iolock) {
+        qemu_mutex_unlock_iothread();
+    }
     qemu_mutex_lock(&proxy->lock);
     vfio_user_send_locked(proxy, msg, fds);
     qemu_mutex_unlock(&proxy->lock);
-    qemu_mutex_lock_iothread();
+    if (iolock) {
+        qemu_mutex_lock_iothread();
+    }
 }
 
 static void vfio_user_send_recv(VFIOProxy *proxy, vfio_user_hdr_t *msg, VFIOUserFDs *fds,
