@@ -681,6 +681,7 @@ int vfio_user_get_info(VFIODevice *vbasedev)
 
     memset(&msg, 0, sizeof(msg));
     vfio_user_request_msg(&msg.hdr, VFIO_USER_DEVICE_GET_INFO, sizeof(msg), 0);
+    msg.argsz = sizeof(struct vfio_device_info);
 
     vfio_user_send_recv(vbasedev->proxy, &msg.hdr, NULL, 0);
     if (msg.hdr.flags & VFIO_USER_ERROR) {
