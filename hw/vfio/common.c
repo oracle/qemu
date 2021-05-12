@@ -1459,8 +1459,7 @@ int vfio_region_mmap(VFIORegion *region)
     for (i = 0; i < region->nr_mmaps; i++) {
         region->mmaps[i].mmap = mmap(NULL, region->mmaps[i].size, prot,
                                      MAP_SHARED, fd,
-                                     region->fd_offset +
-                                     region->mmaps[i].offset);
+                                     region->fd_offset + region->mmaps[i].offset);
         if (region->mmaps[i].mmap == MAP_FAILED) {
             int ret = -errno;
 
