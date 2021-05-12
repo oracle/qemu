@@ -237,16 +237,30 @@ typedef struct VFIOUserReply {
     uint8_t complete;
 } VFIOUserReply;
 
+enum proxy_state {
+    CONNECTED = 1,
+    RECV_ERROR = 2,
+    CLOSING = 3,
+};
+
 typedef struct VFIOProxy {
-    QTAILQ_HEAD(, VFIOUserReply) free;
-    QTAILQ_HEAD(, VFIOUserReply) pending;
     QLIST_ENTRY(VFIOProxy) next;
-    int flags;
     char *sockname;
-    QemuMutex lock;
     struct QIOChannel *ioc;
     int (*request)(void *opaque, char *buf, VFIOUserFDs *fds);
     void *reqarg;
+    int flags;
+    QemuCond close_cv;
+
+    /*
+     * above only changed when iolock is held
+     * below are protected by per-proxy lock
+     */
+    QemuMutex lock;
+    QTAILQ_HEAD(, VFIOUserReply) free;
+    QTAILQ_HEAD(, VFIOUserReply) pending;
+    enum proxy_state state;
+    int close_wait;
 } VFIOProxy;
 
 #define VFIO_PROXY_CLIENT	0x1

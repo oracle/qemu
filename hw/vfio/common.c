@@ -2298,7 +2298,7 @@ int vfio_get_region_info(VFIODevice *vbasedev, int index,
     /* check cache */
     if (vbasedev->regions[index] != NULL) {
         *info = g_malloc0(vbasedev->regions[index]->argsz);
-        **info = *vbasedev->regions[index];
+        memcpy(*info, vbasedev->regions[index], vbasedev->regions[index]->argsz);
         return 0;
     }
     *info = g_malloc0(argsz);
@@ -2336,6 +2336,7 @@ retry:
 
     /* fill cache */
     vbasedev->regions[index] = g_malloc0(argsz);
+    memcpy(vbasedev->regions[index], *info, argsz);
     *vbasedev->regions[index] = **info;
     if (vbasedev->regfds != NULL) {
         vbasedev->regfds[index] = fd;

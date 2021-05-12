@@ -17,6 +17,7 @@
 #include "hw/vfio/vfio.h"
 #include "hw/qdev-properties.h"
 #include "migration/vmstate.h"
+#include "qemu/atomic.h"
 #include "qemu/error-report.h"
 #include "qemu/main-loop.h"
 #include "qemu/module.h"
@@ -49,6 +50,7 @@ static void vfio_user_send_locked(VFIOProxy *proxy, vfio_user_hdr_t *msg, VFIOUs
 static void vfio_user_send(VFIOProxy *proxy, vfio_user_hdr_t *msg, VFIOUserFDs *fds);
 static void vfio_user_send_recv(VFIOProxy *proxy, vfio_user_hdr_t *msg, VFIOUserFDs *fds,
                                int rsize);
+static void vfio_user_shutdown(VFIOProxy *proxy);
 
 
 static uint64_t max_send_fds = VFIO_USER_DEF_MAX_FDS;
@@ -60,7 +62,7 @@ static void vfio_user_request_msg(vfio_user_hdr_t *hdr, uint16_t cmd, uint32_t s
 {
     static uint16_t next_id = 0;
 
-    hdr->id = next_id++;
+    hdr->id = qatomic_fetch_inc(&next_id);
     hdr->command = cmd;
     hdr->size = size;
     hdr->flags = (flags & ~VFIO_USER_TYPE) | VFIO_USER_REQUEST;
@@ -104,9 +106,16 @@ void vfio_user_recv(void *opaque)
     Error *local_err = NULL;
 
     qemu_mutex_lock(&proxy->lock);
+    if (proxy->state == CLOSING) {
+        return;
+    }
 
     ret = qio_channel_readv_full(proxy->ioc, &iov, 1, &fdp, &numfds, &local_err);
-    if (ret < 0) {
+    if (ret <= 0) {
+        /* read error or other side closed connection */
+        error_setg_errno(&local_err, errno, "vfio_user_recv read error");
+        vfio_user_shutdown(proxy);
+        proxy->state = RECV_ERROR;
         goto err;
     }
     if (ret < sizeof(msg)) {
@@ -192,9 +201,12 @@ void vfio_user_recv(void *opaque)
         qemu_cond_signal(&reply->cv);
     } else {
         qemu_mutex_lock_iothread();
-        ret = proxy->request(proxy->reqarg, buf, &reqfds);
-        if (ret < 0) {
-            vfio_user_send_reply(proxy, buf, ret);
+        /* make sure proxy wasn't closed while we waited */
+        if (proxy->state != CLOSING) {
+            ret = proxy->request(proxy->reqarg, buf, &reqfds);
+            if (ret < 0) {
+                vfio_user_send_reply(proxy, buf, ret);
+            }
         }
         qemu_mutex_unlock_iothread();
         g_free(buf);
@@ -237,6 +249,12 @@ static void vfio_user_send_locked(VFIOProxy *proxy, vfio_user_hdr_t *msg, VFIOUs
     int msgleft, ret, *fdp = NULL;
     char *buf;
     Error *local_err = NULL;
+
+    if (proxy->state != CONNECTED) {
+        msg->flags |= VFIO_USER_ERROR;
+        msg->error_reply = ECONNRESET;
+        return;
+    }
 
     if (fds != NULL && fds->send_fds != 0) {
         numfds = fds->send_fds;
@@ -315,8 +333,10 @@ static void vfio_user_send_recv(VFIOProxy *proxy, vfio_user_hdr_t *msg, VFIOUser
     QTAILQ_INSERT_TAIL(&proxy->pending, reply, next);
 
     vfio_user_send_locked(proxy, msg, fds);
-    while (reply->complete == 0) {
-        qemu_cond_wait(&reply->cv, &proxy->lock);
+    if ((msg->flags & VFIO_USER_ERROR) == 0) {
+        while (reply->complete == 0) {
+            qemu_cond_wait(&reply->cv, &proxy->lock);
+        }
     }
 
     QTAILQ_INSERT_HEAD(&proxy->free, reply, next);
@@ -353,6 +373,8 @@ VFIOProxy *vfio_user_connect_dev(char *sockname, Error **errp)
     proxy->sockname = sockname;
     proxy->ioc = ioc;
     proxy->flags = VFIO_PROXY_CLIENT;
+    proxy->state = CONNECTED;
+    qemu_cond_init(&proxy->close_cv);
 
     if (vfio_user_iothread == NULL) {
         vfio_user_iothread = iothread_create("VFIO user", errp);
@@ -379,19 +401,42 @@ void vfio_user_set_reqhandler(VFIODevice *vbasedev,
                                    vfio_user_recv, NULL, vbasedev);
 }
 
-void vfio_user_disconnect(VFIOProxy *proxy)
+static void vfio_user_cb(void *opaque)
 {
-    VFIOUserReply *r1, *r2;
+    VFIOProxy *proxy = opaque;
 
+    proxy->close_wait = 0;
+    qemu_cond_signal(&proxy->close_cv);
+}
+
+static void vfio_user_shutdown(VFIOProxy *proxy)
+{
     qio_channel_shutdown(proxy->ioc, QIO_CHANNEL_SHUTDOWN_READ, NULL);
     qio_channel_set_aio_fd_handler(proxy->ioc,
                                    iothread_get_aio_context(vfio_user_iothread),
                                    NULL, NULL, NULL);
+}
+
+void vfio_user_disconnect(VFIOProxy *proxy)
+{
+    VFIOUserReply *r1, *r2;
 
     qemu_mutex_lock(&proxy->lock);
 
-    if (!QTAILQ_EMPTY(&proxy->pending)) {
-        error_printf("vfio_user_disconnect: outstanding requests\n");
+    /* our side is quitting */
+    if (proxy->state == CONNECTED) {
+        vfio_user_shutdown(proxy);
+        if (!QTAILQ_EMPTY(&proxy->pending)) {
+            error_printf("vfio_user_disconnect: outstanding requests\n");
+        }
+    }
+    qio_channel_close(proxy->ioc, NULL);
+    proxy->state = CLOSING;
+
+    QTAILQ_FOREACH_SAFE(r1, &proxy->pending, next, r2) {
+        qemu_cond_destroy(&r1->cv);
+        QTAILQ_REMOVE(&proxy->pending, r1, next);
+        g_free(r1);
     }
     QTAILQ_FOREACH_SAFE(r1, &proxy->free, next, r2) {
         qemu_cond_destroy(&r1->cv);
@@ -399,7 +444,25 @@ void vfio_user_disconnect(VFIOProxy *proxy)
         g_free(r1);
     }
 
+    /*
+     * Make sure the iothread isn't blocking anywhere
+     * with a ref to this proxy by waiting for a BH
+     * handler to run after the proxy fd handlers were
+     * deleted above.
+     */
+    proxy->close_wait = 1;
+    aio_bh_schedule_oneshot(iothread_get_aio_context(vfio_user_iothread),
+                            vfio_user_cb, proxy);
+
+    /* drop locks so the iothread can make progress */
+    qemu_mutex_unlock_iothread();
+    if (proxy->close_wait != 0) {
+        qemu_cond_wait(&proxy->close_cv, &proxy->lock);
+    }
+
+    /* we now hold the only ref to proxy */
     qemu_mutex_unlock(&proxy->lock);
+    qemu_cond_destroy(&proxy->close_cv);
     qemu_mutex_destroy(&proxy->lock);
 
     QLIST_REMOVE(proxy, next);
@@ -407,9 +470,9 @@ void vfio_user_disconnect(VFIOProxy *proxy)
         iothread_destroy(vfio_user_iothread);
         vfio_user_iothread = NULL;
     }
-
-    qio_channel_close(proxy->ioc, NULL);
     g_free(proxy);
+
+    qemu_mutex_lock_iothread();
 }
 
 
@@ -747,6 +810,24 @@ int vfio_user_get_irq_info(VFIODevice *vbasedev, struct vfio_irq_info *info)
     return 0;
 }
 
+static int irq_howmany(int *fdp, int cur, int max)
+{
+    int n = 0;
+
+    if (fdp[cur] != -1) {
+         do {
+            n++;
+        } while (n < max && fdp[cur + n] != -1 && n < max_send_fds);
+    } else {
+        do {
+            n++;
+        } while (n < max && fdp[cur + n] == -1 && n < max_send_fds);
+    }
+
+    return n;
+}
+ 
+
 int vfio_user_set_irqs(VFIODevice *vbasedev, struct vfio_irq_set *irq)
 {
     struct vfio_user_irq_set *msgp;
@@ -795,7 +876,8 @@ int vfio_user_set_irqs(VFIODevice *vbasedev, struct vfio_irq_set *irq)
     for (sent_fds = 0; nfds > sent_fds; sent_fds += send_fds) {
         VFIOUserFDs loop_fds;
 
-        send_fds = MIN(nfds - sent_fds, max_send_fds);
+	/* must send all valid FDs or all invalid FDs in single msg */
+        send_fds = irq_howmany((int *)irq->data, sent_fds, nfds - sent_fds);
 
         vfio_user_request_msg(&msgp->hdr, VFIO_USER_DEVICE_SET_IRQS, sizeof(*msgp), 0);
         msgp->argsz = irq->argsz;
@@ -919,7 +1001,7 @@ int vfio_user_dirty_bitmap(VFIOProxy *proxy,
     }
 
     vfio_user_request_msg(&msgp->msg.hdr, VFIO_USER_DIRTY_PAGES, msize, 0);
-    msgp->msg.argsz = cmd->argsz;
+    msgp->msg.argsz = msize - sizeof(msgp->msg.hdr);
     msgp->msg.flags = cmd->flags;
 
     vfio_user_send_recv(proxy, &msgp->msg.hdr, NULL, rsize);
