@@ -213,10 +213,7 @@ struct vfio_user_dirty_pages {
  */
 struct vfio_user_dma_unmap_dirty {
     vfio_user_hdr_t hdr;
-    uint32_t argsz;
-    uint32_t flags;
-    uint64_t iova;
-    uint64_t size;
+    struct vfio_user_map map;
     struct vfio_user_bitmap bitmap;
 };
 

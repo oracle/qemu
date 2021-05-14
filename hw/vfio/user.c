@@ -1025,24 +1025,25 @@ int vfio_user_dma_unmap_dirty(VFIOProxy *proxy,
     struct vfio_user_dma_unmap_dirty *msgp;
     int size;
 
-    size = unmap->argsz + bitmap->size;
+    size = MAX(sizeof(*msgp), bitmap->size);
     msgp = g_malloc0(size);
 
-    vfio_user_request_msg(&msgp->hdr, VFIO_USER_DMA_UNMAP_DIRTY, unmap->size, 0);
-    msgp->argsz = unmap->argsz;
-    msgp->flags = unmap->size;
-    msgp->iova = unmap->iova;
-    msgp->size = unmap->size;
+    vfio_user_request_msg(&msgp->hdr, VFIO_USER_DMA_UNMAP, sizeof(*msgp), 0);
+    msgp->map.address = unmap->iova;
+    msgp->map.size = unmap->size;
+    msgp->map.offset = 0;
+    msgp->map.protection = 0;
+    msgp->map.flags = unmap->flags;
     msgp->bitmap.pgsize = bitmap->pgsize;
     msgp->bitmap.size = bitmap->size;
-    
-    vfio_user_send_recv(proxy, &msgp->hdr, NULL, size);
+
+    vfio_user_send_recv(proxy, &msgp->hdr, NULL, sizeof(msgp->hdr) + bitmap->size);
     if (msgp->hdr.flags & VFIO_USER_ERROR) {
         g_free(msgp);
         return -msgp->hdr.error_reply;
     }
 
-    memcpy(bitmap->data, &msgp->bitmap.data, bitmap->size);
+    memcpy(bitmap->data, &msgp->map, bitmap->size);
 
     g_free(msgp);
     return 0;
