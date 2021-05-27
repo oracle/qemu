@@ -24,21 +24,23 @@ typedef struct vfio_user_hdr {
 } vfio_user_hdr_t;
 
 /* commands */
-#define VFIO_USER_VERSION			1
-#define VFIO_USER_DMA_MAP			2
-#define VFIO_USER_DMA_UNMAP			3
-#define VFIO_USER_DEVICE_GET_INFO		4
-#define VFIO_USER_DEVICE_GET_REGION_INFO	5
-#define VFIO_USER_DEVICE_GET_IRQ_INFO		6
-#define VFIO_USER_DEVICE_SET_IRQS		7
-#define VFIO_USER_REGION_READ			8
-#define VFIO_USER_REGION_WRITE			9
-#define VFIO_USER_DMA_READ			10
-#define VFIO_USER_DMA_WRITE			11
-#define VFIO_USER_VM_INTERRUPT			12
-#define VFIO_USER_DEVICE_RESET			13
-#define VFIO_USER_DIRTY_PAGES			14
-#define VFIO_USER_DMA_UNMAP_DIRTY		15
+enum vfio_user_command {
+    VFIO_USER_VERSION                   = 1,
+    VFIO_USER_DMA_MAP                   = 2,
+    VFIO_USER_DMA_UNMAP                 = 3,
+    VFIO_USER_DEVICE_GET_INFO           = 4,
+    VFIO_USER_DEVICE_GET_REGION_INFO    = 5,
+    VFIO_USER_DEVICE_GET_REGION_IO_FDS  = 6,
+    VFIO_USER_DEVICE_GET_IRQ_INFO       = 7,
+    VFIO_USER_DEVICE_SET_IRQS           = 8,
+    VFIO_USER_REGION_READ               = 9,
+    VFIO_USER_REGION_WRITE              = 10,
+    VFIO_USER_DMA_READ                  = 11,
+    VFIO_USER_DMA_WRITE                 = 12,
+    VFIO_USER_DEVICE_RESET              = 13,
+    VFIO_USER_DIRTY_PAGES               = 14,
+    VFIO_USER_MAX,
+};
 
 /* flags */
 #define VFIO_USER_REQUEST	0x0
