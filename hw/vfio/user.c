@@ -660,82 +660,77 @@ err:
     return -1;
 }
 
-int vfio_user_dma_map(VFIOProxy *proxy, struct vfio_user_map *map, VFIOUserFDs *fds,
-                      uint64_t nelem)
+int vfio_user_dma_map(VFIOProxy *proxy, struct vfio_iommu_type1_dma_map *map,
+                      VFIOUserFDs *fds)
 {
-    struct vfio_user_dma_map *msgp;
-    int ret, size, sent_elem, send_elem;
-
-    /*
-     * Handle simple case
-     */
-    if (fds == NULL) {
-        size = sizeof(*msgp) + (nelem * sizeof(struct vfio_user_map));
-
-        msgp = g_malloc0(size);
-        vfio_user_request_msg(&msgp->hdr, VFIO_USER_DMA_MAP, size, 0);
-        memcpy(&msgp->table, map, nelem * sizeof(*map));
-
-        vfio_user_send_recv(proxy, &msgp->hdr, NULL, 0);
-        ret = (msgp->hdr.flags & VFIO_USER_ERROR) ? -msgp->hdr.error_reply : 0;
-
-        g_free(msgp);
-        return ret;
-    }
-
-    if (fds->send_fds != nelem) {
-        error_printf("vfio_user_dma_map mismatch of FDs and table elements\n");
-        return -EINVAL;
-    }
-    if (fds->recv_fds != 0) {
-        error_printf("vfio_user_dma_map can't receive FDs\n");
-        return -EINVAL;
-    }
-
-    /*
-     * Send in chunks if over max_send_fds
-     */
-    for (sent_elem = 0; nelem > sent_elem; sent_elem += send_elem) {
-        VFIOUserFDs loop_fds;
-
-        send_elem = MIN(nelem - sent_elem, max_send_fds);
-        size = sizeof(*msgp) + (send_elem * sizeof(struct vfio_user_map));
-
-        msgp = g_malloc0(size);
-        vfio_user_request_msg(&msgp->hdr, VFIO_USER_DMA_MAP, size, 0);
-        memcpy(&msgp->table, map + sent_elem, send_elem * sizeof(*map));
-
-        loop_fds.send_fds = send_elem;
-        loop_fds.recv_fds = 0;
-        loop_fds.fds = fds->fds + sent_elem;
-
-        vfio_user_send_recv(proxy, &msgp->hdr, &loop_fds, 0);
-        ret = (msgp->hdr.flags & VFIO_USER_ERROR) ? -msgp->hdr.error_reply : 0;
-
-        g_free(msgp);
-        if (ret < 0 ) {
-            return ret;
-        }
-    }
-    return 0;
-}
-
-int vfio_user_dma_unmap(VFIOProxy *proxy, struct vfio_user_map *map,
-                               uint64_t nelem)
-{
-    struct vfio_user_dma_map *msgp;
-    int size = sizeof(*msgp) + (nelem * sizeof(struct vfio_user_map));
+    struct vfio_user_dma_map msg;
     int ret;
 
-    msgp = g_malloc0(size);
-    vfio_user_request_msg(&msgp->hdr, VFIO_USER_DMA_UNMAP, size, 0);
-    memcpy(&msgp->table, map, nelem * sizeof(*map));
+    if (fds == NULL && (map->flags & VFIO_DMA_MAP_FLAG_MAPPABLE)) {
+        error_printf("vfio_user_dma_map mismatch of FDs and flags\n");
+        return -EINVAL;
+    }
 
-    vfio_user_send_recv(proxy, &msgp->hdr, NULL, 0);
-    ret = (msgp->hdr.flags & VFIO_USER_ERROR) ? -msgp->hdr.error_reply : 0;
+    vfio_user_request_msg(&msg.hdr, VFIO_USER_DMA_MAP, sizeof(msg), 0);
+    msg.argsz = map->argsz;
+    msg.flags = map->flags;
+    msg.offset = map->vaddr;
+    msg.iova = map->iova;
+    msg.size = map->size;
+
+    vfio_user_send_recv(proxy, &msg.hdr, fds, 0);
+    ret = (msg.hdr.flags & VFIO_USER_ERROR) ? -msg.hdr.error_reply : 0;
+    return ret;
+}
+
+int vfio_user_dma_unmap(VFIOProxy *proxy,
+                        struct vfio_iommu_type1_dma_unmap *unmap,
+                        struct vfio_bitmap *bitmap)
+{
+    struct {
+        struct vfio_user_dma_unmap msg;
+        struct vfio_user_bitmap bitmap;
+    } *msgp;
+    int msize, rsize;
+
+    if (bitmap == NULL && (unmap->flags & VFIO_DMA_UNMAP_FLAG_GET_DIRTY_BITMAP)) {
+        error_printf("vfio_user_dma_unmap mismatched flags and bitmap\n");
+        return -EINVAL;
+    }
+
+    /*
+     * If a dirty bitmap is returned, allocate extra space for it
+     * otherwise, just send the unmap request
+     */
+    if (bitmap != NULL) {
+        msize = sizeof(*msgp);
+        rsize = msize + bitmap->size;
+        msgp = g_malloc0(rsize);
+        msgp->bitmap.pgsize = bitmap->pgsize;
+        msgp->bitmap.size = bitmap->size;
+    } else {
+        msize = rsize = sizeof(struct vfio_user_dma_unmap);
+        msgp = g_malloc0(rsize);
+    }
+ 
+    vfio_user_request_msg(&msgp->msg.hdr, VFIO_USER_DMA_UNMAP, msize, 0);
+    msgp->msg.argsz = unmap->argsz;
+    msgp->msg.flags = unmap->size;
+    msgp->msg.iova = unmap->iova;
+    msgp->msg.size = unmap->size;
+
+    vfio_user_send_recv(proxy, &msgp->msg.hdr, NULL, rsize);
+    if (msgp->msg.hdr.flags & VFIO_USER_ERROR) {
+        g_free(msgp);
+        return -msgp->msg.hdr.error_reply;
+    }
+
+    if (bitmap != NULL) {
+        memcpy(bitmap->data, &msgp->bitmap.data, bitmap->size);
+    }
 
     g_free(msgp);
-    return ret;
+    return 0;
 }
 
 int vfio_user_get_info(VFIODevice *vbasedev)
@@ -1018,32 +1013,3 @@ int vfio_user_dirty_bitmap(VFIOProxy *proxy,
     return 0;
 }
 
-int vfio_user_dma_unmap_dirty(VFIOProxy *proxy,
-                              struct vfio_iommu_type1_dma_unmap *unmap,
-                              struct vfio_bitmap *bitmap)
-{
-    struct vfio_user_dma_unmap_dirty *msgp;
-    int size;
-
-    size = unmap->argsz + bitmap->size;
-    msgp = g_malloc0(size);
-
-    vfio_user_request_msg(&msgp->hdr, VFIO_USER_DMA_UNMAP_DIRTY, unmap->size, 0);
-    msgp->argsz = unmap->argsz;
-    msgp->flags = unmap->size;
-    msgp->iova = unmap->iova;
-    msgp->size = unmap->size;
-    msgp->bitmap.pgsize = bitmap->pgsize;
-    msgp->bitmap.size = bitmap->size;
-    
-    vfio_user_send_recv(proxy, &msgp->hdr, NULL, size);
-    if (msgp->hdr.flags & VFIO_USER_ERROR) {
-        g_free(msgp);
-        return -msgp->hdr.error_reply;
-    }
-
-    memcpy(bitmap->data, &msgp->bitmap.data, bitmap->size);
-
-    g_free(msgp);
-    return 0;
-}

@@ -438,7 +438,7 @@ static int vfio_dma_unmap_bitmap(VFIOContainer *container,
     }
 
     if (container->proxy != NULL) {
-        ret = vfio_user_dma_unmap_dirty(container->proxy, unmap, bitmap);
+        ret = vfio_user_dma_unmap(container->proxy, unmap, bitmap);
     } else {
         ret = ioctl(container->fd, VFIO_IOMMU_UNMAP_DMA, unmap);
     }
@@ -475,15 +475,7 @@ static int vfio_dma_unmap(VFIOContainer *container,
     }
 
     if (container->proxy != NULL) {
-        struct vfio_user_map unmap = {
-            .address = iova,
-            .size = size,
-            .offset = 0,
-            .protection = 0,
-            .flags = 0,
-        };
-
-        return vfio_user_dma_unmap(container->proxy, &unmap, 1);
+        return vfio_user_dma_unmap(container->proxy, &unmap, NULL);
     }
 
     while (ioctl(container->fd, VFIO_IOMMU_UNMAP_DMA, &unmap)) {
@@ -523,36 +515,27 @@ static int vfio_dma_map(VFIOContainer *container, MemoryRegion *mr, hwaddr iova,
         .size = size,
     };
 
+    if (!readonly) {
+        map.flags |= VFIO_DMA_MAP_FLAG_WRITE;
+    }
+
     if (container->proxy != NULL) {
-        struct vfio_user_map map = {
-            .address = iova,
-            .size = size,
-            .offset = 0,
-            .protection = PROT_READ,
-            .flags = 0,
-        };
         VFIOUserFDs fds;
         int fd;
 
-        if (!readonly) {
-            map.protection |= PROT_WRITE;
-        }
         fd = memory_region_get_fd(mr);
         if (fd != -1 && !(container->proxy->flags & VFIO_PROXY_SECURE)) {
             fds.send_fds = 1;
             fds.recv_fds = 0;
             fds.fds = &fd;
-            map.offset = qemu_ram_block_host_offset(mr->ram_block, vaddr);
-            map.flags = VFIO_USER_MAPPABLE;
+            map.vaddr = qemu_ram_block_host_offset(mr->ram_block, vaddr);
+            map.flags |= VFIO_DMA_MAP_FLAG_MAPPABLE;
 
-            return vfio_user_dma_map(container->proxy, &map, &fds, 1);
+            return vfio_user_dma_map(container->proxy, &map, &fds);
         } else {
-            return vfio_user_dma_map(container->proxy, &map, NULL, 1);
+            map.vaddr = 0;
+            return vfio_user_dma_map(container->proxy, &map, NULL);
         }
-    }
-
-    if (!readonly) {
-        map.flags |= VFIO_DMA_MAP_FLAG_WRITE;
     }
 
     /*

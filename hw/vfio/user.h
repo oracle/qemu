@@ -81,26 +81,42 @@ struct vfio_user_version {
 
 /*
  * VFIO_USER_DMA_MAP
- * VFIO_USER_DMA_UNMAP
+ * imported from struct vfio_iommu_type1_dma_map
  */
-struct vfio_user_map {
-    uint64_t address;
-    uint64_t size;
-    uint64_t offset;
-    uint32_t protection;
-    uint32_t flags;
-};
-
 struct vfio_user_dma_map {
     vfio_user_hdr_t hdr;
-    struct vfio_user_map table[];
+    uint32_t argsz;
+    uint32_t flags;
+    uint64_t offset;	/* FD offset */
+    uint64_t iova;
+    uint64_t size;
 };
 
-#define VFIO_USER_MAPPABLE	1
+#define VFIO_DMA_MAP_FLAG_MAPPABLE	(1 << 2)
+
+
+/*imported from struct vfio_bitmap */
+struct vfio_user_bitmap {
+    uint64_t pgsize;
+    uint64_t size;
+    char data[];
+};
+
+/*
+ * VFIO_USER_DMA_UNMAP
+ * imported from struct vfio_iommu_type1_dma_unmap
+ */
+struct vfio_user_dma_unmap {
+    vfio_user_hdr_t hdr;
+    uint32_t argsz;
+    uint32_t flags;
+    uint64_t iova;
+    uint64_t size;
+};
 
 /*
  * VFIO_USER_DEVICE_GET_INFO
- * imported from struct_device_info
+ * imported from struct vfio_device_info
  */
 struct vfio_user_device_info {
     vfio_user_hdr_t hdr;
@@ -113,7 +129,7 @@ struct vfio_user_device_info {
 
 /*
  * VFIO_USER_DEVICE_GET_REGION_INFO
- * imported from struct_vfio_region_info
+ * imported from struct vfio_region_info
  */
 struct vfio_user_region_info {
     vfio_user_hdr_t hdr;
@@ -183,15 +199,6 @@ struct vfio_user_vm_intr {
     uint32_t subindex;
 };
 
-/*
- * VFIO_USER_DIRTY_PAGES
- * imported from struct vfio_bitmap
- */
-struct vfio_user_bitmap {
-    uint64_t pgsize;
-    uint64_t size;
-    char data[];
-};
 
 /* imported from struct vfio_iommu_type1_dirty_bitmap_get */
 struct vfio_user_bitmap_range {
@@ -200,24 +207,14 @@ struct vfio_user_bitmap_range {
     struct vfio_user_bitmap bitmap;
 };
 
-/* imported from struct vfio_iommu_type1_dirty_bitmap */
+/*
+ * VFIO_USER_DIRTY_PAGES
+ * imported from struct vfio_iommu_type1_dirty_bitmap
+ */
 struct vfio_user_dirty_pages {
     vfio_user_hdr_t hdr;
     uint32_t argsz;
     uint32_t flags;
-};
-
-/*
- * VFIO_USER_DMA_UNMAP_DIRTY
- * imported from struct vfio_iommu_type1_dma_unmap
- */
-struct vfio_user_dma_unmap_dirty {
-    vfio_user_hdr_t hdr;
-    uint32_t argsz;
-    uint32_t flags;
-    uint64_t iova;
-    uint64_t size;
-    struct vfio_user_bitmap bitmap;
 };
 
 
@@ -276,9 +273,10 @@ void vfio_user_recv(void *opaque);
 void vfio_user_send_reply(VFIOProxy *proxy, char *buf, int ret);
 
 int vfio_user_validate_version(VFIODevice *vbasedev, Error **errp);
-int vfio_user_dma_map(VFIOProxy *proxy, struct vfio_user_map *map, VFIOUserFDs *fds,
-                      uint64_t nelem);
-int vfio_user_dma_unmap(VFIOProxy *proxy, struct vfio_user_map *map, uint64_t nelem);
+int vfio_user_dma_map(VFIOProxy *proxy, struct vfio_iommu_type1_dma_map *map,
+                      VFIOUserFDs *fds);
+int vfio_user_dma_unmap(VFIOProxy *proxy, struct vfio_iommu_type1_dma_unmap *unmap,
+                        struct vfio_bitmap *bitmap);
 int vfio_user_get_info(VFIODevice *vbasedev);
 int vfio_user_get_region_info(VFIODevice *vbasedev, int index, struct vfio_region_info *info,
                               VFIOUserFDs *fds);
@@ -293,6 +291,3 @@ void vfio_user_reset(VFIODevice *vbasedev);
 int vfio_user_dirty_bitmap(VFIOProxy *proxy,
                            struct vfio_iommu_type1_dirty_bitmap *bitmap,
                            struct vfio_iommu_type1_dirty_bitmap_get *range);
-int vfio_user_dma_unmap_dirty(VFIOProxy *proxy,
-                              struct vfio_iommu_type1_dma_unmap *unmap,
-                              struct vfio_bitmap *bitmap);
