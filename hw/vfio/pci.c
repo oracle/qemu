@@ -3437,24 +3437,6 @@ static int vfio_user_dma_write(VFIOPCIDevice *vdev, struct vfio_user_dma_rw *msg
     return 0;
 }
 
-static int vfio_user_vm_intr(VFIOPCIDevice *vdev, struct vfio_user_vm_intr *msg)
-{
-
-    /* TODO */
-    switch (msg->index) {
-    case VFIO_PCI_INTX_IRQ_INDEX:
-    case VFIO_PCI_MSI_IRQ_INDEX:
-    case VFIO_PCI_MSIX_IRQ_INDEX:
-    default:
-        break;
-    }
-
-    if ((msg->hdr.flags & VFIO_USER_NO_REPLY) == 0) {
-        vfio_user_send_reply(vdev->vbasedev.proxy, (char *)msg, 0);
-    }
-    return 0;
-}
-
 static int vfio_user_pci_process_req(void *opaque, char *buf, VFIOUserFDs *fds)
 {
     VFIOPCIDevice *vdev = opaque;
@@ -3470,9 +3452,6 @@ static int vfio_user_pci_process_req(void *opaque, char *buf, VFIOUserFDs *fds)
         break;
     case VFIO_USER_DMA_WRITE:
         ret = vfio_user_dma_write(vdev, (struct vfio_user_dma_rw *)hdr);
-        break;
-    case VFIO_USER_VM_INTERRUPT:
-        ret = vfio_user_vm_intr(vdev, (struct vfio_user_vm_intr *)hdr);
         break;
     default:
         error_printf("vfio_user_process_req unknown cmd %d\n", hdr->command);

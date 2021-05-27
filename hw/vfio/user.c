@@ -715,7 +715,7 @@ int vfio_user_dma_unmap(VFIOProxy *proxy,
  
     vfio_user_request_msg(&msgp->msg.hdr, VFIO_USER_DMA_UNMAP, msize, 0);
     msgp->msg.argsz = unmap->argsz;
-    msgp->msg.flags = unmap->size;
+    msgp->msg.flags = unmap->flags;
     msgp->msg.iova = unmap->iova;
     msgp->msg.size = unmap->size;
 
