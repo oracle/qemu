@@ -68,8 +68,8 @@ struct vfio_user_version {
 #define VFIO_USER_CAP		"capabilities"
 
 /* "capabilities" members */
-#define VFIO_USER_CAP_MAX_FDS	"max_fds"
-#define VFIO_USER_CAP_MAX_MSG	"max_msg_size"
+#define VFIO_USER_CAP_MAX_FDS	"max_msg_fds"
+#define VFIO_USER_CAP_MAX_XFER	"max_data_xfer_size"
 #define VFIO_USER_CAP_MIGR	"migration"
 
 /* "migration" members */
@@ -78,8 +78,9 @@ struct vfio_user_version {
 #define	VFIO_USER_DEF_MAX_FDS	8
 #define	VFIO_USER_MAX_MAX_FDS	16
 
-#define	VFIO_USER_DEF_MAX_MSG	4096
-#define	VFIO_USER_MAX_MAX_MSG	(64 * 1024)
+#define	VFIO_USER_DEF_MAX_XFER	(1024 * 1024)
+#define	VFIO_USER_MAX_MAX_XFER	(64 * 1024 * 1024)
+
 
 /*
  * VFIO_USER_DMA_MAP
@@ -93,9 +94,6 @@ struct vfio_user_dma_map {
     uint64_t iova;
     uint64_t size;
 };
-
-#define VFIO_DMA_MAP_FLAG_MAPPABLE	(1 << 2)
-
 
 /*imported from struct vfio_bitmap */
 struct vfio_user_bitmap {
@@ -168,7 +166,6 @@ struct vfio_user_irq_set {
     uint32_t count;
 };
 
-
 /*
  * VFIO_USER_REGION_READ
  * VFIO_USER_REGION_WRITE
@@ -191,16 +188,6 @@ struct vfio_user_dma_rw {
     uint32_t count;
     char data[];
 };
-
-/*
- * VFIO_USER_VM_INTERRUPT
- */
-struct vfio_user_vm_intr {
-    vfio_user_hdr_t hdr;
-    uint32_t index;
-    uint32_t subindex;
-};
-
 
 /* imported from struct vfio_iommu_type1_dirty_bitmap_get */
 struct vfio_user_bitmap_range {
@@ -240,6 +227,7 @@ enum proxy_state {
     CONNECTED = 1,
     RECV_ERROR = 2,
     CLOSING = 3,
+    CLOSED = 4,
 };
 
 typedef struct VFIOProxy {
@@ -259,7 +247,6 @@ typedef struct VFIOProxy {
     QTAILQ_HEAD(, VFIOUserReply) free;
     QTAILQ_HEAD(, VFIOUserReply) pending;
     enum proxy_state state;
-    int close_wait;
 } VFIOProxy;
 
 #define VFIO_PROXY_CLIENT	0x1
@@ -271,6 +258,8 @@ void vfio_user_set_reqhandler(VFIODevice *vbasdev,
                               int (*handler)(void *opaque, char *buf, VFIOUserFDs *fds),
                               void *reqarg);
 void vfio_user_disconnect(VFIOProxy *proxy);
+
+uint64_t vfio_user_max_xfer(void);
 void vfio_user_recv(void *opaque);
 void vfio_user_send_reply(VFIOProxy *proxy, char *buf, int ret);
 
@@ -289,7 +278,6 @@ int vfio_user_region_read(VFIODevice *vbasedev, uint32_t index, uint64_t offset,
 int vfio_user_region_write(VFIODevice *vbasedev, uint32_t index, uint64_t offset,
                            uint32_t count, void *data);
 void vfio_user_reset(VFIODevice *vbasedev);
-
 int vfio_user_dirty_bitmap(VFIOProxy *proxy,
                            struct vfio_iommu_type1_dirty_bitmap *bitmap,
                            struct vfio_iommu_type1_dirty_bitmap_get *range);

@@ -54,8 +54,13 @@ static void vfio_user_shutdown(VFIOProxy *proxy);
 
 
 static uint64_t max_send_fds = VFIO_USER_DEF_MAX_FDS;
-static uint64_t max_msg_size = VFIO_USER_DEF_MAX_MSG;
+static uint64_t max_xfer_size = VFIO_USER_DEF_MAX_XFER;
 
+
+uint64_t vfio_user_max_xfer(void)
+{
+    return max_xfer_size;
+}
 
 static void vfio_user_request_msg(vfio_user_hdr_t *hdr, uint16_t cmd, uint32_t size,
                                   uint32_t flags)
@@ -114,9 +119,7 @@ void vfio_user_recv(void *opaque)
     if (ret <= 0) {
         /* read error or other side closed connection */
         error_setg_errno(&local_err, errno, "vfio_user_recv read error");
-        vfio_user_shutdown(proxy);
-        proxy->state = RECV_ERROR;
-        goto err;
+        goto fatal;
     }
     if (ret < sizeof(msg)) {
         error_setg(&local_err, "vfio_user_recv short read of header");
@@ -170,11 +173,15 @@ void vfio_user_recv(void *opaque)
     if (isreply) {
         if (msg.size > reply->rsize) {
             error_setg(&local_err, "vfio_user_recv reply larger than recv buffer");
-            goto err;
+            goto fatal;
         }
         *reply->msg = msg;
         data = (char *)reply->msg + sizeof(msg);
     } else {
+        if (msg.size > max_xfer_size + sizeof(struct vfio_user_dma_rw)) {
+            error_setg(&local_err, "vfio_user_recv request larger than max");
+            goto fatal;
+        }
         buf = g_malloc0(msg.size);
         memcpy(buf, &msg, sizeof(msg));
         data = buf + sizeof(msg);
@@ -183,7 +190,7 @@ void vfio_user_recv(void *opaque)
     if (msgleft != 0) {
         ret = qio_channel_read(proxy->ioc, data, msgleft, &local_err);
         if (ret < 0) {
-            goto err;
+            goto fatal;
         }
         if (ret != msgleft) {
             error_setg(&local_err, "vfio_user_recv short read of msg body");
@@ -201,7 +208,11 @@ void vfio_user_recv(void *opaque)
         qemu_cond_signal(&reply->cv);
     } else {
         qemu_mutex_lock_iothread();
-        /* make sure proxy wasn't closed while we waited */
+        /*
+         * make sure proxy wasn't closed while we waited
+         * checking without holding the proxy lock is safe
+         * since state is only set to CLOSING when iolock is held
+         */
         if (proxy->state != CLOSING) {
             ret = proxy->request(proxy->reqarg, buf, &reqfds);
             if (ret < 0) {
@@ -216,6 +227,10 @@ void vfio_user_recv(void *opaque)
         g_free(fdp);
     }
     return;
+
+fatal:
+    vfio_user_shutdown(proxy);
+    proxy->state = RECV_ERROR;
 
 err:
     qemu_mutex_unlock(&proxy->lock);
@@ -287,6 +302,7 @@ static void vfio_user_send(VFIOProxy *proxy, vfio_user_hdr_t *msg, VFIOUserFDs *
 {
     /* Use the same locking protocol as vfio_user_send_recv() below */
     bool iolock = qemu_mutex_iothread_locked();
+
     if (iolock) {
         qemu_mutex_unlock_iothread();
     }
@@ -405,7 +421,9 @@ static void vfio_user_cb(void *opaque)
 {
     VFIOProxy *proxy = opaque;
 
-    proxy->close_wait = 0;
+    qemu_mutex_lock(&proxy->lock);
+    proxy->state = CLOSED;
+    qemu_mutex_unlock(&proxy->lock);
     qemu_cond_signal(&proxy->close_cv);
 }
 
@@ -450,20 +468,19 @@ void vfio_user_disconnect(VFIOProxy *proxy)
      * handler to run after the proxy fd handlers were
      * deleted above.
      */
-    proxy->close_wait = 1;
     aio_bh_schedule_oneshot(iothread_get_aio_context(vfio_user_iothread),
                             vfio_user_cb, proxy);
 
     /* drop locks so the iothread can make progress */
     qemu_mutex_unlock_iothread();
-    if (proxy->close_wait != 0) {
-        qemu_cond_wait(&proxy->close_cv, &proxy->lock);
-    }
+    qemu_cond_wait(&proxy->close_cv, &proxy->lock);
 
-    /* we now hold the only ref to proxy */
+    /* we now hold the only reference to proxy */
     qemu_mutex_unlock(&proxy->lock);
     qemu_cond_destroy(&proxy->close_cv);
     qemu_mutex_destroy(&proxy->lock);
+
+    qemu_mutex_lock_iothread();
 
     QLIST_REMOVE(proxy, next);
     if (QLIST_EMPTY(&vfio_user_sockets)) {
@@ -471,8 +488,6 @@ void vfio_user_disconnect(VFIOProxy *proxy)
         vfio_user_iothread = NULL;
     }
     g_free(proxy);
-
-    qemu_mutex_lock_iothread();
 }
 
 
@@ -532,13 +547,13 @@ static int check_max_fds(QObject *qobj, Error **errp)
     return 0;
 }
 
-static int check_max_msg(QObject *qobj, Error **errp)
+static int check_max_xfer(QObject *qobj, Error **errp)
 {
     QNum *qn = qobject_to(QNum, qobj);
 
-    if (qn == NULL || !qnum_get_try_uint(qn, &max_msg_size) ||
-        max_msg_size > VFIO_USER_MAX_MAX_MSG) {
-        error_setg(errp, "malformed %s", VFIO_USER_CAP_MAX_MSG);
+    if (qn == NULL || !qnum_get_try_uint(qn, &max_xfer_size) ||
+        max_xfer_size > VFIO_USER_MAX_MAX_XFER) {
+        error_setg(errp, "malformed %s", VFIO_USER_CAP_MAX_XFER);
         return -1;
     }
     return 0;
@@ -557,7 +572,7 @@ static int check_migr(QObject *qobj, Error **errp)
 
 static struct cap_entry caps_cap[] = {
     { VFIO_USER_CAP_MAX_FDS, check_max_fds },
-    { VFIO_USER_CAP_MAX_MSG, check_max_msg },
+    { VFIO_USER_CAP_MAX_XFER, check_max_xfer },
     { VFIO_USER_CAP_MIGR, check_migr },
     { NULL }
 };
@@ -612,7 +627,7 @@ static GString *caps_json(void)
 
     qdict_put_obj(capdict, VFIO_USER_CAP_MIGR, QOBJECT(migdict));
     qdict_put_int(capdict, VFIO_USER_CAP_MAX_FDS, VFIO_USER_MAX_MAX_FDS);
-    qdict_put_int(capdict, VFIO_USER_CAP_MAX_MSG, VFIO_USER_DEF_MAX_MSG);
+    qdict_put_int(capdict, VFIO_USER_CAP_MAX_XFER, VFIO_USER_DEF_MAX_XFER);
 
     qdict_put_obj(dict, VFIO_USER_CAP, QOBJECT(capdict));
 
@@ -665,11 +680,6 @@ int vfio_user_dma_map(VFIOProxy *proxy, struct vfio_iommu_type1_dma_map *map,
 {
     struct vfio_user_dma_map msg;
     int ret;
-
-    if (fds == NULL && (map->flags & VFIO_DMA_MAP_FLAG_MAPPABLE)) {
-        error_printf("vfio_user_dma_map mismatch of FDs and flags\n");
-        return -EINVAL;
-    }
 
     vfio_user_request_msg(&msg.hdr, VFIO_USER_DMA_MAP, sizeof(msg), 0);
     msg.argsz = map->argsz;

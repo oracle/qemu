@@ -529,7 +529,6 @@ static int vfio_dma_map(VFIOContainer *container, MemoryRegion *mr, hwaddr iova,
             fds.recv_fds = 0;
             fds.fds = &fd;
             map.vaddr = qemu_ram_block_host_offset(mr->ram_block, vaddr);
-            map.flags |= VFIO_DMA_MAP_FLAG_MAPPABLE;
 
             return vfio_user_dma_map(container->proxy, &map, &fds);
         } else {
@@ -2039,7 +2038,7 @@ void vfio_connect_proxy(VFIOProxy *proxy, VFIOGroup *group, AddressSpace *as)
     container->pgsizes = TARGET_PAGE_SIZE;
 
     container->dirty_pages_supported = true;
-    container->max_dirty_bitmap_size = VFIO_USER_DEF_MAX_MSG;
+    container->max_dirty_bitmap_size = VFIO_USER_DEF_MAX_XFER;
     container->dirty_pgsizes = TARGET_PAGE_SIZE;
 
     QLIST_INIT(&container->group_list);

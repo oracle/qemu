@@ -3413,6 +3413,9 @@ static int vfio_user_dma_read(VFIOPCIDevice *vdev, struct vfio_user_dma_rw *msg)
     if (msg->hdr.flags & VFIO_USER_NO_REPLY) {
         return -EINVAL;
     }
+    if (msg->count > vfio_user_max_xfer()) {
+        return -E2BIG;
+    }
 
     buf = g_malloc0(size);
     memcpy(buf, msg, sizeof(*msg));
@@ -3428,6 +3431,10 @@ static int vfio_user_dma_write(VFIOPCIDevice *vdev, struct vfio_user_dma_rw *msg
 {
     PCIDevice *pdev = &vdev->pdev;
     char *buf = (char *)msg + sizeof(*msg);
+
+    if (msg->count > vfio_user_max_xfer()) {
+        return -E2BIG;
+    }
 
     pci_dma_write(pdev, msg->offset, buf, msg->count);
 
