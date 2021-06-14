@@ -3350,6 +3350,7 @@ static void vfio_user_pci_realize(PCIDevice *pdev, Error **errp)
     VFIOPCIDevice *vdev = VFIO_PCI_BASE(pdev);
     VFIODevice *vbasedev = &vdev->vbasedev;
     VFIOProxy *proxy;
+    VFIOGroup *group = NULL;
     Error *err = NULL;
 
     if (!udev->sock_name) {
@@ -3377,6 +3378,19 @@ static void vfio_user_pci_realize(PCIDevice *pdev, Error **errp)
     vbasedev->no_mmap = false;
     vbasedev->ops = &vfio_user_pci_ops;
 
+    /*
+     * each device gets its own group and container
+     * make them unrelated to any host IOMMU groupings
+     */
+    group = g_malloc0(sizeof(*group));
+    group->fd = -1;
+    group->groupid = -1;
+    QLIST_INIT(&group->device_list);
+    QLIST_INSERT_HEAD(&group->device_list, vbasedev, next);
+    vbasedev->group = group;
+
+    vfio_connect_proxy(proxy, group, pci_device_iommu_address_space(pdev));
+
     return;
 
  error:
@@ -3387,6 +3401,11 @@ static void vfio_user_instance_finalize(Object *obj)
 {
     VFIOPCIDevice *vdev = VFIO_PCI_BASE(obj);
     VFIODevice *vbasedev = &vdev->vbasedev;
+    VFIOGroup *group = vbasedev->group;
+
+    vfio_disconnect_proxy(group);
+    g_free(group);
+    vbasedev->group = NULL;
 
     vfio_put_device(vdev);
 
