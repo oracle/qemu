@@ -3379,6 +3379,10 @@ static void vfio_user_pci_realize(PCIDevice *pdev, Error **errp)
     }
     vbasedev->proxy = proxy;
 
+    if (udev->secure) {
+        proxy->flags |= VFIO_PROXY_SECURE;
+    }
+
     vfio_user_validate_version(vbasedev, &err);
     if (err != NULL) {
         error_propagate(errp, err);

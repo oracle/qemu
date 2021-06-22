@@ -453,6 +453,10 @@ static int vfio_dma_unmap(VFIOContainer *container,
         return vfio_dma_unmap_bitmap(container, iova, size, iotlb);
     }
 
+    if (container->proxy != NULL) {
+        return vfio_user_dma_unmap(container->proxy, &unmap, NULL);
+    }
+
     while (ioctl(container->fd, VFIO_IOMMU_UNMAP_DMA, &unmap)) {
         /*
          * The type1 backend has an off-by-one bug in the kernel (71a7d3d78e3c
@@ -479,7 +483,7 @@ static int vfio_dma_unmap(VFIOContainer *container,
     return 0;
 }
 
-static int vfio_dma_map(VFIOContainer *container, hwaddr iova,
+static int vfio_dma_map(VFIOContainer *container, MemoryRegion *mr, hwaddr iova,
                         ram_addr_t size, void *vaddr, bool readonly)
 {
     struct vfio_iommu_type1_dma_map map = {
@@ -492,6 +496,24 @@ static int vfio_dma_map(VFIOContainer *container, hwaddr iova,
 
     if (!readonly) {
         map.flags |= VFIO_DMA_MAP_FLAG_WRITE;
+    }
+
+    if (container->proxy != NULL) {
+        VFIOUserFDs fds;
+        int fd;
+
+        fd = memory_region_get_fd(mr);
+        if (fd != -1 && !(container->proxy->flags & VFIO_PROXY_SECURE)) {
+            fds.send_fds = 1;
+            fds.recv_fds = 0;
+            fds.fds = &fd;
+            map.vaddr = qemu_ram_block_host_offset(mr->ram_block, vaddr);
+
+            return vfio_user_dma_map(container->proxy, &map, &fds);
+        } else {
+            map.vaddr = 0;
+            return vfio_user_dma_map(container->proxy, &map, NULL);
+        }
     }
 
     /*
@@ -562,7 +584,8 @@ static bool vfio_listener_skipped_section(MemoryRegionSection *section)
 
 /* Called with rcu_read_lock held.  */
 static bool vfio_get_xlat_addr(IOMMUTLBEntry *iotlb, void **vaddr,
-                               ram_addr_t *ram_addr, bool *read_only)
+                               ram_addr_t *ram_addr, bool *read_only,
+                               MemoryRegion **mrp)
 {
     MemoryRegion *mr;
     hwaddr xlat;
@@ -605,6 +628,10 @@ static bool vfio_get_xlat_addr(IOMMUTLBEntry *iotlb, void **vaddr,
         *read_only = !writable || mr->readonly;
     }
 
+    if (mrp != NULL) {
+        *mrp = mr;
+    }
+
     return true;
 }
 
@@ -612,6 +639,7 @@ static void vfio_iommu_map_notify(IOMMUNotifier *n, IOMMUTLBEntry *iotlb)
 {
     VFIOGuestIOMMU *giommu = container_of(n, VFIOGuestIOMMU, n);
     VFIOContainer *container = giommu->container;
+    MemoryRegion *mr;
     hwaddr iova = iotlb->iova + giommu->iommu_offset;
     void *vaddr;
     int ret;
@@ -630,7 +658,7 @@ static void vfio_iommu_map_notify(IOMMUNotifier *n, IOMMUTLBEntry *iotlb)
     if ((iotlb->perm & IOMMU_RW) != IOMMU_NONE) {
         bool read_only;
 
-        if (!vfio_get_xlat_addr(iotlb, &vaddr, NULL, &read_only)) {
+        if (!vfio_get_xlat_addr(iotlb, &vaddr, NULL, &read_only, &mr)) {
             goto out;
         }
         /*
@@ -640,7 +668,7 @@ static void vfio_iommu_map_notify(IOMMUNotifier *n, IOMMUTLBEntry *iotlb)
          * of vaddr will always be there, even if the memory object is
          * destroyed and its backing memory munmap-ed.
          */
-        ret = vfio_dma_map(container, iova,
+        ret = vfio_dma_map(container, mr, iova,
                            iotlb->addr_mask + 1, vaddr,
                            read_only);
         if (ret) {
@@ -844,7 +872,7 @@ static void vfio_listener_region_add(MemoryListener *listener,
         }
     }
 
-    ret = vfio_dma_map(container, iova, int128_get64(llsize),
+    ret = vfio_dma_map(container, section->mr, iova, int128_get64(llsize),
                        vaddr, section->readonly);
     if (ret) {
         error_setg(&err, "vfio_dma_map(%p, 0x%"HWADDR_PRIx", "
@@ -1106,7 +1134,7 @@ static void vfio_iommu_map_dirty_notify(IOMMUNotifier *n, IOMMUTLBEntry *iotlb)
     }
 
     rcu_read_lock();
-    if (vfio_get_xlat_addr(iotlb, NULL, &translated_addr, NULL)) {
+    if (vfio_get_xlat_addr(iotlb, NULL, &translated_addr, NULL, NULL)) {
         int ret;
 
         ret = vfio_get_dirty_bitmap(container, iova, iotlb->addr_mask + 1,
@@ -2201,6 +2229,24 @@ int vfio_get_region_info(VFIODevice *vbasedev, int index,
                          struct vfio_region_info **info)
 {
     size_t argsz = sizeof(struct vfio_region_info);
+    int fd = -1;
+    int ret;
+
+    /* create region cache */
+    if (vbasedev->regions == NULL) {
+        vbasedev->regions = g_new0(struct vfio_region_info *,
+                                   vbasedev->num_regions);
+        if (vbasedev->proxy != NULL) {
+            vbasedev->regfds = g_new0(int, vbasedev->num_regions);
+        }
+    }
+    /* check cache */
+    if (vbasedev->regions[index] != NULL) {
+        *info = g_malloc0(vbasedev->regions[index]->argsz);
+        memcpy(*info, vbasedev->regions[index],
+               vbasedev->regions[index]->argsz);
+        return 0;
+    }
 
     *info = g_malloc0(argsz);
 
@@ -2208,7 +2254,17 @@ int vfio_get_region_info(VFIODevice *vbasedev, int index,
 retry:
     (*info)->argsz = argsz;
 
-    if (ioctl(vbasedev->fd, VFIO_DEVICE_GET_REGION_INFO, *info)) {
+    if (vbasedev->proxy != NULL) {
+        VFIOUserFDs fds = { 0, 1, &fd};
+
+        ret = vfio_user_get_region_info(vbasedev, index, *info, &fds);
+    } else {
+        ret = ioctl(vbasedev->fd, VFIO_DEVICE_GET_REGION_INFO, *info);
+        if (ret < 0) {
+            ret = -errno;
+        }
+    }
+    if (ret != 0) {
         g_free(*info);
         *info = NULL;
         return -errno;
@@ -2217,8 +2273,20 @@ retry:
     if ((*info)->argsz > argsz) {
         argsz = (*info)->argsz;
         *info = g_realloc(*info, argsz);
+        if (fd != -1) {
+            close(fd);
+            fd = -1;
+        }
 
         goto retry;
+    }
+
+    /* fill cache */
+    vbasedev->regions[index] = g_malloc0(argsz);
+    memcpy(vbasedev->regions[index], *info, argsz);
+    *vbasedev->regions[index] = **info;
+    if (vbasedev->regfds != NULL) {
+        vbasedev->regfds[index] = fd;
     }
 
     return 0;
