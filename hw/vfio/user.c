@@ -634,3 +634,63 @@ int vfio_user_get_irq_info(VFIODevice *vbasedev, struct vfio_irq_info *info)
     memcpy(info, &msg.argsz, sizeof(*info));
     return 0;
 }
+
+int vfio_user_region_read(VFIODevice *vbasedev, uint32_t index, uint64_t offset,
+                                 uint32_t count, void *data)
+{
+    struct {
+        struct vfio_user_region_rw msg;
+        char buf[8];
+    } smallmsg;
+    struct vfio_user_region_rw *msgp;
+    int ret, size = sizeof(*msgp) + count;
+
+    /* most reads are just registers, only allocate for larger ones */
+    msgp = count > 8 ? g_malloc0(size) : &smallmsg.msg;
+    vfio_user_request_msg(&msgp->hdr, VFIO_USER_REGION_READ, sizeof(*msgp), 0);
+    msgp->offset = offset;
+    msgp->region = index;
+    msgp->count = count;
+
+    vfio_user_send_recv(vbasedev->proxy, &msgp->hdr, NULL, size);
+    if (msgp->hdr.flags & VFIO_USER_ERROR) {
+        ret = -msgp->hdr.error_reply;
+    } else if (msgp->count > count) {
+        ret = -E2BIG;
+    } else {
+        ret = 0;
+        memcpy(data, &msgp->data, msgp->count);
+    }
+
+    if (msgp != &smallmsg.msg) {
+        g_free(msgp);
+    }
+    return ret < 0 ? ret : msgp->count;
+}
+
+int vfio_user_region_write(VFIODevice *vbasedev, uint32_t index,
+                           uint64_t offset, uint32_t count, void *data)
+{
+     struct {
+        struct vfio_user_region_rw msg;
+        char buf[8];
+    } smallmsg;
+    struct vfio_user_region_rw *msgp;
+    int size = sizeof(*msgp) + count;
+
+    /* most writes are just registers, only allocate for larger ones */
+    msgp = count > 8 ? g_malloc0(size) : &smallmsg.msg;
+    vfio_user_request_msg(&msgp->hdr, VFIO_USER_REGION_WRITE, size,
+                          VFIO_USER_NO_REPLY);
+    msgp->offset = offset;
+    msgp->region = index;
+    msgp->count = count;
+    memcpy(&msgp->data, data, count);
+
+    vfio_user_send(vbasedev->proxy, &msgp->hdr, NULL);
+
+    if (msgp != &smallmsg.msg) {
+        g_free(msgp);
+    }
+    return count;
+}
