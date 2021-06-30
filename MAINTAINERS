@@ -1843,6 +1843,14 @@ F: hw/vfio/ap.c
 F: docs/system/s390x/vfio-ap.rst
 L: qemu-s390x@nongnu.org
 
+vfio-user
+M: Elena Ufimtseva <elena.ufimtseva@oracle.com>
+M: Jagannathan Raman <jag.raman@oracle.com>
+M: John G Johnson <john.g.johnson@oracle.com>
+S: Supported
+F: hw/vfio/user.c
+F: hw/vfio/user.h
+
 vhost
 M: Michael S. Tsirkin <mst@redhat.com>
 S: Supported
