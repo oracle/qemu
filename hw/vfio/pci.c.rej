@@ -1,0 +1,18 @@
+diff a/hw/vfio/pci.c b/hw/vfio/pci.c	(rejected hunks)
+@@ -3565,9 +3616,16 @@ static void vfio_user_instance_finalize(Object *obj)
+     VFIODevice *vbasedev = &vdev->vbasedev;
+     VFIOGroup *group = vbasedev->group;
+ 
++    vfio_bars_finalize(vdev);
++    g_free(vdev->emulated_config_bits);
++    g_free(vdev->rom);
++
+     vfio_disconnect_proxy(group);
+     g_free(group);
+     vbasedev->group = NULL;
++
++    vfio_put_device(vdev);
++
+     vfio_user_disconnect(vbasedev->proxy);
+ }
+ 

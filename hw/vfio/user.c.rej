@@ -1,0 +1,13 @@
+diff a/hw/vfio/user.c b/hw/vfio/user.c	(rejected hunks)
+@@ -575,11 +575,6 @@ VFIOProxy *vfio_user_connect_dev(char *sockname, Error **errp)
+     return proxy;
+ }
+ 
+-void vfio_user_disconnect(VFIOProxy *proxy)
+-{
+-    g_free(proxy);
+-}
+-
+ int vfio_user_get_irq_info(VFIODevice *vbasedev, struct vfio_irq_info *info)
+ {
+     struct vfio_user_irq_info msg;
