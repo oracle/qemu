@@ -77,6 +77,7 @@ static void vfio_user_pci_realize(PCIDevice *pdev, Error **errp)
     VFIODevice *vbasedev = &vdev->vbasedev;
     SocketAddress addr;
     VFIOUserProxy *proxy;
+    int ret;
     Error *err = NULL;
 
     /*
@@ -115,6 +116,11 @@ static void vfio_user_pci_realize(PCIDevice *pdev, Error **errp)
     vbasedev->ops = &vfio_user_pci_ops;
     vbasedev->type = VFIO_DEVICE_TYPE_PCI;
     vbasedev->dev = DEVICE(vdev);
+
+    ret = vfio_user_get_device(vbasedev, errp);
+    if (ret) {
+        goto error;
+    }
 
     return;
 
