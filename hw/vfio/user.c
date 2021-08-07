@@ -33,6 +33,14 @@
 #include "user.h"
 #include "trace.h"
 
+
+/*
+ * These are to defend against a malign server trying
+ * to force us to run out of memory.
+ */
+#define VFIO_USER_MAX_REGIONS   100
+#define VFIO_USER_MAX_IRQS      50
+
 static int wait_time = 5000;   /* wait up to 5 sec for busy servers */
 static IOThread *vfio_user_iothread;
 
@@ -55,6 +63,9 @@ static void vfio_user_send_wait(VFIOUserProxy *proxy, VFIOUserHdr *hdr,
                                 VFIOUserFDs *fds, int rsize, bool nobql);
 static void vfio_user_request_msg(VFIOUserHdr *hdr, uint16_t cmd,
                                   uint32_t size, uint32_t flags);
+
+static int vfio_user_get_info(VFIOUserProxy *proxy,
+                              struct vfio_device_info *info);
 
 static inline void vfio_user_set_error(VFIOUserHdr *hdr, uint32_t err)
 {
@@ -808,6 +819,30 @@ void vfio_user_disconnect(VFIOUserProxy *proxy)
     g_free(proxy);
 }
 
+int vfio_user_get_device(VFIODevice *vbasedev, Error **errp)
+{
+    struct vfio_device_info info = { .argsz = sizeof(info) };
+    int ret;
+
+    ret = vfio_user_get_info(vbasedev->proxy, &info);
+    if (ret) {
+        error_setg_errno(errp, -ret, "get info failure");
+        return ret;
+    }
+
+    /* defend against a malicious server */
+    if (info.num_regions > VFIO_USER_MAX_REGIONS ||
+        info.num_irqs > VFIO_USER_MAX_IRQS) {
+        error_printf("vfio_user_get_info: invalid reply\n");
+        return -EINVAL;
+    }
+
+    vbasedev->fd = -1;
+    vfio_init_device(vbasedev, NULL, &info);
+
+    return 0;
+}
+
 static void vfio_user_request_msg(VFIOUserHdr *hdr, uint16_t cmd,
                                   uint32_t size, uint32_t flags)
 {
@@ -1087,5 +1122,25 @@ int vfio_user_validate_version(VFIOUserProxy *proxy, Error **errp)
     }
 
     trace_vfio_user_version(msgp->major, msgp->minor, msgp->capabilities);
+    return 0;
+}
+
+static int vfio_user_get_info(VFIOUserProxy *proxy,
+                              struct vfio_device_info *info)
+{
+    VFIOUserDeviceInfo msg;
+    uint32_t argsz = sizeof(msg) - sizeof(msg.hdr);
+
+    memset(&msg, 0, sizeof(msg));
+    vfio_user_request_msg(&msg.hdr, VFIO_USER_DEVICE_GET_INFO, sizeof(msg), 0);
+    msg.argsz = argsz;
+
+    vfio_user_send_wait(proxy, &msg.hdr, NULL, 0, false);
+    if (msg.hdr.flags & VFIO_USER_ERROR) {
+        return -msg.hdr.error_reply;
+    }
+    trace_vfio_user_get_info(msg.num_regions, msg.num_irqs);
+
+    memcpy(info, &msg.argsz, argsz);
     return 0;
 }
