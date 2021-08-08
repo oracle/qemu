@@ -90,6 +90,8 @@ typedef struct VFIOContainer {
     VFIOContIO *io_ops;
     bool initialized;
     bool dirty_pages_supported;
+    bool will_commit;
+    bool need_map_fd;
     uint64_t dirty_pgsizes;
     uint64_t max_dirty_bitmap_size;
     unsigned long pgsizes;
@@ -210,6 +212,7 @@ struct VFIOContIO {
     int (*dirty_bitmap)(VFIOContainer *container,
                         struct vfio_iommu_type1_dirty_bitmap *bitmap,
                         struct vfio_iommu_type1_dirty_bitmap_get *range);
+    void (*wait_commit)(VFIOContainer *container);
 };
 
 #define CONT_DMA_MAP(cont, map, fd, will_commit) \
@@ -218,6 +221,7 @@ struct VFIOContIO {
     ((cont)->io_ops->dma_unmap((cont), (unmap), (bitmap), (will_commit)))
 #define CONT_DIRTY_BITMAP(cont, bitmap, range) \
     ((cont)->io_ops->dirty_bitmap((cont), (bitmap), (range)))
+#define CONT_WAIT_COMMIT(cont) ((cont)->io_ops->wait_commit(cont))
 
 extern VFIODevIO vfio_dev_io_ioctl;
 extern VFIOContIO vfio_cont_io_ioctl;
