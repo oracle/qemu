@@ -19,10 +19,14 @@
 #include "hw/hw.h"
 #include "hw/vfio/vfio-common.h"
 #include "hw/vfio/vfio.h"
+#include "exec/address-spaces.h"
+#include "exec/memory.h"
+#include "exec/ram_addr.h"
 #include "qemu/sockets.h"
 #include "io/channel.h"
 #include "io/channel-socket.h"
 #include "io/channel-util.h"
+#include "sysemu/reset.h"
 #include "sysemu/iothread.h"
 #include "qapi/qmp/qdict.h"
 #include "qapi/qmp/qjson.h"
@@ -848,7 +852,102 @@ void vfio_user_disconnect(VFIOUserProxy *proxy)
     g_free(proxy);
 }
 
-int vfio_user_get_device(VFIODevice *vbasedev, Error **errp)
+static int vfio_connect_proxy(VFIOUserProxy *proxy, VFIOGroup *group,
+                              AddressSpace *as, Error **errp)
+{
+    VFIOAddressSpace *space;
+    VFIOContainer *container;
+    int ret;
+
+    /*
+     * try to mirror vfio_connect_container()
+     * as much as possible
+     */
+
+    space = vfio_get_address_space(as);
+
+    container = vfio_new_container(space);
+    container->fd = -1;
+    container->io = &vfio_cont_io_sock;
+    container->proxy = proxy;
+
+    /*
+     * The proxy uses a SW IOMMU in lieu of the HW one
+     * used in the ioctl() version.  Mascarade as TYPE1
+     * for maximum compatibility
+     */
+    container->iommu_type = VFIO_TYPE1_IOMMU;
+
+    /*
+     * VFIO user allows the device server to map guest
+     * memory so it has the same issue with discards as
+     * a local IOMMU has.
+     */
+    ret = vfio_ram_block_discard_disable(container, true);
+    if (ret) {
+        error_setg_errno(errp, -ret, "Cannot set discarding of RAM broken");
+        goto free_container_exit;
+    }
+
+    vfio_host_win_add(container, 0, (hwaddr)-1, proxy->dma_pgsizes);
+    container->pgsizes = proxy->dma_pgsizes;
+    container->dma_max_mappings = proxy->max_dma;
+
+    /* setup bitmask now, but migration support won't be ready until v2 */
+    container->dirty_pages_supported = true;
+    container->max_dirty_bitmap_size = proxy->max_bitmap;
+    container->dirty_pgsizes = proxy->migr_pgsize;
+
+    vfio_link_container(container, group);
+
+    if (container->error) {
+        ret = -1;
+        error_propagate_prepend(errp, container->error,
+            "memory listener initialization failed: ");
+        goto listener_release_exit;
+    }
+
+    container->initialized = true;
+
+    return 0;
+
+listener_release_exit:
+    QLIST_REMOVE(group, container_next);
+    QLIST_REMOVE(container, next);
+    vfio_listener_release(container);
+    vfio_ram_block_discard_disable(container, false);
+
+free_container_exit:
+    g_free(container);
+
+    vfio_put_address_space(space);
+
+    return ret;
+}
+
+static void vfio_disconnect_proxy(VFIOGroup *group)
+{
+    VFIOContainer *container = group->container;
+    VFIOAddressSpace *space = container->space;
+
+    /*
+     * try to mirror vfio_disconnect_container()
+     * as much as possible, knowing each device
+     * is in one group and one container
+     */
+
+    QLIST_REMOVE(group, container_next);
+    group->container = NULL;
+
+    memory_listener_unregister(&container->listener);
+
+    vfio_unmap_container(container);
+
+    g_free(container);
+    vfio_put_address_space(space);
+}
+
+int vfio_user_get_device(VFIOGroup *group, VFIODevice *vbasedev, Error **errp)
 {
     struct vfio_device_info info = { .argsz = sizeof(info) };
     int ret;
@@ -867,9 +966,55 @@ int vfio_user_get_device(VFIODevice *vbasedev, Error **errp)
     }
 
     vbasedev->fd = -1;
-    vfio_init_device(vbasedev, NULL, &info);
+    vfio_init_device(vbasedev, group, &info);
 
     return 0;
+}
+
+VFIOGroup *vfio_user_get_group(VFIOUserProxy *proxy, AddressSpace *as,
+                               Error **errp)
+{
+    VFIOGroup *group;
+
+    /*
+     * Mirror vfio_get_group(), except that each
+     * device gets its own group and container,
+     * unrelated to any host IOMMU groupings
+     */
+    group = g_malloc0(sizeof(*group));
+    group->fd = -1;
+    group->groupid = -1;
+    QLIST_INIT(&group->device_list);
+
+    if (vfio_connect_proxy(proxy, group, as, errp)) {
+        error_prepend(errp, "failed to connect proxy");
+        g_free(group);
+        group = NULL;
+    }
+
+    if (QLIST_EMPTY(&vfio_group_list)) {
+        qemu_register_reset(vfio_reset_handler, NULL);
+    }
+
+    QLIST_INSERT_HEAD(&vfio_group_list, group, next);
+
+    return group;
+}
+
+void vfio_user_put_group(VFIOGroup *group)
+{
+    if (!group || !QLIST_EMPTY(&group->device_list)) {
+        return;
+    }
+
+    vfio_ram_block_discard_disable(group->container, false);
+    vfio_disconnect_proxy(group);
+    QLIST_REMOVE(group, next);
+    g_free(group);
+
+    if (QLIST_EMPTY(&vfio_group_list)) {
+        qemu_unregister_reset(vfio_reset_handler, NULL);
+    }
 }
 
 static void vfio_user_request_msg(VFIOUserHdr *hdr, uint16_t cmd,
@@ -1471,4 +1616,7 @@ VFIODeviceIO vfio_dev_io_sock = {
     .set_irqs = vfio_user_io_set_irqs,
     .region_read = vfio_user_io_region_read,
     .region_write = vfio_user_io_region_write,
+};
+
+VFIOContainerIO vfio_cont_io_sock = {
 };

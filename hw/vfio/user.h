@@ -91,9 +91,13 @@ void vfio_user_disconnect(VFIOUserProxy *proxy);
 void vfio_user_set_handler(VFIODevice *vbasedev,
                            void (*handler)(void *opaque, VFIOUserMsg *msg),
                            void *reqarg);
-int vfio_user_get_device(VFIODevice *vbasedev, Error **errp);
+int vfio_user_get_device(VFIOGroup *group, VFIODevice *vbasedev, Error **errp);
+VFIOGroup *vfio_user_get_group(VFIOUserProxy *proxy, AddressSpace *as,
+                               Error **errp);
+void vfio_user_put_group(VFIOGroup *group);
 int vfio_user_validate_version(VFIOUserProxy *proxy, Error **errp);
 
 extern VFIODeviceIO vfio_dev_io_sock;
+extern VFIOContainerIO vfio_cont_io_sock;
 
 #endif /* VFIO_USER_H */
