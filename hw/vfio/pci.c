@@ -3584,7 +3584,7 @@ static void vfio_user_pci_realize(PCIDevice *pdev, Error **errp)
     VFIODevice *vbasedev = &vdev->vbasedev;
     SocketAddress addr;
     VFIOProxy *proxy;
-    struct vfio_device_info info;
+    VFIOGroup *group = NULL;
     int ret;
     Error *err = NULL;
 
@@ -3630,9 +3630,15 @@ static void vfio_user_pci_realize(PCIDevice *pdev, Error **errp)
     vbasedev->io_ops = &vfio_dev_io_sock;
     vdev->vbasedev.irq_mask_works = true;
 
-    ret = VDEV_GET_INFO(vbasedev, &info);
+    group = vfio_user_get_group(proxy, pci_device_iommu_address_space(pdev),
+                                errp);
+    if (!group) {
+        goto error;
+    }
+
+    ret = vfio_user_get_device(group, vbasedev, errp);
     if (ret) {
-        error_setg_errno(errp, -ret, "get info failure");
+        vfio_user_put_group(group);
         goto error;
     }
 
@@ -3692,12 +3698,18 @@ static void vfio_user_instance_finalize(Object *obj)
 {
     VFIOPCIDevice *vdev = VFIO_PCI_BASE(obj);
     VFIODevice *vbasedev = &vdev->vbasedev;
+    VFIOGroup *group = vbasedev->group;
+
+    vfio_bars_finalize(vdev);
+    g_free(vdev->emulated_config_bits);
+    g_free(vdev->rom);
 
     if (vdev->msix != NULL) {
         vfio_user_msix_teardown(vdev);
     }
 
     vfio_put_device(vdev);
+    vfio_user_put_group(group);
 
     if (vbasedev->proxy != NULL) {
         vfio_user_disconnect(vbasedev->proxy);
