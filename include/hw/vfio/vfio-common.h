@@ -94,6 +94,7 @@ typedef struct VFIOContainer {
     uint64_t max_dirty_bitmap_size;
     unsigned long pgsizes;
     unsigned int dma_max_mappings;
+    VFIOUserProxy *proxy;
     QLIST_HEAD(, VFIOGuestIOMMU) giommu_list;
     QLIST_HEAD(, VFIOHostDMAWindow) hostwin_list;
     QLIST_HEAD(, VFIOGroup) group_list;
@@ -236,6 +237,7 @@ typedef struct VFIODisplay {
     } dmabuf;
 } VFIODisplay;
 
+int vfio_ram_block_discard_disable(VFIOContainer *container, bool state);
 void vfio_put_base_device(VFIODevice *vbasedev);
 void vfio_disable_irqindex(VFIODevice *vbasedev, int index);
 void vfio_unmask_single_irqindex(VFIODevice *vbasedev, int index);
@@ -244,6 +246,9 @@ void vfio_unmask_single_irq(VFIODevice *vbasedev, int index, int irq);
 void vfio_mask_single_irq(VFIODevice *vbasedev, int index, int irq);
 int vfio_set_irq_signaling(VFIODevice *vbasedev, int index, int subindex,
                            int action, int fd, Error **errp);
+void vfio_host_win_add(VFIOContainer *container, hwaddr min_iova,
+                       hwaddr max_iova, uint64_t iova_pgsizes);
+void vfio_listener_release(VFIOContainer *container);
 void vfio_region_write(void *opaque, hwaddr addr,
                            uint64_t data, unsigned size);
 uint64_t vfio_region_read(void *opaque,
@@ -256,12 +261,19 @@ void vfio_region_unmap(VFIORegion *region);
 void vfio_region_exit(VFIORegion *region);
 void vfio_region_finalize(VFIORegion *region);
 void vfio_reset_handler(void *opaque);
+VFIOAddressSpace *vfio_get_address_space(AddressSpace *as);
+void vfio_put_address_space(VFIOAddressSpace *space);
 VFIOGroup *vfio_get_group(int groupid, AddressSpace *as, Error **errp);
 void vfio_put_group(VFIOGroup *group);
 int vfio_get_device(VFIOGroup *group, const char *name,
                     VFIODevice *vbasedev, Error **errp);
 
-extern const MemoryRegionOps vfio_region_ops;
+VFIOContainer *vfio_new_container(VFIOAddressSpace *space);
+void vfio_link_container(VFIOContainer *container, VFIOGroup *group);
+void vfio_unmap_container(VFIOContainer *container);
+void vfio_init_device(VFIODevice *vbasedev, VFIOGroup *group,
+                      struct vfio_device_info *info);
+
 typedef QLIST_HEAD(VFIOGroupList, VFIOGroup) VFIOGroupList;
 extern VFIOGroupList vfio_group_list;
 
