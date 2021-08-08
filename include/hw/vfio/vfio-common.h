@@ -90,6 +90,7 @@ typedef struct VFIOContainer {
     VFIOContainerIO *io;
     bool initialized;
     bool dirty_pages_supported;
+    bool async_ops;
     uint64_t dirty_pgsizes;
     uint64_t max_dirty_bitmap_size;
     unsigned long pgsizes;
@@ -187,7 +188,7 @@ struct VFIODeviceIO {
 };
 
 struct VFIOContainerIO {
-    int (*dma_map)(VFIOContainer *container,
+    int (*dma_map)(VFIOContainer *container, MemoryRegion *mr,
                    struct vfio_iommu_type1_dma_map *map);
     int (*dma_unmap)(VFIOContainer *container,
                      struct vfio_iommu_type1_dma_unmap *unmap,
@@ -195,6 +196,7 @@ struct VFIOContainerIO {
     int (*dirty_bitmap)(VFIOContainer *container,
                         struct vfio_iommu_type1_dirty_bitmap *bitmap,
                         struct vfio_iommu_type1_dirty_bitmap_get *range);
+    void (*wait_commit)(VFIOContainer *container);
 };
 
 extern VFIODeviceIO vfio_dev_io_ioctl;
