@@ -134,6 +134,7 @@ static void vfio_user_pci_realize(PCIDevice *pdev, Error **errp)
     VFIODevice *vbasedev = &vdev->vbasedev;
     SocketAddress addr;
     VFIOUserProxy *proxy;
+    VFIOGroup *group = NULL;
     int ret;
     Error *err = NULL;
 
@@ -179,8 +180,15 @@ static void vfio_user_pci_realize(PCIDevice *pdev, Error **errp)
     vbasedev->io = &vfio_dev_io_sock;
     vbasedev->use_regfds = true;
 
-    ret = vfio_user_get_device(vbasedev, errp);
+    group = vfio_user_get_group(proxy, pci_device_iommu_address_space(pdev),
+                                errp);
+    if (!group) {
+        goto error;
+    }
+
+    ret = vfio_user_get_device(group, vbasedev, errp);
     if (ret) {
+        vfio_user_put_group(group);
         goto error;
     }
 
@@ -240,6 +248,7 @@ static void vfio_user_instance_finalize(Object *obj)
 {
     VFIOPCIDevice *vdev = VFIO_PCI_BASE(obj);
     VFIODevice *vbasedev = &vdev->vbasedev;
+    VFIOGroup *group = vbasedev->group;
 
     vfio_bars_finalize(vdev);
     g_free(vdev->emulated_config_bits);
@@ -250,6 +259,7 @@ static void vfio_user_instance_finalize(Object *obj)
     }
 
     vfio_put_device(vdev);
+    vfio_user_put_group(group);
 
     if (vbasedev->proxy != NULL) {
         vfio_user_disconnect(vbasedev->proxy);
