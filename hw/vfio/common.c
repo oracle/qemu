@@ -19,6 +19,7 @@
  */
 
 #include "qemu/osdep.h"
+#include CONFIG_DEVICES
 #include <sys/ioctl.h>
 #ifdef CONFIG_KVM
 #include <linux/kvm.h>
@@ -2267,6 +2268,208 @@ put_space_exit:
     return ret;
 }
 
+
+#ifdef CONFIG_VFIO_USER
+
+static int vfio_connect_proxy(VFIOProxy *proxy, VFIOGroup *group,
+                              AddressSpace *as, Error **errp)
+{
+    VFIOAddressSpace *space;
+    VFIOContainer *container;
+    int ret;
+
+    /*
+     * try to mirror vfio_connect_container()
+     * as much as possible
+     */
+
+    space = vfio_get_address_space(as);
+
+    container = g_malloc0(sizeof(*container));
+    container->space = space;
+    container->fd = -1;
+    container->error = NULL;
+    container->io_ops = &vfio_cont_io_sock;
+    QLIST_INIT(&container->giommu_list);
+    QLIST_INIT(&container->hostwin_list);
+    QLIST_INIT(&container->vrdl_list);
+    container->proxy = proxy;
+
+    /*
+     * The proxy uses a SW IOMMU in lieu of the HW one
+     * used in the ioctl() version.  Mascarade as TYPE1
+     * for maximum capatibility
+     */
+    container->iommu_type = VFIO_TYPE1_IOMMU;
+
+    /*
+     * VFIO user allows the device server to map guest
+     * memory so it has the same issue with discards as
+     * a local IOMMU has.
+     */
+    ret = vfio_ram_block_discard_disable(container, true);
+    if (ret) {
+        error_setg_errno(errp, -ret, "Cannot set discarding of RAM broken");
+        goto free_container_exit;
+    }
+
+    vfio_host_win_add(container, 0, (hwaddr)-1, proxy->dma_pgsizes);
+    container->pgsizes = proxy->dma_pgsizes;
+    container->dma_max_mappings = proxy->max_dma;
+
+    /* setup bitmask now, but migration support won't be ready until v2 */
+    container->dirty_pages_supported = true;
+    container->max_dirty_bitmap_size = proxy->max_bitmap;
+    container->dirty_pgsizes = proxy->migr_pgsize;
+
+    QLIST_INIT(&container->group_list);
+    QLIST_INSERT_HEAD(&space->containers, container, next);
+
+    group->container = container;
+    QLIST_INSERT_HEAD(&container->group_list, group, container_next);
+
+    container->listener = vfio_memory_listener;
+    memory_listener_register(&container->listener, container->space->as);
+
+    if (container->error) {
+        ret = -1;
+        error_propagate_prepend(errp, container->error,
+            "memory listener initialization failed: ");
+        goto listener_release_exit;
+    }
+
+    container->initialized = true;
+
+    return 0;
+
+listener_release_exit:
+    QLIST_REMOVE(group, container_next);
+    QLIST_REMOVE(container, next);
+    vfio_listener_release(container);
+    vfio_ram_block_discard_disable(container, false);
+
+free_container_exit:
+    g_free(container);
+
+    vfio_put_address_space(space);
+
+    return ret;
+}
+
+static void vfio_disconnect_proxy(VFIOGroup *group)
+{
+    VFIOContainer *container = group->container;
+    VFIOAddressSpace *space = container->space;
+    VFIOGuestIOMMU *giommu, *tmp;
+    VFIOHostDMAWindow *hostwin, *next;
+
+    /*
+     * try to mirror vfio_disconnect_container()
+     * as much as possible, knowing each device
+     * is in one group and one container
+     */
+
+    QLIST_REMOVE(group, container_next);
+    group->container = NULL;
+
+    /*
+     * Explicitly release the listener first before unset container,
+     * since unset may destroy the backend container if it's the last
+     * group.
+     */
+    memory_listener_unregister(&container->listener);
+
+    QLIST_REMOVE(container, next);
+
+    QLIST_FOREACH_SAFE(giommu, &container->giommu_list, giommu_next, tmp) {
+        memory_region_unregister_iommu_notifier(
+            MEMORY_REGION(giommu->iommu_mr), &giommu->n);
+        QLIST_REMOVE(giommu, giommu_next);
+        g_free(giommu);
+    }
+
+    QLIST_FOREACH_SAFE(hostwin, &container->hostwin_list, hostwin_next,
+                       next) {
+        QLIST_REMOVE(hostwin, hostwin_next);
+        g_free(hostwin);
+    }
+
+    g_free(container);
+    vfio_put_address_space(space);
+}
+
+int vfio_user_get_device(VFIOGroup *group, VFIODevice *vbasedev, Error **errp)
+{
+    struct vfio_device_info info = { .argsz = sizeof(info) };
+    int ret;
+
+    ret = VDEV_GET_INFO(vbasedev, &info);
+    if (ret) {
+        error_setg_errno(errp, -ret, "get info failure");
+        return ret;
+    }
+
+    vbasedev->fd = -1;
+    vbasedev->group = group;
+    QLIST_INSERT_HEAD(&group->device_list, vbasedev, next);
+
+    vbasedev->num_irqs = info.num_irqs;
+    vbasedev->num_regions = info.num_regions;
+    vbasedev->flags = info.flags;
+
+    vfio_get_all_regions(vbasedev);
+    vbasedev->reset_works = !!(info.flags & VFIO_DEVICE_FLAGS_RESET);
+    return 0;
+}
+
+VFIOGroup *vfio_user_get_group(VFIOProxy *proxy, AddressSpace *as, Error **errp)
+{
+    VFIOGroup *group;
+
+    /*
+     * Mirror vfio_get_group(), except that each
+     * device gets its own group and container,
+     * unrelated to any host IOMMU groupings
+     */
+    group = g_malloc0(sizeof(*group));
+    group->fd = -1;
+    group->groupid = -1;
+    QLIST_INIT(&group->device_list);
+
+    if (vfio_connect_proxy(proxy, group, as, errp)) {
+        error_prepend(errp, "failed to connect proxy");
+        g_free(group);
+        group = NULL;
+    }
+
+    if (QLIST_EMPTY(&vfio_group_list)) {
+        qemu_register_reset(vfio_reset_handler, NULL);
+    }
+
+    QLIST_INSERT_HEAD(&vfio_group_list, group, next);
+
+    return group;
+}
+
+void vfio_user_put_group(VFIOGroup *group)
+{
+    if (!group || !QLIST_EMPTY(&group->device_list)) {
+        return;
+    }
+
+    vfio_ram_block_discard_disable(group->container, false);
+    vfio_disconnect_proxy(group);
+    QLIST_REMOVE(group, next);
+    g_free(group);
+
+    if (QLIST_EMPTY(&vfio_group_list)) {
+        qemu_unregister_reset(vfio_reset_handler, NULL);
+    }
+}
+
+#endif /* CONFIG_VFIO_USER */
+
+
 static void vfio_disconnect_container(VFIOGroup *group)
 {
     VFIOContainer *container = group->container;
@@ -2499,7 +2702,9 @@ void vfio_put_base_device(VFIODevice *vbasedev)
     QLIST_REMOVE(vbasedev, next);
     vbasedev->group = NULL;
     trace_vfio_put_base_device(vbasedev->fd);
-    close(vbasedev->fd);
+    if (vbasedev->fd != -1) {
+        close(vbasedev->fd);
+    }
 }
 
 int vfio_get_region_info(VFIODevice *vbasedev, int index,
