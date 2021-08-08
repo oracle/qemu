@@ -186,12 +186,14 @@ struct VFIODeviceIO {
 };
 
 struct VFIOContainerIO {
-    int (*dma_map)(VFIOContainer *container,
+    int (*dma_map)(VFIOContainer *container, MemoryRegion *mr,
                    struct vfio_iommu_type1_dma_map *map);
     int (*dma_unmap)(VFIOContainer *container,
                      struct vfio_iommu_type1_dma_unmap *unmap);
     int (*dirty_bitmap)(VFIOContainer *container,
                         struct vfio_iommu_type1_dirty_bitmap *bitmap);
+    void (*listener_begin)(VFIOContainer *container);
+    void (*listener_commit)(VFIOContainer *container);
 };
 
 extern VFIODeviceIO vfio_dev_io_ioctl;
