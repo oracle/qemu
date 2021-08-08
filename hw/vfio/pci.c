@@ -3607,6 +3607,7 @@ static void vfio_user_pci_realize(PCIDevice *pdev, Error **errp)
     VFIODevice *vbasedev = &vdev->vbasedev;
     SocketAddress addr;
     VFIOProxy *proxy;
+    VFIOGroup *group = NULL;
     struct vfio_device_info info;
     int ret;
     Error *err = NULL;
@@ -3652,6 +3653,19 @@ static void vfio_user_pci_realize(PCIDevice *pdev, Error **errp)
     vbasedev->type = VFIO_DEVICE_TYPE_PCI;
     vbasedev->ops = &vfio_user_pci_ops;
     vbasedev->io_ops = &vfio_dev_io_sock;
+
+    /*
+     * each device gets its own group and container
+     * make them unrelated to any host IOMMU groupings
+     */
+    group = g_malloc0(sizeof(*group));
+    group->fd = -1;
+    group->groupid = -1;
+    QLIST_INIT(&group->device_list);
+    QLIST_INSERT_HEAD(&group->device_list, vbasedev, next);
+    vbasedev->group = group;
+
+    vfio_connect_proxy(proxy, group, pci_device_iommu_address_space(pdev));
 
     ret = VDEV_GET_INFO(vbasedev, &info);
     if (ret) {
@@ -3718,6 +3732,10 @@ out_teardown:
     vfio_teardown_msi(vdev);
     vfio_bars_exit(vdev);
 error:
+    if (group != NULL) {
+        vfio_disconnect_proxy(group);
+        g_free(group);
+    }
     vfio_user_disconnect(proxy);
     error_prepend(errp, VFIO_MSG_PREFIX, vdev->vbasedev.name);
 }
@@ -3726,6 +3744,13 @@ static void vfio_user_instance_finalize(Object *obj)
 {
     VFIOPCIDevice *vdev = VFIO_PCI_BASE(obj);
     VFIODevice *vbasedev = &vdev->vbasedev;
+    VFIOGroup *group = vbasedev->group;
+
+    if (group != NULL) {
+        vfio_disconnect_proxy(group);
+        g_free(group);
+        vbasedev->group = NULL;
+    }
 
     if (vdev->msix != NULL) {
         vfio_user_msix_teardown(vdev);
