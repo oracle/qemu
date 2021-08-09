@@ -218,6 +218,8 @@ void vfio_teardown_msi(VFIOPCIDevice *vdev);
 void vfio_bars_exit(VFIOPCIDevice *vdev);
 void vfio_bars_finalize(VFIOPCIDevice *vdev);
 int vfio_add_capabilities(VFIOPCIDevice *vdev, Error **errp);
+void vfio_pci_pre_reset(VFIOPCIDevice *vdev);
+void vfio_pci_post_reset(VFIOPCIDevice *vdev);
 void vfio_put_device(VFIOPCIDevice *vdev);
 void vfio_register_err_notifier(VFIOPCIDevice *vdev);
 void vfio_register_req_notifier(VFIOPCIDevice *vdev);
