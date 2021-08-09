@@ -92,6 +92,7 @@ int vfio_user_validate_version(VFIOProxy *proxy, Error **errp);
 void vfio_user_send_reply(VFIOProxy *proxy, VFIOUserHdr *hdr, int size);
 void vfio_user_send_error(VFIOProxy *proxy, VFIOUserHdr *hdr, int error);
 void vfio_user_putfds(VFIOUserMsg *msg);
+void vfio_user_reset(VFIOProxy *proxy);
 
 extern VFIODevIO vfio_dev_io_sock;
 extern VFIOContIO vfio_cont_io_sock;
