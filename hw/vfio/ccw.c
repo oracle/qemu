@@ -615,6 +615,7 @@ static void vfio_ccw_get_device(VFIOGroup *group, VFIOCCWDevice *vcdev,
     vcdev->vdev.name = name;
     vcdev->vdev.dev = &vcdev->cdev.parent_obj.parent_obj;
     vcdev->vdev.io = &vfio_dev_io_ioctl;
+    vcdev->vdev.use_regfds = false;
 
     return;
 

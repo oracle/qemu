@@ -93,4 +93,6 @@ void vfio_user_set_handler(VFIODevice *vbasedev,
 int vfio_user_get_device(VFIODevice *vbasedev, Error **errp);
 int vfio_user_validate_version(VFIOUserProxy *proxy, Error **errp);
 
+extern VFIODeviceIO vfio_dev_io_sock;
+
 #endif /* VFIO_USER_H */
