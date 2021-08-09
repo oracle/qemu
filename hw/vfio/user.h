@@ -98,6 +98,9 @@ VFIOGroup *vfio_user_get_group(VFIOUserProxy *proxy, AddressSpace *as,
                                Error **errp);
 void vfio_user_put_group(VFIOGroup *group);
 int vfio_user_validate_version(VFIOUserProxy *proxy, Error **errp);
+void vfio_user_send_reply(VFIOUserProxy *proxy, VFIOUserHdr *hdr, int size);
+void vfio_user_send_error(VFIOUserProxy *proxy, VFIOUserHdr *hdr, int error);
+void vfio_user_putfds(VFIOUserMsg *msg);
 
 extern VFIODeviceIO vfio_dev_io_sock;
 extern VFIOContainerIO vfio_cont_io_sock;
