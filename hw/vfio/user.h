@@ -101,6 +101,7 @@ int vfio_user_validate_version(VFIOUserProxy *proxy, Error **errp);
 void vfio_user_send_reply(VFIOUserProxy *proxy, VFIOUserHdr *hdr, int size);
 void vfio_user_send_error(VFIOUserProxy *proxy, VFIOUserHdr *hdr, int error);
 void vfio_user_putfds(VFIOUserMsg *msg);
+void vfio_user_reset(VFIOUserProxy *proxy);
 
 extern VFIODeviceIO vfio_dev_io_sock;
 extern VFIOContainerIO vfio_cont_io_sock;
