@@ -56,6 +56,7 @@ typedef struct VFIORegion {
     uint32_t nr_mmaps;
     VFIOMmap *mmaps;
     uint8_t nr; /* cache the region number for debug */
+    bool post_wr; /* writes can be posted */
     int remfd; /* fd if exported from remote process */
 } VFIORegion;
 
@@ -77,6 +78,7 @@ typedef struct VFIOAddressSpace {
 
 struct VFIOGroup;
 typedef struct VFIOProxy VFIOProxy;
+typedef struct VFIOContIO VFIOContIO;
 
 typedef struct VFIOContainer {
     VFIOAddressSpace *space;
@@ -85,9 +87,11 @@ typedef struct VFIOContainer {
     MemoryListener prereg_listener;
     unsigned iommu_type;
     Error *error;
+    VFIOContIO *io_ops;
     bool initialized;
     bool dirty_pages_supported;
     bool will_commit;
+    bool need_map_fd;
     uint64_t dirty_pgsizes;
     uint64_t max_dirty_bitmap_size;
     unsigned long pgsizes;
@@ -126,6 +130,8 @@ typedef struct VFIOHostDMAWindow {
 } VFIOHostDMAWindow;
 
 typedef struct VFIODeviceOps VFIODeviceOps;
+typedef struct VFIODevIO VFIODevIO;
+typedef struct VFIOValidOps VFIOValidOps;
 
 typedef struct VFIODevice {
     QLIST_ENTRY(VFIODevice) next;
@@ -141,6 +147,8 @@ typedef struct VFIODevice {
     bool ram_block_discard_allowed;
     bool enable_migration;
     VFIODeviceOps *ops;
+    VFIODevIO *io_ops;
+    VFIOValidOps *valid_ops;
     unsigned int num_irqs;
     unsigned int num_regions;
     unsigned int flags;
@@ -160,6 +168,81 @@ struct VFIODeviceOps {
     void (*vfio_save_config)(VFIODevice *vdev, QEMUFile *f);
     int (*vfio_load_config)(VFIODevice *vdev, QEMUFile *f);
 };
+
+/*
+ * The next 2 ops vectors are how Devices and Containers
+ * communicate with the server.  The default option is
+ * through ioctl() to the kernel VFIO driver, but vfio-user
+ * can use a socket to a remote process.
+ */
+struct VFIODevIO {
+    int (*get_info)(VFIODevice *vdev, struct vfio_device_info *info);
+    int (*get_region_info)(VFIODevice *vdev,
+                           struct vfio_region_info *info, int *fd);
+    int (*get_irq_info)(VFIODevice *vdev, struct vfio_irq_info *irq);
+    int (*set_irqs)(VFIODevice *vdev, struct vfio_irq_set *irqs);
+    int (*region_read)(VFIODevice *vdev, uint8_t nr, off_t off,
+                       off_t fdoff, uint32_t size, void *data);
+    int (*region_write)(VFIODevice *vdev, uint8_t nr, off_t off,
+                        off_t fdoff, uint32_t size, void *data, bool post);
+};
+
+#define VDEV_GET_INFO(vdev, info) \
+    ((vdev)->io_ops->get_info((vdev), (info)))
+#define VDEV_GET_REGION_INFO(vdev, info, fd) \
+    ((vdev)->io_ops->get_region_info((vdev), (info), (fd)))
+#define VDEV_GET_IRQ_INFO(vdev, irq) \
+    ((vdev)->io_ops->get_irq_info((vdev), (irq)))
+#define VDEV_SET_IRQS(vdev, irqs) \
+    ((vdev)->io_ops->set_irqs((vdev), (irqs)))
+#define VDEV_REGION_READ(vdev, nr, off, fdoff, size, data) \
+    ((vdev)->io_ops->region_read((vdev), (nr), (off), (fdoff), (size), (data)))
+#define VDEV_REGION_WRITE(vdev, nr, off, fdoff, size, data, post) \
+    ((vdev)->io_ops->region_write((vdev), (nr), (off), (fdoff), (size), (data), \
+                                  (post)))
+
+struct VFIOContIO {
+    int (*dma_map)(VFIOContainer *container,
+                   struct vfio_iommu_type1_dma_map *map,
+                   int fd, bool will_commit);
+    int (*dma_unmap)(VFIOContainer *container,
+                     struct vfio_iommu_type1_dma_unmap *unmap,
+                     struct vfio_bitmap *bitmap, bool will_commit);
+    int (*dirty_bitmap)(VFIOContainer *container,
+                        struct vfio_iommu_type1_dirty_bitmap *bitmap,
+                        struct vfio_iommu_type1_dirty_bitmap_get *range);
+    void (*wait_reqs)(VFIOContainer *container);
+};
+
+#define CONT_DMA_MAP(cont, map, fd, will_commit) \
+    ((cont)->io_ops->dma_map((cont), (map), (fd), (will_commit)))
+#define CONT_DMA_UNMAP(cont, unmap, bitmap, will_commit) \
+    ((cont)->io_ops->dma_unmap((cont), (unmap), (bitmap), (will_commit)))
+#define CONT_DIRTY_BITMAP(cont, bitmap, range) \
+    ((cont)->io_ops->dirty_bitmap((cont), (bitmap), (range)))
+#define CONT_WAIT_REQS(cont) ((cont)->io_ops->wait_reqs(cont))
+
+extern VFIODevIO vfio_dev_io_ioctl;
+extern VFIOContIO vfio_cont_io_ioctl;
+
+/*
+ * This ops vector allows for bus-specific verification
+ * routines in cases where the server may not be fully
+ * trusted.
+ */
+struct VFIOValidOps {
+    int (*validate_get_info)(VFIODevice *vdev, struct vfio_device_info *info);
+    int (*validate_get_region_info)(VFIODevice *vdev,
+                                    struct vfio_region_info *info, int *fd);
+    int (*validate_get_irq_info)(VFIODevice *vdev, struct vfio_irq_info *info);
+};
+
+#define VDEV_VALID_INFO(vdev, info) \
+    ((vdev)->valid_ops->validate_get_info((vdev), (info)))
+#define VDEV_VALID_REGION_INFO(vdev, info, fd) \
+    ((vdev)->valid_ops->validate_get_region_info((vdev), (info), (fd)))
+#define VDEV_VALID_IRQ_INFO(vdev, irq) \
+    ((vdev)->valid_ops->validate_get_irq_info((vdev), (irq)))
 
 typedef struct VFIOGroup {
     int fd;

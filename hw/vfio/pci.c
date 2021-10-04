@@ -368,6 +368,7 @@ static void vfio_msi_interrupt(void *opaque)
 
 static int vfio_enable_vectors(VFIOPCIDevice *vdev, bool msix)
 {
+    VFIODevice *vbasedev = &vdev->vbasedev;
     struct vfio_irq_set *irq_set;
     int ret = 0, i, argsz;
     int32_t *fds;
@@ -403,11 +404,7 @@ static int vfio_enable_vectors(VFIOPCIDevice *vdev, bool msix)
         fds[i] = fd;
     }
 
-    if (vdev->vbasedev.proxy != NULL) {
-        ret = vfio_user_set_irqs(&vdev->vbasedev, irq_set);
-    } else {
-        ret = ioctl(vdev->vbasedev.fd, VFIO_DEVICE_SET_IRQS, irq_set);
-    }
+    ret = VDEV_SET_IRQS(vbasedev, irq_set);
 
     g_free(irq_set);
 
@@ -777,18 +774,18 @@ static void vfio_update_msi(VFIOPCIDevice *vdev)
 
 static void vfio_pci_load_rom(VFIOPCIDevice *vdev)
 {
+    VFIODevice *vbasedev = &vdev->vbasedev;
     struct vfio_region_info *reg_info;
     uint64_t size;
     off_t off = 0;
     ssize_t bytes;
 
-    if (vfio_get_region_info(&vdev->vbasedev,
-                             VFIO_PCI_ROM_REGION_INDEX, &reg_info)) {
+    if (vfio_get_region_info(vbasedev, VFIO_PCI_ROM_REGION_INDEX, &reg_info)) {
         error_report("vfio: Error getting ROM info: %m");
         return;
     }
 
-    trace_vfio_pci_load_rom(vdev->vbasedev.name, (unsigned long)reg_info->size,
+    trace_vfio_pci_load_rom(vbasedev->name, (unsigned long)reg_info->size,
                             (unsigned long)reg_info->offset,
                             (unsigned long)reg_info->flags);
 
@@ -800,7 +797,7 @@ static void vfio_pci_load_rom(VFIOPCIDevice *vdev)
     if (!vdev->rom_size) {
         vdev->rom_read_failed = true;
         error_report("vfio-pci: Cannot read device rom at "
-                    "%s", vdev->vbasedev.name);
+                    "%s", vbasedev->name);
         error_printf("Device option ROM contents are probably invalid "
                     "(check dmesg).\nSkip option ROM probe with rombar=0, "
                     "or load from file with romfile=\n");
@@ -811,14 +808,8 @@ static void vfio_pci_load_rom(VFIOPCIDevice *vdev)
     memset(vdev->rom, 0xff, size);
 
     while (size) {
-        if (vdev->vbasedev.proxy != NULL) {
-            bytes = vfio_user_region_read(&vdev->vbasedev,
-                                          VFIO_PCI_ROM_REGION_INDEX,
-                                          off, size, vdev->rom + off);
-        } else {
-            bytes = pread(vdev->vbasedev.fd, vdev->rom + off,
-                          size, vdev->rom_offset + off);
-        }
+        bytes = VDEV_REGION_READ(vbasedev, VFIO_PCI_ROM_REGION_INDEX, off,
+                                 vdev->rom_offset + off, size, vdev->rom + off);
         if (bytes == 0) {
             break;
         } else if (bytes > 0) {
@@ -916,11 +907,11 @@ static const MemoryRegionOps vfio_rom_ops = {
 
 static void vfio_pci_size_rom(VFIOPCIDevice *vdev)
 {
+    VFIODevice *vbasedev = &vdev->vbasedev;
     uint32_t orig, size = cpu_to_le32((uint32_t)PCI_ROM_ADDRESS_MASK);
     off_t offset = vdev->config_offset + PCI_ROM_ADDRESS;
     DeviceState *dev = DEVICE(vdev);
     char *name;
-    int fd = vdev->vbasedev.fd;
 
     if (vdev->pdev.romfile || !vdev->pdev.rom_bar) {
         /* Since pci handles romfile, just print a message and return */
@@ -937,32 +928,27 @@ static void vfio_pci_size_rom(VFIOPCIDevice *vdev)
      * Use the same size ROM BAR as the physical device.  The contents
      * will get filled in later when the guest tries to read it.
      */
-    if (vdev->vbasedev.proxy != NULL) {
-        if (vfio_user_region_read(&vdev->vbasedev, VFIO_PCI_CONFIG_REGION_INDEX,
-                                  PCI_ROM_ADDRESS, 4, &orig) != 4 ||
-            vfio_user_region_write(&vdev->vbasedev,
-                                   VFIO_PCI_CONFIG_REGION_INDEX,
-                                   PCI_ROM_ADDRESS, 4, &size) != 4 ||
-            vfio_user_region_read(&vdev->vbasedev, VFIO_PCI_CONFIG_REGION_INDEX,
-                                  PCI_ROM_ADDRESS, 4, &size) != 4 ||
-            vfio_user_region_write(&vdev->vbasedev,
-                                   VFIO_PCI_CONFIG_REGION_INDEX,
-                                   PCI_ROM_ADDRESS, 4, &orig) != 4) {
-            error_report("%s(%s) failed: %m", __func__, vdev->vbasedev.name);
-            return;
-        }
-    } else {
-        if (pread(fd, &orig, 4, offset) != 4 ||
-            pwrite(fd, &size, 4, offset) != 4 ||
-            pread(fd, &size, 4, offset) != 4 ||
-            pwrite(fd, &orig, 4, offset) != 4) {
-            error_report("%s(%s) failed: %m", __func__, vdev->vbasedev.name);
-            return;
-        }
+
+#define rom_read(var) VDEV_REGION_READ(vbasedev,  \
+                                       VFIO_PCI_CONFIG_REGION_INDEX,  \
+                                       PCI_ROM_ADDRESS, offset, 4, (var))
+#define rom_write(var) VDEV_REGION_WRITE(vbasedev,                      \
+                                         VFIO_PCI_CONFIG_REGION_INDEX,  \
+                                         PCI_ROM_ADDRESS, offset, 4, (var), \
+                                         false)
+
+    if (rom_read(&orig) != 4 ||
+        rom_write(&size) != 4 ||
+        rom_read(&size) != 4 ||
+        rom_write(&orig) != 4) {
+
+        error_report("%s(%s) failed: %m", __func__, vbasedev->name);
+        return;
     }
+#undef rom_read
+#undef rom_write
 
     size = ~(le32_to_cpu(size) & PCI_ROM_ADDRESS_MASK) + 1;
-
     if (!size) {
         return;
     }
@@ -1137,6 +1123,7 @@ static void vfio_sub_page_bar_update_mapping(PCIDevice *pdev, int bar)
 uint32_t vfio_pci_read_config(PCIDevice *pdev, uint32_t addr, int len)
 {
     VFIOPCIDevice *vdev = VFIO_PCI_BASE(pdev);
+    VFIODevice *vbasedev = &vdev->vbasedev;
     uint32_t emu_bits = 0, emu_val = 0, phys_val = 0, val;
 
     memcpy(&emu_bits, vdev->emulated_config_bits + addr, len);
@@ -1149,14 +1136,9 @@ uint32_t vfio_pci_read_config(PCIDevice *pdev, uint32_t addr, int len)
     if (~emu_bits & (0xffffffffU >> (32 - len * 8))) {
         ssize_t ret;
 
-        if (vdev->vbasedev.proxy != NULL) {
-            ret = vfio_user_region_read(&vdev->vbasedev,
-                                        VFIO_PCI_CONFIG_REGION_INDEX,
-                                        addr, len, &phys_val);
-        } else {
-            ret = pread(vdev->vbasedev.fd, &phys_val, len,
-                        vdev->config_offset + addr);
-        }
+        ret = VDEV_REGION_READ(vbasedev, VFIO_PCI_CONFIG_REGION_INDEX, addr,
+                               vdev->config_offset + addr, len, &phys_val);
+
         if (ret != len) {
             error_report("%s(%s, 0x%x, 0x%x) failed: %m",
                          __func__, vdev->vbasedev.name, addr, len);
@@ -1176,23 +1158,18 @@ void vfio_pci_write_config(PCIDevice *pdev,
                            uint32_t addr, uint32_t val, int len)
 {
     VFIOPCIDevice *vdev = VFIO_PCI_BASE(pdev);
+    VFIODevice *vbasedev = &vdev->vbasedev; 
     uint32_t val_le = cpu_to_le32(val);
     int ret;
 
     trace_vfio_pci_write_config(vdev->vbasedev.name, addr, val, len);
 
     /* Write everything to VFIO, let it filter out what we can't write */
-    if (vdev->vbasedev.proxy != NULL) {
-        ret = vfio_user_region_write(&vdev->vbasedev,
-                                     VFIO_PCI_CONFIG_REGION_INDEX,
-                                     addr, len, &val_le);
-    } else {
-        ret = pwrite(vdev->vbasedev.fd, &val_le, len,
-                     vdev->config_offset + addr);
-    }
+    ret = VDEV_REGION_WRITE(vbasedev, VFIO_PCI_CONFIG_REGION_INDEX, addr,
+                            vdev->config_offset + addr, len, &val_le, false);
     if (ret != len) {
         error_report("%s(%s, 0x%x, 0x%x, 0x%x) failed: %m",
-                     __func__, vdev->vbasedev.name, addr, val, len);
+                     __func__, vbasedev->name, addr, val, len);
     }
 
     /* MSI/MSI-X Enabling/Disabling */
@@ -1691,6 +1668,9 @@ static void vfio_bar_prepare(VFIOPCIDevice *vdev, int nr)
     bar->type = pci_bar & (bar->ioport ? ~PCI_BASE_ADDRESS_IO_MASK :
                                          ~PCI_BASE_ADDRESS_MEM_MASK);
     bar->size = bar->region.size;
+
+    /* IO regions are sync, memory can be async */
+    bar->region.post_wr = (bar->ioport == 0);
 }
 
 static void vfio_bars_prepare(VFIOPCIDevice *vdev)
@@ -2243,13 +2223,8 @@ static void vfio_pci_post_reset(VFIOPCIDevice *vdev)
         uint32_t val = 0;
         uint32_t len = sizeof(val);
 
-        if (vbasedev->proxy != NULL) {
-            ret = vfio_user_region_write(vbasedev, VFIO_PCI_CONFIG_REGION_INDEX,
-                                         addr, len, &val);
-        } else {
-            ret = pwrite(vdev->vbasedev.fd, &val, len,
-                         vdev->config_offset + addr);
-        }
+        ret = VDEV_REGION_WRITE(vbasedev, VFIO_PCI_CONFIG_REGION_INDEX, addr,
+                                vdev->config_offset + addr, len, &val, false);
         if (ret != len) {
             error_report("%s(%s) reset bar %d failed: %m", __func__,
                          vdev->vbasedev.name, nr);
@@ -2687,12 +2662,7 @@ static void vfio_populate_device(VFIOPCIDevice *vdev, Error **errp)
 
     irq_info.index = VFIO_PCI_ERR_IRQ_INDEX;
 
-    if (vbasedev->proxy != NULL) {
-        ret = vfio_user_get_irq_info(vbasedev, &irq_info);
-    } else {
-        ret = ioctl(vdev->vbasedev.fd, VFIO_DEVICE_GET_IRQ_INFO, &irq_info);
-    }
-
+    ret = VDEV_GET_IRQ_INFO(vbasedev, &irq_info);
 
     if (ret) {
         /* This can fail for an old kernel or legacy PCI dev */
@@ -2812,14 +2782,8 @@ static void vfio_register_req_notifier(VFIOPCIDevice *vdev)
         return;
     }
 
-    if (vdev->vbasedev.proxy != NULL) {
-        if (vfio_user_get_irq_info(&vdev->vbasedev, &irq_info) < 0) {
-            return;
-        }
-    } else {
-        if (ioctl(vdev->vbasedev.fd, VFIO_DEVICE_GET_IRQ_INFO, &irq_info) < 0) {
-            return;
-        }
+    if (VDEV_GET_IRQ_INFO(&vdev->vbasedev, &irq_info) < 0) {
+        return;
     }
     if (irq_info.count < 1) {
         return;
@@ -2899,6 +2863,7 @@ static void vfio_realize(PCIDevice *pdev, Error **errp)
     vdev->vbasedev.ops = &vfio_pci_ops;
     vdev->vbasedev.type = VFIO_DEVICE_TYPE_PCI;
     vdev->vbasedev.dev = DEVICE(vdev);
+    vdev->vbasedev.io_ops = &vfio_dev_io_ioctl;
 
     tmp = g_strdup_printf("%s/iommu_group", vdev->vbasedev.sysfsdev);
     len = readlink(tmp, group_path, sizeof(group_path));
@@ -3283,48 +3248,22 @@ static void vfio_instance_init(Object *obj)
     pci_dev->cap_present |= QEMU_PCI_CAP_EXPRESS;
 }
 
-static Property vfio_pci_dev_properties[] = {
-    DEFINE_PROP_PCI_HOST_DEVADDR("host", VFIOPCIDevice, host),
-    DEFINE_PROP_STRING("sysfsdev", VFIOPCIDevice, vbasedev.sysfsdev),
+static Property vfio_pci_base_dev_properties[] = {
     DEFINE_PROP_ON_OFF_AUTO("x-pre-copy-dirty-page-tracking", VFIOPCIDevice,
                             vbasedev.pre_copy_dirty_page_tracking,
                             ON_OFF_AUTO_ON),
-    DEFINE_PROP_ON_OFF_AUTO("display", VFIOPCIDevice,
-                            display, ON_OFF_AUTO_OFF),
-    DEFINE_PROP_UINT32("xres", VFIOPCIDevice, display_xres, 0),
-    DEFINE_PROP_UINT32("yres", VFIOPCIDevice, display_yres, 0),
     DEFINE_PROP_UINT32("x-intx-mmap-timeout-ms", VFIOPCIDevice,
                        intx.mmap_timeout, 1100),
-    DEFINE_PROP_BIT("x-vga", VFIOPCIDevice, features,
-                    VFIO_FEATURE_ENABLE_VGA_BIT, false),
-    DEFINE_PROP_BIT("x-req", VFIOPCIDevice, features,
-                    VFIO_FEATURE_ENABLE_REQ_BIT, true),
-    DEFINE_PROP_BIT("x-igd-opregion", VFIOPCIDevice, features,
-                    VFIO_FEATURE_ENABLE_IGD_OPREGION_BIT, false),
     DEFINE_PROP_BOOL("x-enable-migration", VFIOPCIDevice,
                      vbasedev.enable_migration, false),
     DEFINE_PROP_BOOL("x-no-mmap", VFIOPCIDevice, vbasedev.no_mmap, false),
-    DEFINE_PROP_BOOL("x-balloon-allowed", VFIOPCIDevice,
-                     vbasedev.ram_block_discard_allowed, false),
     DEFINE_PROP_BOOL("x-no-kvm-intx", VFIOPCIDevice, no_kvm_intx, false),
     DEFINE_PROP_BOOL("x-no-kvm-msi", VFIOPCIDevice, no_kvm_msi, false),
     DEFINE_PROP_BOOL("x-no-kvm-msix", VFIOPCIDevice, no_kvm_msix, false),
-    DEFINE_PROP_BOOL("x-no-geforce-quirks", VFIOPCIDevice,
-                     no_geforce_quirks, false),
     DEFINE_PROP_BOOL("x-no-kvm-ioeventfd", VFIOPCIDevice, no_kvm_ioeventfd,
                      false),
     DEFINE_PROP_BOOL("x-no-vfio-ioeventfd", VFIOPCIDevice, no_vfio_ioeventfd,
                      false),
-    DEFINE_PROP_UINT32("x-pci-vendor-id", VFIOPCIDevice, vendor_id, PCI_ANY_ID),
-    DEFINE_PROP_UINT32("x-pci-device-id", VFIOPCIDevice, device_id, PCI_ANY_ID),
-    DEFINE_PROP_UINT32("x-pci-sub-vendor-id", VFIOPCIDevice,
-                       sub_vendor_id, PCI_ANY_ID),
-    DEFINE_PROP_UINT32("x-pci-sub-device-id", VFIOPCIDevice,
-                       sub_device_id, PCI_ANY_ID),
-    DEFINE_PROP_UINT32("x-igd-gms", VFIOPCIDevice, igd_gms, 0),
-    DEFINE_PROP_UNSIGNED_NODEFAULT("x-nv-gpudirect-clique", VFIOPCIDevice,
-                                   nv_gpudirect_clique,
-                                   qdev_prop_nv_gpudirect_clique, uint8_t),
     DEFINE_PROP_OFF_AUTO_PCIBAR("x-msix-relocation", VFIOPCIDevice, msix_relo,
                                 OFF_AUTOPCIBAR_OFF),
     /*
@@ -3340,6 +3279,7 @@ static void vfio_pci_base_dev_class_init(ObjectClass *klass, void *data)
     DeviceClass *dc = DEVICE_CLASS(klass);
     PCIDeviceClass *pdc = PCI_DEVICE_CLASS(klass);
 
+    device_class_set_props(dc, vfio_pci_base_dev_properties);
     dc->desc = "VFIO PCI base device";
     set_bit(DEVICE_CATEGORY_MISC, dc->categories);
     pdc->exit = vfio_exitfn;
@@ -3359,6 +3299,37 @@ static const TypeInfo vfio_pci_base_dev_info = {
         { }
     },
 };
+
+static Property vfio_pci_dev_properties[] = {
+    DEFINE_PROP_PCI_HOST_DEVADDR("host", VFIOPCIDevice, host),
+    DEFINE_PROP_STRING("sysfsdev", VFIOPCIDevice, vbasedev.sysfsdev),
+    DEFINE_PROP_ON_OFF_AUTO("display", VFIOPCIDevice,
+                            display, ON_OFF_AUTO_OFF),
+    DEFINE_PROP_UINT32("xres", VFIOPCIDevice, display_xres, 0),
+    DEFINE_PROP_UINT32("yres", VFIOPCIDevice, display_yres, 0),
+    DEFINE_PROP_BIT("x-vga", VFIOPCIDevice, features,
+                    VFIO_FEATURE_ENABLE_VGA_BIT, false),
+    DEFINE_PROP_BIT("x-req", VFIOPCIDevice, features,
+                    VFIO_FEATURE_ENABLE_REQ_BIT, true),
+    DEFINE_PROP_BIT("x-igd-opregion", VFIOPCIDevice, features,
+                    VFIO_FEATURE_ENABLE_IGD_OPREGION_BIT, false),
+    DEFINE_PROP_BOOL("x-balloon-allowed", VFIOPCIDevice,
+                     vbasedev.ram_block_discard_allowed, false),
+    DEFINE_PROP_BOOL("x-no-geforce-quirks", VFIOPCIDevice,
+                     no_geforce_quirks, false),
+    DEFINE_PROP_UINT32("x-pci-vendor-id", VFIOPCIDevice, vendor_id, PCI_ANY_ID),
+    DEFINE_PROP_UINT32("x-pci-device-id", VFIOPCIDevice, device_id, PCI_ANY_ID),
+    DEFINE_PROP_UINT32("x-pci-sub-vendor-id", VFIOPCIDevice,
+                       sub_vendor_id, PCI_ANY_ID),
+    DEFINE_PROP_UINT32("x-pci-sub-device-id", VFIOPCIDevice,
+                       sub_device_id, PCI_ANY_ID),
+    DEFINE_PROP_UINT32("x-igd-gms", VFIOPCIDevice, igd_gms, 0),
+    DEFINE_PROP_UNSIGNED_NODEFAULT("x-nv-gpudirect-clique", VFIOPCIDevice,
+                                   nv_gpudirect_clique,
+                                   qdev_prop_nv_gpudirect_clique, uint8_t),
+    DEFINE_PROP_END_OF_LIST(),
+};
+
 
 static void vfio_pci_dev_class_init(ObjectClass *klass, void *data)
 {
@@ -3411,73 +3382,174 @@ type_init(register_vfio_pci_dev_type)
 
 
 /*
+ * PCI validation ops - used when return values need
+ * validation before use
+ */
+
+static int vfio_pci_valid_info(VFIODevice *vbasedev,
+                               struct vfio_device_info *info)
+{
+    /* must be PCI */
+    if ((info->flags & VFIO_DEVICE_FLAGS_PCI) == 0) {
+        return -EINVAL;
+    }
+    /* only other valid flag is reset */
+    if (info->flags & ~(VFIO_DEVICE_FLAGS_PCI | VFIO_DEVICE_FLAGS_RESET)) {
+        return -EINVAL;
+    }
+    /* account for extra migration region */
+    if (info->num_regions > VFIO_PCI_NUM_REGIONS + 1) {
+        return -EINVAL;
+    }
+    if (info->num_irqs > VFIO_PCI_NUM_IRQS) {
+        return -EINVAL;
+    }
+    return 0;
+}
+
+static int vfio_pci_valid_region_info(VFIODevice *vbasedev, 
+                                          struct vfio_region_info *info,
+                                          int *fd)
+{
+    if (info->flags & ~(VFIO_REGION_INFO_FLAG_READ |
+                        VFIO_REGION_INFO_FLAG_WRITE |
+                        VFIO_REGION_INFO_FLAG_MMAP |
+                        VFIO_REGION_INFO_FLAG_CAPS)) {
+        return -EINVAL;
+    }
+    if (info->index > vbasedev->num_regions) {
+        return -EINVAL;
+    }
+    /* cap_offset in valid area */
+    if ((info->flags & VFIO_REGION_INFO_FLAG_CAPS) && 
+        (info->cap_offset < sizeof(*info) || info->cap_offset > info->argsz)) {
+        return -EINVAL;
+    }
+    return 0;
+}
+
+static int vfio_pci_valid_irq_info(VFIODevice *vbasedev,
+                                 struct vfio_irq_info *info)
+{
+    if (info->flags & ~(VFIO_IRQ_INFO_EVENTFD | VFIO_IRQ_INFO_MASKABLE |
+                        VFIO_IRQ_INFO_AUTOMASKED | VFIO_IRQ_INFO_NORESIZE)) {
+        return -EINVAL;
+    }
+    if (info->index > vbasedev->num_irqs) {
+        return -EINVAL;
+    }
+    return 0;
+}
+
+struct VFIOValidOps vfio_pci_valid_ops = {
+    vfio_pci_valid_info,
+    vfio_pci_valid_region_info,
+    vfio_pci_valid_irq_info,
+};
+
+
+/*
  * vfio-user routines.
  */
 
-static int vfio_user_dma_read(VFIOPCIDevice *vdev, VFIOUserDMARW *msg)
+static void vfio_user_dma_read(VFIOPCIDevice *vdev, VFIOUserDMARW *msg)
 {
     PCIDevice *pdev = &vdev->pdev;
-    char *buf;
+    VFIOProxy *proxy = vdev->vbasedev.proxy;
+    VFIOUserDMARW *res;
+    MemTxResult r;
     int size = msg->count + sizeof(VFIOUserDMARW);
 
-    if (msg->hdr.flags & VFIO_USER_NO_REPLY) {
-        return -EINVAL;
-    }
     if (msg->count > vfio_user_max_xfer()) {
-        return -E2BIG;
+        vfio_user_send_error(proxy, &msg->hdr, E2BIG);
+        return;
     }
 
-    buf = g_malloc0(size);
-    memcpy(buf, msg, sizeof(*msg));
+    /* switch to our own message buffer */
+    res = g_malloc0(size);
+    memcpy(res, msg, sizeof(*res));
+    g_free(msg);
 
-    pci_dma_read(pdev, msg->offset, buf + sizeof(*msg), msg->count);
+    r = pci_dma_read(pdev, res->offset, &res->data, res->count);
 
-    vfio_user_send_reply(vdev->vbasedev.proxy, buf, size);
-    g_free(buf);
-    return 0;
+    switch (r) {
+    case MEMTX_OK:
+        if (res->hdr.flags & VFIO_USER_NO_REPLY) {
+            g_free(res);
+            return;
+        }
+        vfio_user_send_reply(proxy, &res->hdr, size);
+        break;
+    case MEMTX_ERROR:
+        vfio_user_send_error(proxy, &res->hdr, EFAULT);
+        break;
+    case MEMTX_DECODE_ERROR:
+        vfio_user_send_error(proxy, &res->hdr, ENODEV);
+        break;
+    }
 }
 
-static int vfio_user_dma_write(VFIOPCIDevice *vdev,
-                               VFIOUserDMARW *msg)
+static void vfio_user_dma_write(VFIOPCIDevice *vdev, VFIOUserDMARW *msg)
 {
     PCIDevice *pdev = &vdev->pdev;
-    char *buf = (char *)msg + sizeof(*msg);
+    VFIOProxy *proxy = vdev->vbasedev.proxy;
+    MemTxResult r;
 
     /* make sure transfer count isn't larger than the message data */
     if (msg->count > msg->hdr.size - sizeof(*msg)) {
-        return -E2BIG;
+        vfio_user_send_error(proxy, &msg->hdr, E2BIG);
+        return;
     }
 
-    pci_dma_write(pdev, msg->offset, buf, msg->count);
+    r = pci_dma_write(pdev, msg->offset, &msg->data, msg->count);
 
-    if ((msg->hdr.flags & VFIO_USER_NO_REPLY) == 0) {
-        vfio_user_send_reply(vdev->vbasedev.proxy, (char *)msg,
-                             sizeof(msg->hdr));
+    switch (r) {
+    case MEMTX_OK:
+        if ((msg->hdr.flags & VFIO_USER_NO_REPLY) == 0) {
+            vfio_user_send_reply(proxy, &msg->hdr, sizeof(msg->hdr));
+        } else {
+            g_free(msg);
+        }
+        break;
+    case MEMTX_ERROR:
+        vfio_user_send_error(proxy, &msg->hdr, EFAULT);
+        break;
+    case MEMTX_DECODE_ERROR:
+        vfio_user_send_error(proxy, &msg->hdr, ENODEV);
+        break;
     }
-    return 0;
+
+    return;
 }
 
-static int vfio_user_pci_process_req(void *opaque, char *buf, VFIOUserFDs *fds)
+/*
+ * Incoming request message callback.
+ *
+ * Runs off main loop, so BQL held.
+ */
+static void vfio_user_pci_process_req(void *opaque, VFIOUserMsg *msg)
 {
     VFIOPCIDevice *vdev = opaque;
-    VFIOUserHdr *hdr = (VFIOUserHdr *)buf;
-    int ret;
+    VFIOUserHdr *hdr = msg->hdr;
 
-    if (fds->recv_fds != 0) {
-        return -EINVAL;
+    /* no incoming PCI requests pass FDs */
+    if (msg->fds != NULL) {
+        vfio_user_send_error(vdev->vbasedev.proxy, hdr, EINVAL);
+        vfio_user_putfds(msg);
+        return;
     }
+
     switch (hdr->command) {
     case VFIO_USER_DMA_READ:
-        ret = vfio_user_dma_read(vdev, (VFIOUserDMARW *)hdr);
+        vfio_user_dma_read(vdev, (VFIOUserDMARW *)hdr);
         break;
     case VFIO_USER_DMA_WRITE:
-        ret = vfio_user_dma_write(vdev, (VFIOUserDMARW *)hdr);
+        vfio_user_dma_write(vdev, (VFIOUserDMARW *)hdr);
         break;
     default:
         error_printf("vfio_user_process_req unknown cmd %d\n", hdr->command);
-        ret = -ENOSYS;
+        vfio_user_send_error(vdev->vbasedev.proxy, hdr, ENOSYS);
     }
-    return ret;
 }
 
 /*
@@ -3512,12 +3584,13 @@ static void vfio_user_pci_realize(PCIDevice *pdev, Error **errp)
     SocketAddress addr;
     VFIOProxy *proxy;
     VFIOGroup *group = NULL;
+    struct vfio_device_info info;
     int ret;
     Error *err = NULL;
 
     /*
      * TODO: make option parser understand SocketAddress
-     * and use that instead of having scaler options
+     * and use that instead of having scalar options
      * for each socket type.
      */
     if (!udev->sock_name) {
@@ -3535,10 +3608,16 @@ static void vfio_user_pci_realize(PCIDevice *pdev, Error **errp)
         return;
     }
     vbasedev->proxy = proxy;
-    vfio_user_set_reqhandler(vbasedev, vfio_user_pci_process_req, vdev);
+    vfio_user_set_handler(vbasedev, vfio_user_pci_process_req, vdev);
 
     if (udev->secure_dma) {
         proxy->flags |= VFIO_PROXY_SECURE;
+    }
+    if (udev->send_queued) {
+        proxy->flags |= VFIO_PROXY_FORCE_QUEUED;
+    }
+    if (udev->no_post) {
+        proxy->flags |= VFIO_PROXY_NO_POST;
     }
 
     vfio_user_validate_version(vbasedev, &err);
@@ -3553,6 +3632,8 @@ static void vfio_user_pci_realize(PCIDevice *pdev, Error **errp)
     vbasedev->type = VFIO_DEVICE_TYPE_PCI;
     vbasedev->no_mmap = false;
     vbasedev->ops = &vfio_user_pci_ops;
+    vbasedev->io_ops = &vfio_dev_io_sock;
+    vbasedev->valid_ops = &vfio_pci_valid_ops;
 
     /*
      * each device gets its own group and container
@@ -3567,11 +3648,15 @@ static void vfio_user_pci_realize(PCIDevice *pdev, Error **errp)
 
     vfio_connect_proxy(proxy, group, pci_device_iommu_address_space(pdev));
 
-    ret = vfio_user_get_info(&vdev->vbasedev);
+    ret = VDEV_GET_INFO(vbasedev, &info);
     if (ret) {
         error_setg_errno(errp, -ret, "get info failure");
         goto error;
     }
+    vbasedev->num_irqs = info.num_irqs;
+    vbasedev->num_regions = info.num_regions;
+    vbasedev->flags = info.flags;
+    vbasedev->reset_works = !!(info.flags & VFIO_DEVICE_FLAGS_RESET);
 
     vfio_populate_device(vdev, &err);
     if (err) {
@@ -3580,9 +3665,9 @@ static void vfio_user_pci_realize(PCIDevice *pdev, Error **errp)
     }
 
     /* Get a copy of config space */
-    ret = vfio_user_region_read(vbasedev, VFIO_PCI_CONFIG_REGION_INDEX, 0,
-                                MIN(pci_config_size(pdev), vdev->config_size),
-                                pdev->config);
+    ret = VDEV_REGION_READ(vbasedev, VFIO_PCI_CONFIG_REGION_INDEX, 0, 0,
+                           MIN(pci_config_size(pdev), vdev->config_size),
+                           pdev->config);
     if (ret < (int)MIN(pci_config_size(&vdev->pdev), vdev->config_size)) {
         error_setg_errno(errp, -ret, "failed to read device config space");
         goto error;
@@ -3707,7 +3792,7 @@ static void vfio_user_pci_reset(DeviceState *dev)
     vfio_pci_pre_reset(vdev);
 
     if (vbasedev->reset_works) {
-        vfio_user_reset(vbasedev);
+        vfio_user_reset(vbasedev->proxy);
     }
 
     vfio_pci_post_reset(vdev);
@@ -3716,11 +3801,8 @@ static void vfio_user_pci_reset(DeviceState *dev)
 static Property vfio_user_pci_dev_properties[] = {
     DEFINE_PROP_STRING("socket", VFIOUserPCIDevice, sock_name),
     DEFINE_PROP_BOOL("secure-dma", VFIOUserPCIDevice, secure_dma, false),
-    DEFINE_PROP_BOOL("x-enable-migration", VFIOPCIDevice,
-                     vbasedev.enable_migration, false),
-    DEFINE_PROP_ON_OFF_AUTO("x-pre-copy-dirty-page-tracking", VFIOPCIDevice,
-                            vbasedev.pre_copy_dirty_page_tracking,
-                            ON_OFF_AUTO_ON),
+    DEFINE_PROP_BOOL("x-send-queued", VFIOUserPCIDevice, send_queued, false),
+    DEFINE_PROP_BOOL("x-no-posted-writes", VFIOUserPCIDevice, no_post, false),
     DEFINE_PROP_END_OF_LIST(),
 };
 

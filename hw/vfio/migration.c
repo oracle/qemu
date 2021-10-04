@@ -53,16 +53,12 @@ static inline int vfio_mig_access(VFIODevice *vbasedev, void *val, int count,
     VFIORegion *region = &vbasedev->migration->region;
     int ret;
 
-    if (vbasedev->proxy != NULL) {
-        ret = iswrite ?
-            vfio_user_region_write(vbasedev, region->nr, off, count, val) :
-            vfio_user_region_read(vbasedev, region->nr, off, count, val);
-    } else {
-        off += region->fd_offset;
-        ret = iswrite ? pwrite(vbasedev->fd, val, count, off) :
-                        pread(vbasedev->fd, val, count, off);
-    }
-    if (ret < count) {
+    ret = iswrite ?
+        VDEV_REGION_WRITE(vbasedev, region->nr, off,
+                          region->fd_offset + off, count, val, false) :
+        VDEV_REGION_READ(vbasedev, region->nr, off,
+                         region->fd_offset + off, count, val);
+     if (ret < count) {
         error_report("vfio_mig_%s %d byte %s: failed at offset 0x%"
                      HWADDR_PRIx", err: %s", iswrite ? "write" : "read", count,
                      vbasedev->name, off, strerror(errno));
@@ -748,7 +744,9 @@ static void vfio_vmstate_change(void *opaque, bool running, RunState state)
          */
         error_report("%s: Failed to set device state 0x%x", vbasedev->name,
                      (migration->device_state & mask) | value);
-        qemu_file_set_error(migrate_get_current()->to_dst_file, ret);
+        if (value != 0) {
+            qemu_file_set_error(migrate_get_current()->to_dst_file, ret);
+        }
     }
     vbasedev->migration->vm_running = running;
     trace_vfio_vmstate_change(vbasedev->name, running, RunState_str(state),

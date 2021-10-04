@@ -71,11 +71,7 @@ void vfio_disable_irqindex(VFIODevice *vbasedev, int index)
         .count = 0,
     };
 
-    if (vbasedev->proxy != NULL) {
-        vfio_user_set_irqs(vbasedev, &irq_set);
-    } else {
-        ioctl(vbasedev->fd, VFIO_DEVICE_SET_IRQS, &irq_set);
-    }
+    VDEV_SET_IRQS(vbasedev, &irq_set);
 }
 
 void vfio_unmask_single_irqindex(VFIODevice *vbasedev, int index)
@@ -88,11 +84,7 @@ void vfio_unmask_single_irqindex(VFIODevice *vbasedev, int index)
         .count = 1,
     };
 
-    if (vbasedev->proxy != NULL) {
-        vfio_user_set_irqs(vbasedev, &irq_set);
-    } else {
-        ioctl(vbasedev->fd, VFIO_DEVICE_SET_IRQS, &irq_set);
-    }
+    VDEV_SET_IRQS(vbasedev, &irq_set);
 }
 
 void vfio_mask_single_irqindex(VFIODevice *vbasedev, int index)
@@ -105,11 +97,7 @@ void vfio_mask_single_irqindex(VFIODevice *vbasedev, int index)
         .count = 1,
     };
 
-    if (vbasedev->proxy != NULL) {
-        vfio_user_set_irqs(vbasedev, &irq_set);
-    } else {
-        ioctl(vbasedev->fd, VFIO_DEVICE_SET_IRQS, &irq_set);
-    }
+    VDEV_SET_IRQS(vbasedev, &irq_set);
 }
 
 static inline const char *action_to_str(int action)
@@ -190,13 +178,7 @@ int vfio_set_irq_signaling(VFIODevice *vbasedev, int index, int subindex,
     pfd = (int32_t *)&irq_set->data;
     *pfd = fd;
 
-    if (vbasedev->proxy != NULL) {
-        ret = vfio_user_set_irqs(vbasedev, irq_set);
-    } else {
-        if (ioctl(vbasedev->fd, VFIO_DEVICE_SET_IRQS, irq_set)) {
-            ret = -errno;
-        }
-    }
+    ret = VDEV_SET_IRQS(vbasedev, irq_set);
     g_free(irq_set);
 
     if (!ret) {
@@ -231,6 +213,7 @@ void vfio_region_write(void *opaque, hwaddr addr,
         uint32_t dword;
         uint64_t qword;
     } buf;
+    bool post = region->post_wr;
     int ret;
 
     switch (size) {
@@ -251,18 +234,20 @@ void vfio_region_write(void *opaque, hwaddr addr,
         break;
     }
 
-    if (vbasedev->proxy != NULL) {
-        ret = vfio_user_region_write(vbasedev, region->nr, addr, size, &data);
-    } else {
-        ret = pwrite(vbasedev->fd, &buf, size, region->fd_offset + addr);
+    /* read-after-write hazard if guest can directly access region */
+    if (region->nr_mmaps) {
+        post = false;
     }
+    ret = VDEV_REGION_WRITE(vbasedev, region->nr, addr, region->fd_offset + addr,
+                            size, &buf, post);
     if (ret != size) {
-        error_report("%s(%s:region%d+0x%"HWADDR_PRIx", 0x%"PRIx64
-                     ",%d) failed: %m",
-                     __func__, vbasedev->name, region->nr,
-                     addr, data, size);
-    }
+        const char *err = ret < 0 ? strerror(-ret) : "short write";
 
+        error_report("%s(%s:region%d+0x%"HWADDR_PRIx", 0x%"PRIx64
+                     ",%d) failed: %s",
+                     __func__, vbasedev->name, region->nr,
+                     addr, data, size, err);
+    }
     trace_vfio_region_write(vbasedev->name, region->nr, addr, data, size);
 
     /*
@@ -290,17 +275,17 @@ uint64_t vfio_region_read(void *opaque,
     uint64_t data = 0;
     int ret;
 
-    if (vbasedev->proxy != NULL) {
-        ret = vfio_user_region_read(vbasedev, region->nr, addr, size, &buf);
-    } else {
-        ret = pread(vbasedev->fd, &buf, size, region->fd_offset + addr);
-    }
+    ret = VDEV_REGION_READ(vbasedev, region->nr, addr, region->fd_offset + addr,
+                           size, &buf);
     if (ret != size) {
-        error_report("%s(%s:region%d+0x%"HWADDR_PRIx", %d) failed: %m",
+        const char *err = ret < 0 ? strerror(-ret) : "short read";
+
+        error_report("%s(%s:region%d+0x%"HWADDR_PRIx", %d) failed: %s",
                      __func__, vbasedev->name, region->nr,
-                     addr, size);
+                     addr, size, err);
         return (uint64_t)-1;
     }
+
     switch (size) {
     case 1:
         data = buf.byte;
@@ -461,11 +446,7 @@ static int vfio_dma_unmap_bitmap(VFIOContainer *container,
         goto unmap_exit;
     }
 
-    if (container->proxy != NULL) {
-        ret = vfio_user_dma_unmap(container->proxy, unmap, bitmap, will_commit);
-    } else {
-        ret = ioctl(container->fd, VFIO_IOMMU_UNMAP_DMA, unmap);
-    }
+    ret = CONT_DMA_UNMAP(container, unmap, bitmap, will_commit);
     if (!ret) {
         cpu_physical_memory_set_dirty_lebitmap((unsigned long *)bitmap->data,
                 iotlb->translated_addr, pages);
@@ -499,34 +480,7 @@ static int vfio_dma_unmap(VFIOContainer *container,
         return vfio_dma_unmap_bitmap(container, iova, size, iotlb);
     }
 
-    if (container->proxy != NULL) {
-        return vfio_user_dma_unmap(container->proxy, &unmap, NULL, will_commit);
-    }
-
-    while (ioctl(container->fd, VFIO_IOMMU_UNMAP_DMA, &unmap)) {
-        /*
-         * The type1 backend has an off-by-one bug in the kernel (71a7d3d78e3c
-         * v4.15) where an overflow in its wrap-around check prevents us from
-         * unmapping the last page of the address space.  Test for the error
-         * condition and re-try the unmap excluding the last page.  The
-         * expectation is that we've never mapped the last page anyway and this
-         * unmap request comes via vIOMMU support which also makes it unlikely
-         * that this page is used.  This bug was introduced well after type1 v2
-         * support was introduced, so we shouldn't need to test for v1.  A fix
-         * is queued for kernel v5.0 so this workaround can be removed once
-         * affected kernels are sufficiently deprecated.
-         */
-        if (errno == EINVAL && unmap.size && !(unmap.iova + unmap.size) &&
-            container->iommu_type == VFIO_TYPE1v2_IOMMU) {
-            trace_vfio_dma_unmap_overflow_workaround();
-            unmap.size -= 1ULL << ctz64(container->pgsizes);
-            continue;
-        }
-        error_report("VFIO_UNMAP_DMA failed: %s", strerror(errno));
-        return -errno;
-    }
-
-    return 0;
+    return CONT_DMA_UNMAP(container, &unmap, NULL, will_commit);
 }
 
 static int vfio_dma_map(VFIOContainer *container, MemoryRegion *mr, hwaddr iova,
@@ -539,43 +493,28 @@ static int vfio_dma_map(VFIOContainer *container, MemoryRegion *mr, hwaddr iova,
         .iova = iova,
         .size = size,
     };
+    int fd, ret;
     bool will_commit = container->will_commit;
 
     if (!readonly) {
         map.flags |= VFIO_DMA_MAP_FLAG_WRITE;
     }
 
-    if (container->proxy != NULL) {
-        VFIOUserFDs fds;
-        int fd;
-
+    if (container->need_map_fd) {
         fd = memory_region_get_fd(mr);
-        if (fd != -1 && !(container->proxy->flags & VFIO_PROXY_SECURE)) {
-            fds.send_fds = 1;
-            fds.recv_fds = 0;
-            fds.fds = &fd;
+        if (fd != -1) {
             map.vaddr = qemu_ram_block_host_offset(mr->ram_block, vaddr);
-
-            return vfio_user_dma_map(container->proxy, &map, &fds, will_commit);
-        } else {
-            map.vaddr = 0;
-            return vfio_user_dma_map(container->proxy, &map, NULL, will_commit);
         }
+    } else {
+        fd = -1;
     }
 
-    /*
-     * Try the mapping, if it fails with EBUSY, unmap the region and try
-     * again.  This shouldn't be necessary, but we sometimes see it in
-     * the VGA ROM space.
-     */
-    if (ioctl(container->fd, VFIO_IOMMU_MAP_DMA, &map) == 0 ||
-        (errno == EBUSY && vfio_dma_unmap(container, iova, size, NULL) == 0 &&
-         ioctl(container->fd, VFIO_IOMMU_MAP_DMA, &map) == 0)) {
-        return 0;
-    }
+    ret = CONT_DMA_MAP(container, &map, fd, will_commit);
 
-    error_report("VFIO_MAP_DMA failed: %s", strerror(errno));
-    return -errno;
+    if (ret < 0) {
+        error_report("VFIO_MAP_DMA failed: %s", strerror(-ret));
+    }
+    return ret;
 }
 
 static void vfio_host_win_add(VFIOContainer *container,
@@ -927,7 +866,7 @@ static void vfio_listener_begin(MemoryListener *listener)
 {
     VFIOContainer *container = container_of(listener, VFIOContainer, listener);
 
-    container->will_commit = 1;
+    container->will_commit = true;
 }
 
 static void vfio_listener_commit(MemoryListener *listener)
@@ -935,10 +874,8 @@ static void vfio_listener_commit(MemoryListener *listener)
     VFIOContainer *container = container_of(listener, VFIOContainer, listener);
 
     /* wait for any async requests sent during the transaction */
-    if (container->proxy != NULL) {
-        vfio_user_drain_reqs(container->proxy);
-    }
-    container->will_commit = 0;
+    CONT_WAIT_REQS(container);
+    container->will_commit = false;
 }
 
 static void vfio_listener_region_add(MemoryListener *listener,
@@ -1303,19 +1240,10 @@ static void vfio_set_dirty_page_tracking(VFIOContainer *container, bool start)
         dirty.flags = VFIO_IOMMU_DIRTY_PAGES_FLAG_STOP;
     }
 
-    if (container->proxy != NULL) {
-        ret = vfio_user_dirty_bitmap(container->proxy, &dirty, NULL);
-        if (ret) {
-            error_report("Failed to set dirty tracking flag 0x%x errno: %d",
-                         dirty.flags, -ret);
-        }
-    } else {
-        ret = ioctl(container->fd, VFIO_IOMMU_DIRTY_PAGES, &dirty);
-        if (ret) {
-            error_report("Failed to set dirty tracking flag 0x%x errno: %d",
-                         dirty.flags, errno);
-            ret = -errno;
-        }
+    ret = CONT_DIRTY_BITMAP(container, &dirty, NULL);
+    if (ret) {
+        error_report("Failed to set dirty tracking flag 0x%x errno: %d",
+                     dirty.flags, -ret);
     }
 }
 
@@ -1365,15 +1293,11 @@ static int vfio_get_dirty_bitmap(VFIOContainer *container, uint64_t iova,
         goto err_out;
     }
 
-    if (container->proxy != NULL) {
-        ret = vfio_user_dirty_bitmap(container->proxy, dbitmap, range);
-    } else {
-        ret = ioctl(container->fd, VFIO_IOMMU_DIRTY_PAGES, dbitmap);
-    }
+    ret = CONT_DIRTY_BITMAP(container, dbitmap, range);
     if (ret) {
         error_report("Failed to get dirty bitmap for iova: 0x%"PRIx64
                 " size: 0x%"PRIx64" err: %d", (uint64_t)range->iova,
-                (uint64_t)range->size, errno);
+                (uint64_t)range->size, -ret);
         goto err_out;
     }
 
@@ -1674,6 +1598,7 @@ int vfio_region_setup(Object *obj, VFIODevice *vbasedev, VFIORegion *region,
     region->size = info->size;
     region->fd_offset = info->offset;
     region->nr = index;
+    region->post_wr = false;
     region->remfd = vfio_get_region_info_remfd(vbasedev, index);
 
     if (region->size) {
@@ -2159,6 +2084,8 @@ static int vfio_connect_container(VFIOGroup *group, AddressSpace *as,
     container->error = NULL;
     container->dirty_pages_supported = false;
     container->dma_max_mappings = 0;
+    container->io_ops = &vfio_cont_io_ioctl;
+    container->need_map_fd = false;
     QLIST_INIT(&container->giommu_list);
     QLIST_INIT(&container->hostwin_list);
     QLIST_INIT(&container->vrdl_list);
@@ -2338,6 +2265,8 @@ void vfio_connect_proxy(VFIOProxy *proxy, VFIOGroup *group, AddressSpace *as)
     container = g_malloc0(sizeof(*container));
     container->space = space;
     container->fd = -1;
+    container->io_ops = &vfio_cont_io_sock;
+    container->need_map_fd = (proxy->flags & VFIO_PROXY_SECURE) == 0;
     QLIST_INIT(&container->giommu_list);
     QLIST_INIT(&container->hostwin_list);
     container->proxy = proxy;
@@ -2647,20 +2576,11 @@ int vfio_get_region_info(VFIODevice *vbasedev, int index,
 retry:
     (*info)->argsz = argsz;
 
-    if (vbasedev->proxy != NULL) {
-        VFIOUserFDs fds = { 0, 1, &fd};
-
-        ret = vfio_user_get_region_info(vbasedev, index, *info, &fds);
-    } else {
-        ret = ioctl(vbasedev->fd, VFIO_DEVICE_GET_REGION_INFO, *info);
-        if (ret < 0) {
-            ret = -errno;
-        }
-    }
+    ret = VDEV_GET_REGION_INFO(vbasedev, *info, &fd);
     if (ret != 0) {
         g_free(*info);
         *info = NULL;
-        return -errno;
+        return ret;
     }
 
     if ((*info)->argsz > argsz) {
@@ -2677,7 +2597,6 @@ retry:
     /* fill cache */
     vbasedev->regions[index] = g_malloc0(argsz);
     memcpy(vbasedev->regions[index], *info, argsz);
-    *vbasedev->regions[index] = **info;
     if (vbasedev->regfds != NULL) {
         vbasedev->regfds[index] = fd;
     }
@@ -2829,3 +2748,172 @@ int vfio_eeh_as_op(AddressSpace *as, uint32_t op)
     }
     return vfio_eeh_container_op(container, op);
 }
+
+
+/*
+ * Traditional ioctl() based io_ops
+ */
+
+static int vfio_io_get_info(VFIODevice *vbasedev, struct vfio_device_info *info)
+{
+    int ret;
+
+    ret = ioctl(vbasedev->fd, VFIO_DEVICE_GET_INFO, info);
+    if (ret < 0) {
+        ret = -errno;
+    }
+
+    return ret;
+}
+
+static int vfio_io_get_region_info(VFIODevice *vbasedev,
+                                   struct vfio_region_info *info,
+                                   int *fd)
+{
+    int ret;
+
+    *fd = -1;
+    ret = ioctl(vbasedev->fd, VFIO_DEVICE_GET_REGION_INFO, info);
+    if (ret < 0) {
+        ret = -errno;
+    }
+
+    return ret;
+}
+
+static int vfio_io_get_irq_info(VFIODevice *vbasedev, struct vfio_irq_info *info)
+{
+    int ret;
+
+    ret = ioctl(vbasedev->fd, VFIO_DEVICE_GET_IRQ_INFO, info);
+    if (ret < 0) {
+        ret = -errno;
+    }
+
+    return ret;
+}
+
+static int vfio_io_set_irqs(VFIODevice *vbasedev, struct vfio_irq_set *irqs)
+{
+    int ret;
+
+    ret = ioctl(vbasedev->fd, VFIO_DEVICE_SET_IRQS, irqs);
+    if (ret < 0) {
+        ret = -errno;
+    }
+
+    return ret;
+}
+
+static int vfio_io_region_read(VFIODevice *vbasedev, uint8_t index, off_t off,
+                               off_t fdoff, uint32_t size, void *data)
+{
+    int ret;
+
+    ret = pread(vbasedev->fd, data, size, fdoff);
+    if (ret < 0) {
+        ret = -errno;
+    }
+
+    return ret;
+}
+
+static int vfio_io_region_write(VFIODevice *vbasedev, uint8_t index, off_t off,
+                                off_t fdoff, uint32_t size, void *data,
+                                bool post)
+{
+    int ret;
+
+    ret = pwrite(vbasedev->fd, data, size, fdoff);
+    if (ret < 0) {
+        ret = -errno;
+    }
+
+    return ret;
+}
+
+VFIODevIO vfio_dev_io_ioctl = {
+    .get_info = vfio_io_get_info,
+    .get_region_info = vfio_io_get_region_info,
+    .get_irq_info = vfio_io_get_irq_info,
+    .set_irqs = vfio_io_set_irqs,
+    .region_read = vfio_io_region_read,
+    .region_write = vfio_io_region_write,
+};
+
+static int vfio_io_dma_map(VFIOContainer *container,
+                           struct vfio_iommu_type1_dma_map *map,
+                           int fd, bool will_commit)
+{
+
+    /*
+     * Try the mapping, if it fails with EBUSY, unmap the region and try
+     * again.  This shouldn't be necessary, but we sometimes see it in
+     * the VGA ROM space.
+     */
+    if (ioctl(container->fd, VFIO_IOMMU_MAP_DMA, map) == 0 ||
+        (errno == EBUSY &&
+         vfio_dma_unmap(container, map->iova, map->size, NULL) == 0 &&
+         ioctl(container->fd, VFIO_IOMMU_MAP_DMA, map) == 0)) {
+        return 0;
+    }
+    return -errno;
+}
+
+static int vfio_io_dma_unmap(VFIOContainer *container,
+                             struct vfio_iommu_type1_dma_unmap *unmap,
+                             struct vfio_bitmap *bitmap,
+                             bool will_commit)
+{
+
+    while (ioctl(container->fd, VFIO_IOMMU_UNMAP_DMA, unmap)) {
+        /*
+         * The type1 backend has an off-by-one bug in the kernel (71a7d3d78e3c
+         * v4.15) where an overflow in its wrap-around check prevents us from
+         * unmapping the last page of the address space.  Test for the error
+         * condition and re-try the unmap excluding the last page.  The
+         * expectation is that we've never mapped the last page anyway and this
+         * unmap request comes via vIOMMU support which also makes it unlikely
+         * that this page is used.  This bug was introduced well after type1 v2
+         * support was introduced, so we shouldn't need to test for v1.  A fix
+         * is queued for kernel v5.0 so this workaround can be removed once
+         * affected kernels are sufficiently deprecated.
+         */
+        if (errno == EINVAL && unmap->size && !(unmap->iova + unmap->size) &&
+            container->iommu_type == VFIO_TYPE1v2_IOMMU) {
+            trace_vfio_dma_unmap_overflow_workaround();
+            unmap->size -= 1ULL << ctz64(container->pgsizes);
+            continue;
+        }
+        error_report("VFIO_UNMAP_DMA failed: %s", strerror(errno));
+        return -errno;
+    }
+
+    return 0;
+}
+
+static int vfio_io_dirty_bitmap(VFIOContainer *container,
+                                struct vfio_iommu_type1_dirty_bitmap *bitmap,
+                                struct vfio_iommu_type1_dirty_bitmap_get *range)
+{
+    int ret;
+
+    ret = ioctl(container->fd, VFIO_IOMMU_DIRTY_PAGES, bitmap);
+    if (ret < 0) {
+        return -errno;
+    }
+
+    return ret;
+}
+
+static void vfio_io_wait_reqs(VFIOContainer *container)
+{
+    /* ioctl()s are synchronous */
+}
+
+VFIOContIO vfio_cont_io_ioctl = {
+    .dma_map = vfio_io_dma_map,
+    .dma_unmap = vfio_io_dma_unmap,
+    .dirty_bitmap = vfio_io_dirty_bitmap,
+    .wait_reqs = vfio_io_wait_reqs,
+};

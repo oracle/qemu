@@ -109,7 +109,7 @@ typedef struct {
 
 /*
  * VFIO_USER_DEVICE_GET_INFO
- * imported from struct_device_info
+ * imported from struct vfio_device_info
  */
 typedef struct {
     VFIOUserHdr hdr;
