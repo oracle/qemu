@@ -228,6 +228,7 @@ static int vfio_user_recv_one(VFIOProxy *proxy)
         break;
     default:
         error_setg(&local_err, "vfio_user_recv unknown message type");
+        isreply = false;
         goto fatal;
     }
 
@@ -258,9 +259,13 @@ static int vfio_user_recv_one(VFIOProxy *proxy)
             msg->fds->recv_fds = numfds;
             memcpy(msg->fds->fds, fdp, numfds * sizeof(int));
         }
-    } else if (numfds != 0) {
-        reqfds = vfio_user_getfds(numfds);
-        memcpy(reqfds->fds, fdp, numfds * sizeof(int));
+    } else {
+        if (numfds != 0) {
+            reqfds = vfio_user_getfds(numfds);
+            memcpy(reqfds->fds, fdp, numfds * sizeof(int));
+        } else {
+            reqfds = NULL;
+        }
     }
 
     /*
@@ -428,25 +433,30 @@ static void vfio_user_cb(void *opaque)
 static void vfio_user_request(void *opaque)
 {
     VFIOProxy *proxy = opaque;
-    VFIOUserMsgQ list;
+    VFIOUserMsgQ new, free;
     VFIOUserMsg *msg;
 
-    /*
-     * BQL held, so the proxy won't be deleted, but
-     * the proxy lock is needed to modify 'incoming'.
-     */
+    /* reap all incoming */
     WITH_QEMU_LOCK_GUARD(&proxy->lock) {
-        list = proxy->incoming;
+        new = proxy->incoming;
         QTAILQ_INIT(&proxy->incoming);
     }
+    QTAILQ_INIT(&free);
 
-    while (!QTAILQ_EMPTY(&list)) {
-        msg = QTAILQ_FIRST(&list);
-        QTAILQ_REMOVE(&list, msg, next);
+    /* process list */
+    while (!QTAILQ_EMPTY(&new)) {
+        msg = QTAILQ_FIRST(&new);
+        QTAILQ_REMOVE(&new, msg, next);
         proxy->request(proxy->req_arg, msg);
+        QTAILQ_INSERT_HEAD(&free, msg, next);
+    }
 
-        msg->hdr = NULL;
-        vfio_user_recycle(proxy, msg);
+    /* free list */
+    WITH_QEMU_LOCK_GUARD(&proxy->lock) {
+        while (!QTAILQ_EMPTY(&free)) {
+            QTAILQ_REMOVE(&free, msg, next);
+            vfio_user_recycle(proxy, msg);
+        }
     }
 }
 
