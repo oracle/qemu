@@ -160,6 +160,8 @@ typedef struct VFIODevice {
     int *regfds;
 } VFIODevice;
 
+#ifdef CONFIG_LINUX
+
 struct VFIODeviceOps {
     void (*vfio_compute_needs_reset)(VFIODevice *vdev);
     int (*vfio_hot_reset_multi)(VFIODevice *vdev);
@@ -198,8 +200,8 @@ struct VFIODevIO {
 #define VDEV_REGION_READ(vdev, nr, off, fdoff, size, data) \
     ((vdev)->io_ops->region_read((vdev), (nr), (off), (fdoff), (size), (data)))
 #define VDEV_REGION_WRITE(vdev, nr, off, fdoff, size, data, post) \
-    ((vdev)->io_ops->region_write((vdev), (nr), (off), (fdoff), (size), (data), \
-                                  (post)))
+    ((vdev)->io_ops->region_write((vdev), (nr), (off), (fdoff), (size), \
+                                  (data), (post)))
 
 struct VFIOContIO {
     int (*dma_map)(VFIOContainer *container,
@@ -243,6 +245,8 @@ struct VFIOValidOps {
     ((vdev)->valid_ops->validate_get_region_info((vdev), (info), (fd)))
 #define VDEV_VALID_IRQ_INFO(vdev, irq) \
     ((vdev)->valid_ops->validate_get_irq_info((vdev), (irq)))
+
+#endif /* CONFIG_LINUX */
 
 typedef struct VFIOGroup {
     int fd;

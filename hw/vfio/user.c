@@ -58,9 +58,12 @@ static void vfio_user_send_wait(VFIOProxy *proxy, VFIOUserHdr *hdr,
                                 VFIOUserFDs *fds, int rsize, bool nobql);
 static void vfio_user_wait_reqs(VFIOProxy *proxy);
 
-#define vfio_user_set_error(hdr, err)   \
-    (hdr)->flags |= VFIO_USER_ERROR;    \
-    (hdr)->error_reply = (err);
+
+static inline void vfio_user_set_error(VFIOUserHdr *hdr, uint32_t err)
+{
+    hdr->flags |= VFIO_USER_ERROR;
+    hdr->error_reply = err;
+}
 
 /*
  * Functions called by main, CPU, or iothread threads
@@ -380,7 +383,7 @@ static void vfio_user_send(void *opaque)
 /*
  * Send a single message.
  *
- * Sent async messages are freed, others are moved to pending queue. 
+ * Sent async messages are freed, others are moved to pending queue.
  */
 static int vfio_user_send_one(VFIOProxy *proxy, VFIOUserMsg *msg)
 {
@@ -454,6 +457,7 @@ static void vfio_user_request(void *opaque)
     /* free list */
     WITH_QEMU_LOCK_GUARD(&proxy->lock) {
         while (!QTAILQ_EMPTY(&free)) {
+            msg = QTAILQ_FIRST(&free);
             QTAILQ_REMOVE(&free, msg, next);
             vfio_user_recycle(proxy, msg);
         }
@@ -1096,7 +1100,7 @@ static int vfio_user_dma_map(VFIOProxy *proxy,
         vfio_user_send_nowait(proxy, &msgp->hdr, fds, 0);
         ret = 0;
     } else {
-        VFIOUserFDs local_fds = { 1, 0, &fd };;
+        VFIOUserFDs local_fds = { 1, 0, &fd };
 
         fds = fd != -1 ? &local_fds : NULL;
         vfio_user_send_wait(proxy, &msgp->hdr, fds, 0, will_commit);
@@ -1391,7 +1395,8 @@ void vfio_user_reset(VFIOProxy *proxy)
 
 static int vfio_user_dirty_bitmap(VFIOProxy *proxy,
                                   struct vfio_iommu_type1_dirty_bitmap *cmd,
-                                  struct vfio_iommu_type1_dirty_bitmap_get *dbitmap)
+                                  struct vfio_iommu_type1_dirty_bitmap_get
+                                  *dbitmap)
 {
     g_autofree struct {
         VFIOUserDirtyPages msg;
@@ -1475,7 +1480,8 @@ static int vfio_user_io_get_irq_info(VFIODevice *vbasedev,
     return VDEV_VALID_IRQ_INFO(vbasedev, irq);
 }
 
-static int vfio_user_io_set_irqs(VFIODevice *vbasedev, struct vfio_irq_set *irqs)
+static int vfio_user_io_set_irqs(VFIODevice *vbasedev,
+                                 struct vfio_irq_set *irqs)
 {
     return vfio_user_set_irqs(vbasedev->proxy, irqs);
 }
@@ -1491,7 +1497,8 @@ static int vfio_user_io_region_write(VFIODevice *vbasedev, uint8_t index,
                                      off_t off, off_t fdoff,
                                      unsigned size, void *data, bool post)
 {
-    return vfio_user_region_write(vbasedev->proxy, index, off, size, data, post);
+    return vfio_user_region_write(vbasedev->proxy, index, off, size, data,
+                                  post);
 }
 
 VFIODevIO vfio_dev_io_sock = {

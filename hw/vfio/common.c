@@ -238,8 +238,8 @@ void vfio_region_write(void *opaque, hwaddr addr,
     if (region->nr_mmaps) {
         post = false;
     }
-    ret = VDEV_REGION_WRITE(vbasedev, region->nr, addr, region->fd_offset + addr,
-                            size, &buf, post);
+    ret = VDEV_REGION_WRITE(vbasedev, region->nr, addr,
+                            region->fd_offset + addr, size, &buf, post);
     if (ret != size) {
         const char *err = ret < 0 ? strerror(-ret) : "short write";
 
@@ -2781,7 +2781,8 @@ static int vfio_io_get_region_info(VFIODevice *vbasedev,
     return ret;
 }
 
-static int vfio_io_get_irq_info(VFIODevice *vbasedev, struct vfio_irq_info *info)
+static int vfio_io_get_irq_info(VFIODevice *vbasedev,
+                                struct vfio_irq_info *info)
 {
     int ret;
 

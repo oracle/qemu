@@ -1158,7 +1158,7 @@ void vfio_pci_write_config(PCIDevice *pdev,
                            uint32_t addr, uint32_t val, int len)
 {
     VFIOPCIDevice *vdev = VFIO_PCI_BASE(pdev);
-    VFIODevice *vbasedev = &vdev->vbasedev; 
+    VFIODevice *vbasedev = &vdev->vbasedev;
     uint32_t val_le = cpu_to_le32(val);
     int ret;
 
@@ -3407,7 +3407,7 @@ static int vfio_pci_valid_info(VFIODevice *vbasedev,
     return 0;
 }
 
-static int vfio_pci_valid_region_info(VFIODevice *vbasedev, 
+static int vfio_pci_valid_region_info(VFIODevice *vbasedev,
                                           struct vfio_region_info *info,
                                           int *fd)
 {
@@ -3421,7 +3421,7 @@ static int vfio_pci_valid_region_info(VFIODevice *vbasedev,
         return -EINVAL;
     }
     /* cap_offset in valid area */
-    if ((info->flags & VFIO_REGION_INFO_FLAG_CAPS) && 
+    if ((info->flags & VFIO_REGION_INFO_FLAG_CAPS) &&
         (info->cap_offset < sizeof(*info) || info->cap_offset > info->argsz)) {
         return -EINVAL;
     }
