@@ -3553,7 +3553,7 @@ static void vfio_user_pci_process_req(void *opaque, VFIOUserMsg *msg)
 }
 
 /*
- * Emulated devices don't use host hot reset
+ * Emulated devices do not use host hot reset
  */
 static int vfio_user_pci_no_reset(VFIODevice *vbasedev)
 {
@@ -3775,9 +3775,11 @@ static void vfio_user_instance_finalize(Object *obj)
     VFIODevice *vbasedev = &vdev->vbasedev;
     VFIOGroup *group = vbasedev->group;
 
-    vfio_disconnect_proxy(group);
-    g_free(group);
-    vbasedev->group = NULL;
+    if (group != NULL) {
+        vfio_disconnect_proxy(group);
+        g_free(group);
+        vbasedev->group = NULL;
+    }
 
     vfio_put_device(vdev);
 
