@@ -190,7 +190,7 @@ static int vfio_user_recv_one(VFIOProxy *proxy)
         .iov_base = &hdr,
         .iov_len = sizeof(hdr),
     };
-    bool isreply;
+    bool isreply = false;
     int i, ret;
     size_t msgleft, numfds = 0;
     char *data = NULL;
@@ -231,7 +231,6 @@ static int vfio_user_recv_one(VFIOProxy *proxy)
         break;
     default:
         error_setg(&local_err, "vfio_user_recv unknown message type");
-        isreply = false;
         goto fatal;
     }
 
