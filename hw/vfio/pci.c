@@ -3783,7 +3783,9 @@ static void vfio_user_instance_finalize(Object *obj)
 
     vfio_put_device(vdev);
 
-    vfio_user_disconnect(vbasedev->proxy);
+    if (vbasedev->proxy != NULL) {
+        vfio_user_disconnect(vbasedev->proxy);
+    }
 }
 
 static void vfio_user_pci_reset(DeviceState *dev)
