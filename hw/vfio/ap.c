@@ -102,6 +102,7 @@ static void vfio_ap_realize(DeviceState *dev, Error **errp)
     mdevid = basename(vapdev->vdev.sysfsdev);
     vapdev->vdev.name = g_strdup_printf("%s", mdevid);
     vapdev->vdev.dev = dev;
+    vapdev->vdev.io_ops = &vfio_dev_io_ioctl;
 
     /*
      * vfio-ap devices operate in a way compatible with discarding of
