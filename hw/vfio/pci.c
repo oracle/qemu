@@ -3371,3 +3371,70 @@ static void register_vfio_pci_dev_type(void)
 }
 
 type_init(register_vfio_pci_dev_type)
+
+
+/*
+ * PCI validation ops - used when return values need
+ * validation before use
+ */
+
+static int vfio_pci_valid_info(VFIODevice *vbasedev,
+                               struct vfio_device_info *info)
+{
+    /* must be PCI */
+    if ((info->flags & VFIO_DEVICE_FLAGS_PCI) == 0) {
+        return -EINVAL;
+    }
+    /* only other valid flag is reset */
+    if (info->flags & ~(VFIO_DEVICE_FLAGS_PCI | VFIO_DEVICE_FLAGS_RESET)) {
+        return -EINVAL;
+    }
+    /* account for extra migration region */
+    if (info->num_regions > VFIO_PCI_NUM_REGIONS + 1) {
+        return -EINVAL;
+    }
+    if (info->num_irqs > VFIO_PCI_NUM_IRQS) {
+        return -EINVAL;
+    }
+    return 0;
+}
+
+static int vfio_pci_valid_region_info(VFIODevice *vbasedev,
+                                          struct vfio_region_info *info,
+                                          int *fd)
+{
+    if (info->flags & ~(VFIO_REGION_INFO_FLAG_READ |
+                        VFIO_REGION_INFO_FLAG_WRITE |
+                        VFIO_REGION_INFO_FLAG_MMAP |
+                        VFIO_REGION_INFO_FLAG_CAPS)) {
+        return -EINVAL;
+    }
+    if (info->index > vbasedev->num_regions) {
+        return -EINVAL;
+    }
+    /* cap_offset in valid area */
+    if ((info->flags & VFIO_REGION_INFO_FLAG_CAPS) &&
+        (info->cap_offset < sizeof(*info) || info->cap_offset > info->argsz)) {
+        return -EINVAL;
+    }
+    return 0;
+}
+
+static int vfio_pci_valid_irq_info(VFIODevice *vbasedev,
+                                 struct vfio_irq_info *info)
+{
+    if (info->flags & ~(VFIO_IRQ_INFO_EVENTFD | VFIO_IRQ_INFO_MASKABLE |
+                        VFIO_IRQ_INFO_AUTOMASKED | VFIO_IRQ_INFO_NORESIZE)) {
+        return -EINVAL;
+    }
+    if (info->index > vbasedev->num_irqs) {
+        return -EINVAL;
+    }
+    return 0;
+}
+
+struct VFIOValidOps vfio_pci_valid_ops = {
+    .validate_get_info = vfio_pci_valid_info,
+    .validate_get_region_info = vfio_pci_valid_region_info,
+    .validate_get_irq_info = vfio_pci_valid_irq_info,
+};
