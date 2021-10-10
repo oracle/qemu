@@ -608,6 +608,7 @@ static void vfio_ccw_get_device(VFIOGroup *group, VFIOCCWDevice *vcdev,
     vcdev->vdev.type = VFIO_DEVICE_TYPE_CCW;
     vcdev->vdev.name = name;
     vcdev->vdev.dev = DEVICE(vcdev);
+    vcdev->vdev.io = &vfio_dev_io_ioctl;
 
     return;
 
