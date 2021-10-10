@@ -125,6 +125,7 @@ typedef struct VFIOHostDMAWindow {
 
 typedef struct VFIODeviceOps VFIODeviceOps;
 typedef struct VFIODevIO VFIODevIO;
+typedef struct VFIOValidOps VFIOValidOps;
 
 typedef struct VFIODevice {
     QLIST_ENTRY(VFIODevice) next;
@@ -141,6 +142,7 @@ typedef struct VFIODevice {
     bool enable_migration;
     VFIODeviceOps *ops;
     VFIODevIO *io_ops;
+    VFIOValidOps *valid_ops;
     unsigned int num_irqs;
     unsigned int num_regions;
     unsigned int flags;
@@ -213,6 +215,25 @@ struct VFIOContIO {
 
 extern VFIODevIO vfio_dev_io_ioctl;
 extern VFIOContIO vfio_cont_io_ioctl;
+
+/*
+ * This ops vector allows for bus-specific verification
+ * routines in cases where the server may not be fully
+ * trusted.
+ */
+struct VFIOValidOps {
+    int (*validate_get_info)(VFIODevice *vdev, struct vfio_device_info *info);
+    int (*validate_get_region_info)(VFIODevice *vdev,
+                                    struct vfio_region_info *info, int *fd);
+    int (*validate_get_irq_info)(VFIODevice *vdev, struct vfio_irq_info *info);
+};
+
+#define VDEV_VALID_INFO(vdev, info) \
+    ((vdev)->valid_ops->validate_get_info((vdev), (info)))
+#define VDEV_VALID_REGION_INFO(vdev, info, fd) \
+    ((vdev)->valid_ops->validate_get_region_info((vdev), (info), (fd)))
+#define VDEV_VALID_IRQ_INFO(vdev, irq) \
+    ((vdev)->valid_ops->validate_get_irq_info((vdev), (irq)))
 
 #endif /* CONFIG_LINUX */
 
