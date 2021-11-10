@@ -926,10 +926,8 @@ nvmm_init_vcpu(CPUState *cpu)
         error_setg(&nvmm_migration_blocker,
             "NVMM: Migration not supported");
 
-        (void)migrate_add_blocker(nvmm_migration_blocker, &local_error);
-        if (local_error) {
+        if (migrate_add_blocker(nvmm_migration_blocker, &local_error) < 0) {
             error_report_err(local_error);
-            migrate_del_blocker(nvmm_migration_blocker);
             error_free(nvmm_migration_blocker);
             return -EINVAL;
         }
@@ -1125,6 +1123,7 @@ nvmm_log_sync(MemoryListener *listener, MemoryRegionSection *section)
 }
 
 static MemoryListener nvmm_memory_listener = {
+    .name = "nvmm",
     .begin = nvmm_transaction_begin,
     .commit = nvmm_transaction_commit,
     .region_add = nvmm_region_add,
@@ -1134,13 +1133,14 @@ static MemoryListener nvmm_memory_listener = {
 };
 
 static void
-nvmm_ram_block_added(RAMBlockNotifier *n, void *host, size_t size)
+nvmm_ram_block_added(RAMBlockNotifier *n, void *host, size_t size,
+                     size_t max_size)
 {
     struct nvmm_machine *mach = get_nvmm_mach();
     uintptr_t hva = (uintptr_t)host;
     int ret;
 
-    ret = nvmm_hva_map(mach, hva, size);
+    ret = nvmm_hva_map(mach, hva, max_size);
 
     if (ret == -1) {
         error_report("NVMM: Failed to map HVA, HostVA:%p "

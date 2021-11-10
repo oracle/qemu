@@ -124,6 +124,25 @@ cross-ppc64el-user:
   variables:
     IMAGE: debian-ppc64el-cross
 
+# The riscv64 cross-builds currently use a 'sid' container to get
+# compilers and libraries. Until something more stable is found we
+# allow_failure so as not to block CI.
+cross-riscv64-system:
+  extends: .cross_system_build_job
+  allow_failure: true
+  needs:
+    job: riscv64-debian-cross-container
+  variables:
+    IMAGE: debian-riscv64-cross
+
+cross-riscv64-user:
+  extends: .cross_user_build_job
+  allow_failure: true
+  needs:
+    job: riscv64-debian-cross-container
+  variables:
+    IMAGE: debian-riscv64-cross
+
 cross-s390x-system:
   extends: .cross_system_build_job
   needs:
@@ -160,6 +179,8 @@ cross-win32-system:
     job: win32-fedora-cross-container
   variables:
     IMAGE: fedora-win32-cross
+    CROSS_SKIP_TARGETS: alpha-softmmu avr-softmmu hppa-softmmu m68k-softmmu
+                        microblazeel-softmmu mips64el-softmmu nios2-softmmu
   artifacts:
     paths:
       - build/qemu-setup*.exe
@@ -170,6 +191,8 @@ cross-win64-system:
     job: win64-fedora-cross-container
   variables:
     IMAGE: fedora-win64-cross
+    CROSS_SKIP_TARGETS: or1k-softmmu rx-softmmu sh4eb-softmmu sparc64-softmmu
+                        tricore-softmmu xtensaeb-softmmu
   artifacts:
     paths:
       - build/qemu-setup*.exe

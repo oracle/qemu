@@ -49,6 +49,8 @@
 #include "qemu/timer.h"
 #include "qemu/cutils.h"
 #include "qemu/id.h"
+#include "qemu/range.h"
+#include "qemu/rcu.h"
 #include "block/coroutines.h"
 
 #ifdef CONFIG_BSD
@@ -81,6 +83,9 @@ static BlockDriverState *bdrv_open_inherit(const char *filename,
                                            const BdrvChildClass *child_class,
                                            BdrvChildRole child_role,
                                            Error **errp);
+
+static bool bdrv_recurse_has_child(BlockDriverState *bs,
+                                   BlockDriverState *child);
 
 static void bdrv_replace_child_noperm(BdrvChild *child,
                                       BlockDriverState *new_bs);
@@ -400,6 +405,9 @@ BlockDriverState *bdrv_new(void)
     bs->aio_context = qemu_get_aio_context();
 
     qemu_co_queue_init(&bs->flush_queue);
+
+    qemu_co_mutex_init(&bs->bsc_modify_lock);
+    bs->block_status_cache = g_new0(BdrvBlockStatusCache, 1);
 
     for (i = 0; i < bdrv_drain_all_count; i++) {
         bdrv_drained_begin(bs);
@@ -1599,16 +1607,26 @@ open_failed:
     return ret;
 }
 
-BlockDriverState *bdrv_new_open_driver(BlockDriver *drv, const char *node_name,
-                                       int flags, Error **errp)
+/*
+ * Create and open a block node.
+ *
+ * @options is a QDict of options to pass to the block drivers, or NULL for an
+ * empty set of options. The reference to the QDict belongs to the block layer
+ * after the call (even on failure), so if the caller intends to reuse the
+ * dictionary, it needs to use qobject_ref() before calling bdrv_open.
+ */
+BlockDriverState *bdrv_new_open_driver_opts(BlockDriver *drv,
+                                            const char *node_name,
+                                            QDict *options, int flags,
+                                            Error **errp)
 {
     BlockDriverState *bs;
     int ret;
 
     bs = bdrv_new();
     bs->open_flags = flags;
-    bs->explicit_options = qdict_new();
-    bs->options = qdict_new();
+    bs->options = options ?: qdict_new();
+    bs->explicit_options = qdict_clone_shallow(bs->options);
     bs->opaque = NULL;
 
     update_options_from_flags(bs->options, flags);
@@ -1624,6 +1642,13 @@ BlockDriverState *bdrv_new_open_driver(BlockDriver *drv, const char *node_name,
     }
 
     return bs;
+}
+
+/* Create and open a block node. */
+BlockDriverState *bdrv_new_open_driver(BlockDriver *drv, const char *node_name,
+                                       int flags, Error **errp)
+{
+    return bdrv_new_open_driver_opts(drv, node_name, NULL, flags, errp);
 }
 
 QemuOptsList bdrv_runtime_opts = {
@@ -2651,6 +2676,7 @@ static void bdrv_replace_child_noperm(BdrvChild *child,
     int drain_saldo;
 
     assert(!child->frozen);
+    assert(old_bs != new_bs);
 
     if (old_bs && new_bs) {
         assert(bdrv_get_aio_context(old_bs) == bdrv_get_aio_context(new_bs));
@@ -2869,6 +2895,12 @@ static int bdrv_attach_child_noperm(BlockDriverState *parent_bs,
     uint64_t perm, shared_perm;
 
     assert(parent_bs->drv);
+
+    if (bdrv_recurse_has_child(child_bs, parent_bs)) {
+        error_setg(errp, "Making '%s' a %s child of '%s' would create a cycle",
+                   child_bs->node_name, child_name, parent_bs->node_name);
+        return -EINVAL;
+    }
 
     bdrv_get_cumulative_perm(parent_bs, &perm, &shared_perm);
     bdrv_child_perm(parent_bs, child_bs, NULL, child_role, NULL,
@@ -4694,6 +4726,8 @@ static void bdrv_close(BlockDriverState *bs)
     bs->explicit_options = NULL;
     qobject_unref(bs->full_open_options);
     bs->full_open_options = NULL;
+    g_free(bs->block_status_cache);
+    bs->block_status_cache = NULL;
 
     bdrv_release_named_dirty_bitmaps(bs);
     assert(QLIST_EMPTY(&bs->dirty_bitmaps));
@@ -5048,6 +5082,37 @@ out:
     return ret;
 }
 
+/* Not for empty child */
+int bdrv_replace_child_bs(BdrvChild *child, BlockDriverState *new_bs,
+                          Error **errp)
+{
+    int ret;
+    Transaction *tran = tran_new();
+    g_autoptr(GHashTable) found = NULL;
+    g_autoptr(GSList) refresh_list = NULL;
+    BlockDriverState *old_bs = child->bs;
+
+    bdrv_ref(old_bs);
+    bdrv_drained_begin(old_bs);
+    bdrv_drained_begin(new_bs);
+
+    bdrv_replace_child_tran(child, new_bs, tran);
+
+    found = g_hash_table_new(NULL, NULL);
+    refresh_list = bdrv_topological_dfs(refresh_list, found, old_bs);
+    refresh_list = bdrv_topological_dfs(refresh_list, found, new_bs);
+
+    ret = bdrv_list_refresh_perms(refresh_list, NULL, tran, errp);
+
+    tran_finalize(tran, ret);
+
+    bdrv_drained_end(old_bs);
+    bdrv_drained_end(new_bs);
+    bdrv_unref(old_bs);
+
+    return ret;
+}
+
 static void bdrv_delete(BlockDriverState *bs)
 {
     assert(bdrv_op_blocker_is_empty(bs));
@@ -5064,29 +5129,61 @@ static void bdrv_delete(BlockDriverState *bs)
     g_free(bs);
 }
 
-BlockDriverState *bdrv_insert_node(BlockDriverState *bs, QDict *node_options,
+
+/*
+ * Replace @bs by newly created block node.
+ *
+ * @options is a QDict of options to pass to the block drivers, or NULL for an
+ * empty set of options. The reference to the QDict belongs to the block layer
+ * after the call (even on failure), so if the caller intends to reuse the
+ * dictionary, it needs to use qobject_ref() before calling bdrv_open.
+ */
+BlockDriverState *bdrv_insert_node(BlockDriverState *bs, QDict *options,
                                    int flags, Error **errp)
 {
-    BlockDriverState *new_node_bs;
-    Error *local_err = NULL;
+    ERRP_GUARD();
+    int ret;
+    BlockDriverState *new_node_bs = NULL;
+    const char *drvname, *node_name;
+    BlockDriver *drv;
 
-    new_node_bs = bdrv_open(NULL, NULL, node_options, flags, errp);
-    if (new_node_bs == NULL) {
+    drvname = qdict_get_try_str(options, "driver");
+    if (!drvname) {
+        error_setg(errp, "driver is not specified");
+        goto fail;
+    }
+
+    drv = bdrv_find_format(drvname);
+    if (!drv) {
+        error_setg(errp, "Unknown driver: '%s'", drvname);
+        goto fail;
+    }
+
+    node_name = qdict_get_try_str(options, "node-name");
+
+    new_node_bs = bdrv_new_open_driver_opts(drv, node_name, options, flags,
+                                            errp);
+    options = NULL; /* bdrv_new_open_driver() eats options */
+    if (!new_node_bs) {
         error_prepend(errp, "Could not create node: ");
-        return NULL;
+        goto fail;
     }
 
     bdrv_drained_begin(bs);
-    bdrv_replace_node(bs, new_node_bs, &local_err);
+    ret = bdrv_replace_node(bs, new_node_bs, errp);
     bdrv_drained_end(bs);
 
-    if (local_err) {
-        bdrv_unref(new_node_bs);
-        error_propagate(errp, local_err);
-        return NULL;
+    if (ret < 0) {
+        error_prepend(errp, "Could not replace node: ");
+        goto fail;
     }
 
     return new_node_bs;
+
+fail:
+    qobject_unref(options);
+    bdrv_unref(new_node_bs);
+    return NULL;
 }
 
 /*
@@ -6288,6 +6385,7 @@ static int bdrv_inactivate_recurse(BlockDriverState *bs)
 {
     BdrvChild *child, *parent;
     int ret;
+    uint64_t cumulative_perms, cumulative_shared_perms;
 
     if (!bs->drv) {
         return -ENOMEDIUM;
@@ -6316,6 +6414,13 @@ static int bdrv_inactivate_recurse(BlockDriverState *bs)
                 return ret;
             }
         }
+    }
+
+    bdrv_get_cumulative_perm(bs, &cumulative_perms,
+                             &cumulative_shared_perms);
+    if (cumulative_perms & (BLK_PERM_WRITE | BLK_PERM_WRITE_UNCHANGED)) {
+        /* Our inactive parents still need write access. Inactivation failed. */
+        return -EPERM;
     }
 
     bs->open_flags |= BDRV_O_INACTIVE;
@@ -7652,4 +7757,77 @@ BlockDriverState *bdrv_skip_filters(BlockDriverState *bs)
 BlockDriverState *bdrv_backing_chain_next(BlockDriverState *bs)
 {
     return bdrv_skip_filters(bdrv_cow_bs(bdrv_skip_filters(bs)));
+}
+
+/**
+ * Check whether [offset, offset + bytes) overlaps with the cached
+ * block-status data region.
+ *
+ * If so, and @pnum is not NULL, set *pnum to `bsc.data_end - offset`,
+ * which is what bdrv_bsc_is_data()'s interface needs.
+ * Otherwise, *pnum is not touched.
+ */
+static bool bdrv_bsc_range_overlaps_locked(BlockDriverState *bs,
+                                           int64_t offset, int64_t bytes,
+                                           int64_t *pnum)
+{
+    BdrvBlockStatusCache *bsc = qatomic_rcu_read(&bs->block_status_cache);
+    bool overlaps;
+
+    overlaps =
+        qatomic_read(&bsc->valid) &&
+        ranges_overlap(offset, bytes, bsc->data_start,
+                       bsc->data_end - bsc->data_start);
+
+    if (overlaps && pnum) {
+        *pnum = bsc->data_end - offset;
+    }
+
+    return overlaps;
+}
+
+/**
+ * See block_int.h for this function's documentation.
+ */
+bool bdrv_bsc_is_data(BlockDriverState *bs, int64_t offset, int64_t *pnum)
+{
+    RCU_READ_LOCK_GUARD();
+
+    return bdrv_bsc_range_overlaps_locked(bs, offset, 1, pnum);
+}
+
+/**
+ * See block_int.h for this function's documentation.
+ */
+void bdrv_bsc_invalidate_range(BlockDriverState *bs,
+                               int64_t offset, int64_t bytes)
+{
+    RCU_READ_LOCK_GUARD();
+
+    if (bdrv_bsc_range_overlaps_locked(bs, offset, bytes, NULL)) {
+        qatomic_set(&bs->block_status_cache->valid, false);
+    }
+}
+
+/**
+ * See block_int.h for this function's documentation.
+ */
+void bdrv_bsc_fill(BlockDriverState *bs, int64_t offset, int64_t bytes)
+{
+    BdrvBlockStatusCache *new_bsc = g_new(BdrvBlockStatusCache, 1);
+    BdrvBlockStatusCache *old_bsc;
+
+    *new_bsc = (BdrvBlockStatusCache) {
+        .valid = true,
+        .data_start = offset,
+        .data_end = offset + bytes,
+    };
+
+    QEMU_LOCK_GUARD(&bs->bsc_modify_lock);
+
+    old_bsc = qatomic_rcu_read(&bs->block_status_cache);
+    qatomic_rcu_set(&bs->block_status_cache, new_bsc);
+    if (old_bsc) {
+        g_free_rcu(old_bsc, rcu);
+    }
 }

@@ -789,6 +789,14 @@ static const char *qtest_qemu_storage_daemon_binary(void)
         exit(0);
     }
 
+    /* If we've got a path to the binary, check whether we can access it */
+    if (strchr(qemu_storage_daemon_bin, '/') &&
+        access(qemu_storage_daemon_bin, X_OK) != 0) {
+        fprintf(stderr, "ERROR: '%s' is not accessible\n",
+                qemu_storage_daemon_bin);
+        exit(1);
+    }
+
     return qemu_storage_daemon_bin;
 }
 
@@ -898,9 +906,9 @@ static void start_vhost_user_blk(GString *cmd_line, int vus_instances,
         img_path = drive_create();
         g_string_append_printf(storage_daemon_command,
             "--blockdev driver=file,node-name=disk%d,filename=%s "
-            "--export type=vhost-user-blk,id=disk%d,addr.type=unix,addr.path=%s,"
+            "--export type=vhost-user-blk,id=disk%d,addr.type=fd,addr.str=%d,"
             "node-name=disk%i,writable=on,num-queues=%d ",
-            i, img_path, i, sock_path, i, num_queues);
+            i, img_path, i, fd, i, num_queues);
 
         g_string_append_printf(cmd_line, "-chardev socket,id=char%d,path=%s ",
                                i + 1, sock_path);
