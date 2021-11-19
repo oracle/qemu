@@ -38,7 +38,6 @@ typedef struct VFIOUserMsg {
     enum msg_type type;
 } VFIOUserMsg;
 
-
 enum proxy_state {
     VFIO_PROXY_CONNECTED = 1,
     VFIO_PROXY_ERROR = 2,

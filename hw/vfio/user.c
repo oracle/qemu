@@ -60,7 +60,6 @@ static void vfio_user_wait_reqs(VFIOProxy *proxy);
 static void vfio_user_request_msg(VFIOUserHdr *hdr, uint16_t cmd,
                                   uint32_t size, uint32_t flags);
 
-
 static inline void vfio_user_set_error(VFIOUserHdr *hdr, uint32_t err)
 {
     hdr->flags |= VFIO_USER_ERROR;
@@ -139,6 +138,9 @@ static void vfio_user_recycle(VFIOProxy *proxy, VFIOUserMsg *msg)
     /* free msg buffer if no one is waiting to consume the reply */
     if (msg->type == VFIO_MSG_NOWAIT || msg->type == VFIO_MSG_ASYNC) {
         g_free(msg->hdr);
+        if (msg->fds != NULL) {
+            g_free(msg->fds);
+        }
     }
 
     msg->type = VFIO_MSG_NONE;
@@ -164,7 +166,6 @@ static VFIOUserFDs *vfio_user_getfds(int numfds)
 static void vfio_user_recv(void *opaque)
 {
     VFIOProxy *proxy = opaque;
-
 
     QEMU_LOCK_GUARD(&proxy->lock);
 
@@ -418,7 +419,6 @@ static void vfio_user_cb(void *opaque)
     qemu_cond_signal(&proxy->close_cv);
 }
 
-
 /*
  * Functions called by main or CPU threads
  */
@@ -634,6 +634,7 @@ static void vfio_user_send_wait(VFIOProxy *proxy, VFIOUserHdr *hdr,
     if (ret == 0) {
         while (!msg->complete) {
             if (!qemu_cond_timedwait(&msg->cv, &proxy->lock, wait_time)) {
+                QTAILQ_REMOVE(&proxy->pending, msg, next);
                 vfio_user_set_error(hdr, ETIMEDOUT);
                 break;
             }
@@ -672,6 +673,7 @@ static void vfio_user_wait_reqs(VFIOProxy *proxy)
         msg->type = VFIO_MSG_WAIT;
         while (!msg->complete) {
             if (!qemu_cond_timedwait(&msg->cv, &proxy->lock, wait_time)) {
+                QTAILQ_REMOVE(&proxy->pending, msg, next);
                 error_printf("vfio_wait_reqs - timed out\n");
                 break;
             }
@@ -960,11 +962,11 @@ static int check_migr(QObject *qobj, Error **errp)
 {
     QDict *qdict = qobject_to(QDict, qobj);
 
-    if (qdict == NULL || caps_parse(qdict, caps_migr, errp)) {
+    if (qdict == NULL) {
         error_setg(errp, "malformed %s", VFIO_USER_CAP_MAX_FDS);
         return -1;
     }
-    return 0;
+    return caps_parse(qdict, caps_migr, errp);
 }
 
 static struct cap_entry caps_cap[] = {
@@ -978,11 +980,11 @@ static int check_cap(QObject *qobj, Error **errp)
 {
    QDict *qdict = qobject_to(QDict, qobj);
 
-    if (qdict == NULL || caps_parse(qdict, caps_cap, errp)) {
-        error_setg(errp, "malformed %s", VFIO_USER_CAP);
-        return -1;
+    if (qdict == NULL) {
+         error_setg(errp, "malformed %s", VFIO_USER_CAP);
+         return -1;
     }
-    return 0;
+    return caps_parse(qdict, caps_cap, errp);
 }
 
 static struct cap_entry ver_0_0[] = {
@@ -1151,7 +1153,7 @@ static int vfio_user_dma_unmap(VFIOProxy *proxy,
     }
 
     vfio_user_request_msg(&msgp->msg.hdr, VFIO_USER_DMA_UNMAP, msize, 0);
-    msgp->msg.argsz = unmap->argsz;
+    msgp->msg.argsz = rsize - sizeof(VFIOUserHdr);
     msgp->msg.flags = unmap->flags;
     msgp->msg.iova = unmap->iova;
     msgp->msg.size = unmap->size;
@@ -1428,7 +1430,7 @@ static int vfio_user_dirty_bitmap(VFIOProxy *proxy,
     }
 
     vfio_user_request_msg(&msgp->msg.hdr, VFIO_USER_DIRTY_PAGES, msize, 0);
-    msgp->msg.argsz = msize - sizeof(msgp->msg.hdr);
+    msgp->msg.argsz = rsize - sizeof(VFIOUserHdr);
     msgp->msg.flags = cmd->flags;
 
     vfio_user_send_wait(proxy, &msgp->msg.hdr, NULL, rsize, false);
