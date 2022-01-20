@@ -304,7 +304,7 @@ static int vfio_user_recv_one(VFIOProxy *proxy)
         ret = qio_channel_read(proxy->ioc, data, msgleft, &local_err);
 
         /* error or would block */
-        if (ret < 0) {
+        if (ret <= 0) {
             goto fatal;
         }
 
@@ -1576,10 +1576,15 @@ static int vfio_user_io_dma_unmap(VFIOContainer *container,
                                container->async_ops);
 }
 
-static int vfio_user_io_dirty_bitmap(VFIOContainer *container,
+static int vfio_user_io_dirty_bitmap(VFIOContainer *container, MemoryRegion *mr,
                         struct vfio_iommu_type1_dirty_bitmap *bitmap,
                         struct vfio_iommu_type1_dirty_bitmap_get *range)
 {
+
+    /* if the region wasn't exported, this is a noop */
+    if (range != NULL && memory_region_get_fd(mr) == -1) {
+        return 0;
+    }
     return vfio_user_dirty_bitmap(container->proxy, bitmap, range);
 }
 

@@ -1243,7 +1243,7 @@ static void vfio_set_dirty_page_tracking(VFIOContainer *container, bool start)
         dirty.flags = VFIO_IOMMU_DIRTY_PAGES_FLAG_STOP;
     }
 
-    ret = CONT_DIRTY_BITMAP(container, &dirty, NULL);
+    ret = CONT_DIRTY_BITMAP(container, NULL, &dirty, NULL);
     if (ret) {
         error_report("Failed to set dirty tracking flag 0x%x errno: %d",
                      dirty.flags, -ret);
@@ -1264,8 +1264,9 @@ static void vfio_listener_log_global_stop(MemoryListener *listener)
     vfio_set_dirty_page_tracking(container, false);
 }
 
-static int vfio_get_dirty_bitmap(VFIOContainer *container, uint64_t iova,
-                                 uint64_t size, ram_addr_t ram_addr)
+static int vfio_get_dirty_bitmap(VFIOContainer *container, MemoryRegion *mr,
+                                 uint64_t iova, uint64_t size,
+                                 ram_addr_t ram_addr)
 {
     struct vfio_iommu_type1_dirty_bitmap *dbitmap;
     struct vfio_iommu_type1_dirty_bitmap_get *range;
@@ -1296,7 +1297,7 @@ static int vfio_get_dirty_bitmap(VFIOContainer *container, uint64_t iova,
         goto err_out;
     }
 
-    ret = CONT_DIRTY_BITMAP(container, dbitmap, range);
+    ret = CONT_DIRTY_BITMAP(container, mr, dbitmap, range);
     if (ret) {
         error_report("Failed to get dirty bitmap for iova: 0x%"PRIx64
                 " size: 0x%"PRIx64" err: %d", (uint64_t)range->iova,
@@ -1329,6 +1330,7 @@ static void vfio_iommu_map_dirty_notify(IOMMUNotifier *n, IOMMUTLBEntry *iotlb)
     VFIOContainer *container = giommu->container;
     hwaddr iova = iotlb->iova + giommu->iommu_offset;
     ram_addr_t translated_addr;
+    MemoryRegion *mr;
 
     trace_vfio_iommu_map_dirty_notify(iova, iova + iotlb->addr_mask);
 
@@ -1339,10 +1341,10 @@ static void vfio_iommu_map_dirty_notify(IOMMUNotifier *n, IOMMUTLBEntry *iotlb)
     }
 
     rcu_read_lock();
-    if (vfio_get_xlat_addr(iotlb, NULL, &translated_addr, NULL, NULL)) {
+    if (vfio_get_xlat_addr(iotlb, NULL, &translated_addr, NULL, &mr)) {
         int ret;
 
-        ret = vfio_get_dirty_bitmap(container, iova, iotlb->addr_mask + 1,
+        ret = vfio_get_dirty_bitmap(container, mr, iova, iotlb->addr_mask + 1,
                                     translated_addr);
         if (ret) {
             error_report("vfio_iommu_map_dirty_notify(%p, 0x%"HWADDR_PRIx", "
@@ -1367,7 +1369,8 @@ static int vfio_ram_discard_get_dirty_bitmap(MemoryRegionSection *section,
      * Sync the whole mapped region (spanning multiple individual mappings)
      * in one go.
      */
-    return vfio_get_dirty_bitmap(vrdl->container, iova, size, ram_addr);
+    return vfio_get_dirty_bitmap(vrdl->container, section->mr, iova, size,
+                                 ram_addr);
 }
 
 static int vfio_sync_ram_discard_listener_dirty_bitmap(VFIOContainer *container,
@@ -1435,7 +1438,7 @@ static int vfio_sync_dirty_bitmap(VFIOContainer *container,
     ram_addr = memory_region_get_ram_addr(section->mr) +
                section->offset_within_region;
 
-    return vfio_get_dirty_bitmap(container,
+    return vfio_get_dirty_bitmap(container, section->mr,
                    REAL_HOST_PAGE_ALIGN(section->offset_within_address_space),
                    int128_get64(section->size), ram_addr);
 }
@@ -2899,7 +2902,7 @@ static int vfio_io_dma_unmap(VFIOContainer *container,
     return 0;
 }
 
-static int vfio_io_dirty_bitmap(VFIOContainer *container,
+static int vfio_io_dirty_bitmap(VFIOContainer *container, MemoryRegion *mr,
                                 struct vfio_iommu_type1_dirty_bitmap *bitmap,
                                 struct vfio_iommu_type1_dirty_bitmap_get *range)
 {
