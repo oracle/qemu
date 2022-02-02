@@ -57,6 +57,7 @@ typedef struct VFIOProxy {
     uint64_t max_xfer_size;
     uint64_t max_send_fds;
     int flags;
+    uint32_t wait_time;
     QemuCond close_cv;
     AioContext *ctx;
     QEMUBH *req_bh;
