@@ -717,7 +717,8 @@ static void vfio_user_send_wait(VFIOProxy *proxy, VFIOUserHdr *hdr,
 
     if (ret == 0) {
         while (!msg->complete) {
-            if (!qemu_cond_timedwait(&msg->cv, &proxy->lock, wait_time)) {
+            if (!qemu_cond_timedwait(&msg->cv, &proxy->lock,
+                                     proxy->wait_time)) {
                 VFIOUserMsgQ *list;
 
                 list = msg->pending ? &proxy->pending : &proxy->outgoing;
@@ -759,7 +760,8 @@ static void vfio_user_wait_reqs(VFIOProxy *proxy)
         msg = proxy->last_nowait;
         msg->type = VFIO_MSG_WAIT;
         while (!msg->complete) {
-            if (!qemu_cond_timedwait(&msg->cv, &proxy->lock, wait_time)) {
+            if (!qemu_cond_timedwait(&msg->cv, &proxy->lock,
+                                     proxy->wait_time)) {
                 VFIOUserMsgQ *list;
 
                 list = msg->pending ? &proxy->pending : &proxy->outgoing;
@@ -881,6 +883,7 @@ VFIOProxy *vfio_user_connect_dev(SocketAddress *addr, Error **errp)
 
     proxy->flags = VFIO_PROXY_CLIENT;
     proxy->state = VFIO_PROXY_CONNECTED;
+    proxy->wait_time = wait_time;
 
     qemu_mutex_init(&proxy->lock);
     qemu_cond_init(&proxy->close_cv);
