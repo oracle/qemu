@@ -55,6 +55,7 @@ typedef struct VFIOProxy {
     void (*request)(void *opaque, VFIOUserMsg *msg);
     void *req_arg;
     int flags;
+    uint32_t wait_time;
     QemuCond close_cv;
     AioContext *ctx;
     QEMUBH *req_bh;
