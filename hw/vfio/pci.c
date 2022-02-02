@@ -3730,6 +3730,9 @@ static void vfio_user_pci_realize(PCIDevice *pdev, Error **errp)
     if (udev->no_post) {
         proxy->flags |= VFIO_PROXY_NO_POST;
     }
+    if (udev->wait_time) {
+        proxy->wait_time = udev->wait_time;
+    }
 
     vfio_user_validate_version(proxy, &err);
     if (err != NULL) {
@@ -3873,6 +3876,7 @@ static Property vfio_user_pci_dev_properties[] = {
     DEFINE_PROP_BOOL("secure-dma", VFIOUserPCIDevice, secure_dma, false),
     DEFINE_PROP_BOOL("x-send-queued", VFIOUserPCIDevice, send_queued, false),
     DEFINE_PROP_BOOL("x-no-posted-writes", VFIOUserPCIDevice, no_post, false),
+    DEFINE_PROP_UINT32("x-msg-timeout", VFIOUserPCIDevice, wait_time, 0),
     DEFINE_PROP_END_OF_LIST(),
 };
 
