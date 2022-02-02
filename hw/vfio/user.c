@@ -39,7 +39,7 @@
 
 static uint64_t max_xfer_size = VFIO_USER_DEF_MAX_XFER;
 static uint64_t max_send_fds = VFIO_USER_DEF_MAX_FDS;
-static int wait_time = 1000;   /* wait 1 sec for replies */
+static uint32_t wait_time = 1000;   /* wait 1 sec for replies */
 static IOThread *vfio_user_iothread;
 
 static void vfio_user_shutdown(VFIOProxy *proxy);
@@ -718,7 +718,7 @@ static void vfio_user_send_wait(VFIOProxy *proxy, VFIOUserHdr *hdr,
 
     if (ret == 0) {
         while (!msg->complete) {
-            if (!qemu_cond_timedwait(&msg->cv, &proxy->lock, wait_time)) {
+            if (!qemu_cond_timedwait(&msg->cv, &proxy->lock, proxy->wait_time)) {
                 QTAILQ_REMOVE(&proxy->pending, msg, next);
                 vfio_user_set_error(hdr, ETIMEDOUT);
                 break;
@@ -757,7 +757,7 @@ static void vfio_user_wait_reqs(VFIOProxy *proxy)
         msg = proxy->last_nowait;
         msg->type = VFIO_MSG_WAIT;
         while (!msg->complete) {
-            if (!qemu_cond_timedwait(&msg->cv, &proxy->lock, wait_time)) {
+            if (!qemu_cond_timedwait(&msg->cv, &proxy->lock, proxy->wait_time)) {
                 QTAILQ_REMOVE(&proxy->pending, msg, next);
                 error_printf("vfio_wait_reqs - timed out\n");
                 break;
@@ -867,6 +867,7 @@ VFIOProxy *vfio_user_connect_dev(SocketAddress *addr, Error **errp)
     proxy->ioc = ioc;
     proxy->flags = VFIO_PROXY_CLIENT;
     proxy->state = VFIO_PROXY_CONNECTED;
+    proxy->wait_time = wait_time;
 
     qemu_mutex_init(&proxy->lock);
     qemu_cond_init(&proxy->close_cv);
