@@ -30,6 +30,13 @@
 #include "qapi/qmp/qnum.h"
 #include "user.h"
 
+/*
+ * These are to defend against a malign server trying
+ * to force us to run out of memory.
+ */
+#define VFIO_USER_MAX_REGIONS   100
+#define VFIO_USER_MAX_IRQS      50
+
 static uint64_t max_xfer_size = VFIO_USER_DEF_MAX_XFER;
 static uint64_t max_send_fds = VFIO_USER_DEF_MAX_FDS;
 static uint32_t wait_time = 1000;   /* wait 1 sec for replies */
@@ -1472,9 +1479,12 @@ static int vfio_user_io_get_info(VFIODevice *vbasedev,
         return ret;
     }
 
-    /* clamp these to defend against a malicious server */
-    info->num_regions = MAX(info->num_regions, 100);
-    info->num_irqs = MAX(info->num_irqs, 100);
+    /* defend against a malicious server */
+    if (info->num_regions > VFIO_USER_MAX_REGIONS ||
+        info->num_irqs > VFIO_USER_MAX_IRQS) {
+        error_printf("vfio_user_get_info: invalid reply\n");
+        return -EINVAL;
+    }
 
     return 0;
 }
