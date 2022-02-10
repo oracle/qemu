@@ -170,6 +170,80 @@ static VFIOUserFDs *vfio_user_getfds(int numfds)
  * Functions only called by iothread
  */
 
+/*
+ * Process a received message.
+ */
+static void vfio_user_process(VFIOProxy *proxy, VFIOUserMsg *msg, bool isreply)
+{
+
+    /*
+     * Replies signal a waiter, if none just check for errors
+     * and free the message buffer.
+     *
+     * Requests get queued for the BH.
+     */
+    if (isreply) {
+        msg->complete = true;
+        if (msg->type == VFIO_MSG_WAIT) {
+            qemu_cond_signal(&msg->cv);
+        } else {
+            if (msg->hdr->flags & VFIO_USER_ERROR) {
+                error_printf("vfio_user_rcv:  error reply on async request ");
+                error_printf("command %x error %s\n", msg->hdr->command,
+                             strerror(msg->hdr->error_reply));
+            }
+            /* youngest nowait msg has been ack'd */
+            if (proxy->last_nowait == msg) {
+                proxy->last_nowait = NULL;
+            }
+            vfio_user_recycle(proxy, msg);
+        }
+    } else {
+        QTAILQ_INSERT_TAIL(&proxy->incoming, msg, next);
+        qemu_bh_schedule(proxy->req_bh);
+    }
+}
+
+/*
+ * Complete a partial message read
+ */
+static int vfio_user_complete(VFIOProxy *proxy, Error **errp)
+{
+    VFIOUserMsg *msg = proxy->part_recv;
+    size_t msgleft = proxy->recv_left;
+    bool isreply;
+    char *data;
+    int ret;
+
+    data = (char *)msg->hdr + (msg->hdr->size - msgleft);
+    while (msgleft > 0) {
+        ret = qio_channel_read(proxy->ioc, data, msgleft, errp);
+
+        /* error or would block */
+        if (ret <= 0) {
+            /* try for rest on next iternation */
+            if (ret == QIO_CHANNEL_ERR_BLOCK) {
+                proxy->recv_left = msgleft;
+            }
+            return ret;
+        }
+
+        msgleft -= ret;
+        data += ret;
+    }
+
+    /*
+     * Read complete message, process it.
+     */
+    proxy->part_recv = NULL;
+    proxy->recv_left = 0;
+    isreply = (msg->hdr->flags & VFIO_USER_TYPE) == VFIO_USER_REPLY;
+    vfio_user_process(proxy, msg, isreply);
+
+    /* return positive value */
+    return 1;
+}
+
 static void vfio_user_recv(void *opaque)
 {
     VFIOProxy *proxy = opaque;
@@ -207,6 +281,23 @@ static int vfio_user_recv_one(VFIOProxy *proxy)
     Error *local_err = NULL;
 
     /*
+     * Complete any partial reads
+     */
+    if (proxy->part_recv != NULL) {
+        ret = vfio_user_complete(proxy, &local_err);
+
+        /* still not complete, try later */
+        if (ret == QIO_CHANNEL_ERR_BLOCK) {
+            return ret;
+        }
+
+        if (ret <= 0) {
+            goto fatal;
+        }
+        /* else fall into reading another msg */
+    }
+
+    /*
      * Read header
      */
     ret = qio_channel_readv_full(proxy->ioc, &iov, 1, &fdp, &numfds,
@@ -214,17 +305,14 @@ static int vfio_user_recv_one(VFIOProxy *proxy)
     if (ret == QIO_CHANNEL_ERR_BLOCK) {
         return ret;
     }
+
+    /* read error or other side closed connection */
     if (ret <= 0) {
-        /* read error or other side closed connection */
-        if (ret == 0) {
-            error_setg(&local_err, "vfio_user_recv server closed socket");
-        } else {
-            error_prepend(&local_err, "vfio_user_recv");
-        }
         goto fatal;
     }
+
     if (ret < sizeof(msg)) {
-        error_setg(&local_err, "vfio_user_recv short read of header");
+        error_setg(&local_err, "short read of header");
         goto fatal;
     }
 
@@ -232,7 +320,7 @@ static int vfio_user_recv_one(VFIOProxy *proxy)
      * Validate header
      */
     if (hdr.size < sizeof(VFIOUserHdr)) {
-        error_setg(&local_err, "vfio_user_recv bad header size");
+        error_setg(&local_err, "bad header size");
         goto fatal;
     }
     switch (hdr.flags & VFIO_USER_TYPE) {
@@ -243,7 +331,7 @@ static int vfio_user_recv_one(VFIOProxy *proxy)
         isreply = true;
         break;
     default:
-        error_setg(&local_err, "vfio_user_recv unknown message type");
+        error_setg(&local_err, "unknown message type");
         goto fatal;
     }
 
@@ -258,7 +346,7 @@ static int vfio_user_recv_one(VFIOProxy *proxy)
             }
         }
         if (msg == NULL) {
-            error_setg(&local_err, "vfio_user_recv unexpected reply");
+            error_setg(&local_err, "unexpected reply");
             goto err;
         }
         QTAILQ_REMOVE(&proxy->pending, msg, next);
@@ -268,7 +356,7 @@ static int vfio_user_recv_one(VFIOProxy *proxy)
          */
         if (numfds != 0) {
             if (msg->fds == NULL || msg->fds->recv_fds < numfds) {
-                error_setg(&local_err, "vfio_user_recv unexpected FDs");
+                error_setg(&local_err, "unexpected FDs");
                 goto err;
             }
             msg->fds->recv_fds = numfds;
@@ -288,15 +376,14 @@ static int vfio_user_recv_one(VFIOProxy *proxy)
      */
     if (isreply) {
         if (hdr.size > msg->rsize) {
-            error_setg(&local_err,
-                       "vfio_user_recv reply larger than recv buffer");
+            error_setg(&local_err, "reply larger than recv buffer");
             goto err;
         }
         *msg->hdr = hdr;
         data = (char *)msg->hdr + sizeof(hdr);
     } else {
         if (hdr.size > max_xfer_size + sizeof(VFIOUserDMARW)) {
-            error_setg(&local_err, "vfio_user_recv request larger than max");
+            error_setg(&local_err, "request larger than max");
             goto err;
         }
         buf = g_malloc0(hdr.size);
@@ -306,11 +393,20 @@ static int vfio_user_recv_one(VFIOProxy *proxy)
         msg->type = VFIO_MSG_REQ;
     }
 
+    /*
+     * Read rest of message.
+     */
     msgleft = hdr.size - sizeof(hdr);
     while (msgleft > 0) {
         ret = qio_channel_read(proxy->ioc, data, msgleft, &local_err);
 
-        /* error or would block */
+        /* prepare to complete read on next iternation */
+        if (ret == QIO_CHANNEL_ERR_BLOCK) {
+            proxy->part_recv = msg;
+            proxy->recv_left = msgleft;
+            return ret;
+        }
+
         if (ret <= 0) {
             goto fatal;
         }
@@ -319,32 +415,7 @@ static int vfio_user_recv_one(VFIOProxy *proxy)
         data += ret;
     }
 
-    /*
-     * Replies signal a waiter, if none just check for errors
-     * and free the message buffer.
-     *
-     * Requests get queued for the BH.
-     */
-    if (isreply) {
-        msg->complete = true;
-        if (msg->type == VFIO_MSG_WAIT) {
-            qemu_cond_signal(&msg->cv);
-        } else {
-            if (hdr.flags & VFIO_USER_ERROR) {
-                error_printf("vfio_user_rcv error reply on async request ");
-                error_printf("command %x error %s\n", hdr.command,
-                             strerror(hdr.error_reply));
-            }
-            /* youngest nowait msg has been ack'd */
-            if (proxy->last_nowait == msg) {
-                proxy->last_nowait = NULL;
-            }
-            vfio_user_recycle(proxy, msg);
-        }
-    } else {
-        QTAILQ_INSERT_TAIL(&proxy->incoming, msg, next);
-        qemu_bh_schedule(proxy->req_bh);
-    }
+    vfio_user_process(proxy, msg, isreply);
     return 0;
 
     /*
@@ -354,6 +425,11 @@ static int vfio_user_recv_one(VFIOProxy *proxy)
 fatal:
     vfio_user_shutdown(proxy);
     proxy->state = VFIO_PROXY_ERROR;
+
+    /* set error if server side closed */
+    if (ret == 0) {
+        error_setg(&local_err, "server closed socket");
+    }
 
 err:
     for (i = 0; i < numfds; i++) {
@@ -365,6 +441,7 @@ err:
         msg->complete = true;
         qemu_cond_signal(&msg->cv);
     }
+    error_prepend(&local_err, "vfio_user_recv: ");
     error_report_err(local_err);
     return -1;
 }
