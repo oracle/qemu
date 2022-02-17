@@ -29,6 +29,8 @@
 #include "qapi/qmp/qstring.h"
 #include "qapi/qmp/qnum.h"
 #include "user.h"
+#include "trace.h"
+
 
 /*
  * These are to defend against a malign server trying
@@ -112,6 +114,8 @@ static int vfio_user_send_qio(VFIOProxy *proxy, VFIOUserMsg *msg)
         vfio_user_shutdown(proxy);
         error_report_err(local_err);
     }
+    trace_vfio_user_send_write(msg->hdr->id, ret);
+
     return ret;
 }
 
@@ -228,6 +232,7 @@ static int vfio_user_complete(VFIOProxy *proxy, Error **errp)
             }
             return ret;
         }
+        trace_vfio_user_recv_read(msg->hdr->id, ret);
 
         msgleft -= ret;
         data += ret;
@@ -335,6 +340,8 @@ static int vfio_user_recv_one(VFIOProxy *proxy)
         error_setg(&local_err, "unknown message type");
         goto fatal;
     }
+    trace_vfio_user_recv_hdr(proxy->sockname, hdr.id, hdr.command, hdr.size,
+                             hdr.flags);
 
     /*
      * For replies, find the matching pending request.
@@ -411,6 +418,7 @@ static int vfio_user_recv_one(VFIOProxy *proxy)
         if (ret <= 0) {
             goto fatal;
         }
+        trace_vfio_user_recv_read(hdr.id, ret);
 
         msgleft -= ret;
         data += ret;
