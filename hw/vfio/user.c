@@ -30,6 +30,8 @@
 #include "qapi/qmp/qnum.h"
 #include "qapi/qmp/qbool.h"
 #include "user.h"
+#include "trace.h"
+
 
 
 /*
@@ -108,6 +110,8 @@ static int vfio_user_send_qio(VFIOProxy *proxy, VFIOUserMsg *msg)
         vfio_user_shutdown(proxy);
         error_report_err(local_err);
     }
+    trace_vfio_user_send_write(msg->hdr->id, ret);
+
     return ret;
 }
 
@@ -225,6 +229,7 @@ static int vfio_user_complete(VFIOProxy *proxy, Error **errp)
             }
             return ret;
         }
+        trace_vfio_user_recv_read(msg->hdr->id, ret);
 
         msgleft -= ret;
         data += ret;
@@ -332,6 +337,8 @@ static int vfio_user_recv_one(VFIOProxy *proxy)
         error_setg(&local_err, "unknown message type");
         goto fatal;
     }
+    trace_vfio_user_recv_hdr(proxy->sockname, hdr.id, hdr.command, hdr.size,
+                             hdr.flags);
 
     /*
      * For replies, find the matching pending request.
@@ -408,6 +415,7 @@ static int vfio_user_recv_one(VFIOProxy *proxy)
         if (ret <= 0) {
             goto fatal;
         }
+        trace_vfio_user_recv_read(hdr.id, ret);
 
         msgleft -= ret;
         data += ret;
@@ -546,6 +554,7 @@ static void vfio_user_request(void *opaque)
     QTAILQ_INIT(&free);
     QTAILQ_FOREACH_SAFE(msg, &new, next, m1) {
         QTAILQ_REMOVE(&new, msg, next);
+        trace_vfio_user_recv_request(msg->hdr->command);
         proxy->request(proxy->req_arg, msg);
         QTAILQ_INSERT_HEAD(&free, msg, next);
     }
@@ -1181,6 +1190,7 @@ int vfio_user_validate_version(VFIOProxy *proxy, Error **errp)
     msgp->minor = VFIO_USER_MINOR_VER;
     memcpy(&msgp->capabilities, caps->str, caplen);
     g_string_free(caps, true);
+    trace_vfio_user_version(msgp->major, msgp->minor, msgp->capabilities);
 
     vfio_user_send_wait(proxy, &msgp->hdr, NULL, 0, false);
     if (msgp->hdr.flags & VFIO_USER_ERROR) {
@@ -1204,6 +1214,7 @@ int vfio_user_validate_version(VFIOProxy *proxy, Error **errp)
         return -1;
     }
 
+    trace_vfio_user_version(msgp->major, msgp->minor, msgp->capabilities);
     return 0;
 }
 
@@ -1221,6 +1232,8 @@ static int vfio_user_dma_map(VFIOProxy *proxy,
     msgp->offset = map->vaddr;
     msgp->iova = map->iova;
     msgp->size = map->size;
+    trace_vfio_user_dma_map(msgp->iova, msgp->size, msgp->offset, msgp->flags,
+                        will_commit);
 
     /*
      * The will_commit case sends without blocking or dropping BQL.
@@ -1287,6 +1300,8 @@ static int vfio_user_dma_unmap(VFIOProxy *proxy,
     msgp->msg.flags = unmap->flags;
     msgp->msg.iova = unmap->iova;
     msgp->msg.size = unmap->size;
+    trace_vfio_user_dma_unmap(msgp->msg.iova, msgp->msg.size, msgp->msg.flags,
+                         bitmap != NULL, will_commit);
 
     if (blocking) {
         vfio_user_send_wait(proxy, &msgp->msg.hdr, NULL, rsize, will_commit);
@@ -1316,6 +1331,7 @@ static int vfio_user_get_info(VFIOProxy *proxy, struct vfio_device_info *info)
     if (msg.hdr.flags & VFIO_USER_ERROR) {
         return -msg.hdr.error_reply;
     }
+    trace_vfio_user_get_info(msg.num_regions, msg.num_irqs);
 
     memcpy(info, &msg.argsz, sizeof(*info));
     return 0;
@@ -1350,6 +1366,7 @@ static int vfio_user_get_region_info(VFIOProxy *proxy,
     if (msgp->hdr.flags & VFIO_USER_ERROR) {
         return -msgp->hdr.error_reply;
     }
+    trace_vfio_user_get_region_info(msgp->index, msgp->flags, msgp->size);
 
     memcpy(info, &msgp->argsz, info->argsz);
     return 0;
@@ -1370,6 +1387,7 @@ static int vfio_user_get_irq_info(VFIOProxy *proxy,
     if (msg.hdr.flags & VFIO_USER_ERROR) {
         return -msg.hdr.error_reply;
     }
+    trace_vfio_user_get_irq_info(msg.index, msg.flags, msg.count);
 
     memcpy(info, &msg.argsz, sizeof(*info));
     return 0;
@@ -1415,6 +1433,8 @@ static int vfio_user_set_irqs(VFIOProxy *proxy, struct vfio_irq_set *irq)
         msgp->index = irq->index;
         msgp->start = irq->start;
         msgp->count = irq->count;
+        trace_vfio_user_set_irqs(msgp->index, msgp->start, msgp->count,
+                                 msgp->flags);
 
         vfio_user_send_wait(proxy, &msgp->hdr, NULL, 0, false);
         if (msgp->hdr.flags & VFIO_USER_ERROR) {
@@ -1451,6 +1471,8 @@ static int vfio_user_set_irqs(VFIOProxy *proxy, struct vfio_irq_set *irq)
         msgp->index = irq->index;
         msgp->start = irq->start + sent_fds;
         msgp->count = send_fds;
+        trace_vfio_user_set_irqs(msgp->index, msgp->start, msgp->count,
+                                 msgp->flags);
 
         loop_fds.send_fds = send_fds;
         loop_fds.recv_fds = 0;
@@ -1481,6 +1503,7 @@ static int vfio_user_region_read(VFIOProxy *proxy, uint8_t index, off_t offset,
     msgp->offset = offset;
     msgp->region = index;
     msgp->count = count;
+    trace_vfio_user_region_rw(msgp->region, msgp->offset, msgp->count);
 
     vfio_user_send_wait(proxy, &msgp->hdr, NULL, size, false);
     if (msgp->hdr.flags & VFIO_USER_ERROR) {
@@ -1509,6 +1532,7 @@ static void vfio_user_flush_multi(VFIOProxy *proxy)
     msg->id = wm->hdr.id;
     msg->rsize = 0;
     msg->type = VFIO_MSG_ASYNC;
+    trace_vfio_user_wrmulti("flush", wm->wr_cnt);
 
     ret = vfio_user_send_queued(proxy, msg);
     if (ret < 0) {
@@ -1518,27 +1542,28 @@ static void vfio_user_flush_multi(VFIOProxy *proxy)
 
 static void vfio_user_create_multi(VFIOProxy *proxy)
 {
-    VFIOUserWRMulti *msgp;
+    VFIOUserWRMulti *wm;
 
-    msgp = g_malloc0(sizeof(*msgp));
-    vfio_user_request_msg(&msgp->hdr, VFIO_USER_REGION_WRITE_MULTI,
-                          sizeof(*msgp), VFIO_USER_NO_REPLY);
-    proxy->wr_multi = msgp;
+    wm = g_malloc0(sizeof(*wm));
+    vfio_user_request_msg(&wm->hdr, VFIO_USER_REGION_WRITE_MULTI,
+                          sizeof(*wm), VFIO_USER_NO_REPLY);
+    proxy->wr_multi = wm;
 }
 
 static void vfio_user_add_multi(VFIOProxy *proxy, uint8_t index, off_t offset,
                                 uint32_t count, void *data)
 {
-    VFIOUserWRMulti *msgp = proxy->wr_multi;
-    VFIOUserWROne *w1 = &msgp->wrs[msgp->wr_cnt];
+    VFIOUserWRMulti *wm = proxy->wr_multi;
+    VFIOUserWROne *w1 = &wm->wrs[wm->wr_cnt];
 
     w1->offset = offset;
     w1->region = index;
     w1->count = count;
     memcpy(&w1->data, data, count);
 
-    msgp->wr_cnt++;
-    if (msgp->wr_cnt == VFIO_USER_MULTI_MAX ||
+    wm->wr_cnt++;
+    trace_vfio_user_wrmulti("add", wm->wr_cnt);
+    if (wm->wr_cnt == VFIO_USER_MULTI_MAX ||
         proxy->num_outgoing < VFIO_USER_OUT_LOW) {
         vfio_user_flush_multi(proxy);
     }
@@ -1605,6 +1630,7 @@ static int vfio_user_region_write(VFIOProxy *proxy, uint8_t index, off_t offset,
     msgp->region = index;
     msgp->count = count;
     memcpy(&msgp->data, data, count);
+    trace_vfio_user_region_rw(msgp->region, msgp->offset, msgp->count);
 
     /* async send will free msg after it's sent */
     if (post) {
