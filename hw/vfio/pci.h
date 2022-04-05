@@ -135,6 +135,7 @@ struct VFIOPCIDevice {
     int msi_cap_size;
     VFIOMSIVector *msi_vectors;
     VFIOMSIXInfo *msix;
+    MemoryRegion *msix_regions;
     int nr_vectors; /* Number of MSI/MSIX vectors currently in use */
     int interrupt; /* Current interrupt type */
     VFIOBAR bars[PCI_NUM_REGIONS - 1]; /* No ROM */
