@@ -623,6 +623,7 @@ static void vfio_platform_realize(DeviceState *dev, Error **errp)
     vbasedev->ops = &vfio_platform_ops;
     vbasedev->io = &vfio_dev_io_ioctl;
     vbasedev->use_regfds = false;
+    vbasedev->can_mask_irq = false;
 
     qemu_mutex_init(&vdev->intp_mutex);
 
