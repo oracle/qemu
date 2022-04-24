@@ -477,6 +477,7 @@ static int vfio_msix_vector_do_use(PCIDevice *pdev, unsigned int nr,
 {
     VFIOPCIDevice *vdev = VFIO_PCI_BASE(pdev);
     VFIOMSIVector *vector;
+    bool new_vec = false;
     int ret;
 
     trace_vfio_msix_vector_do_use(vdev->vbasedev.name, nr);
@@ -490,6 +491,7 @@ static int vfio_msix_vector_do_use(PCIDevice *pdev, unsigned int nr,
             error_report("vfio: Error: event_notifier_init failed");
         }
         vector->use = true;
+        new_vec = true;
         msix_vector_use(pdev, nr);
     }
 
@@ -516,6 +518,7 @@ static int vfio_msix_vector_do_use(PCIDevice *pdev, unsigned int nr,
                 kvm_irqchip_commit_route_changes(&vfio_route_change);
                 vfio_connect_kvm_msi_virq(vector);
             }
+            new_vec = true;
         }
     }
 
@@ -523,6 +526,8 @@ static int vfio_msix_vector_do_use(PCIDevice *pdev, unsigned int nr,
      * We don't want to have the host allocate all possible MSI vectors
      * for a device if they're not in use, so we shutdown and incrementally
      * increase them as needed.
+     * Otherwise, unmask the vector if the vector is already setup (and we can
+     * do so) or send the fd if not.
      */
     if (vdev->nr_vectors < nr + 1) {
         vdev->nr_vectors = nr + 1;
@@ -533,6 +538,8 @@ static int vfio_msix_vector_do_use(PCIDevice *pdev, unsigned int nr,
                 error_report("vfio: failed to enable vectors, %d", ret);
             }
         }
+    } else if (vdev->vbasedev.can_mask_irq && !new_vec) {
+        vfio_unmask_single_irq(&vdev->vbasedev, VFIO_PCI_MSIX_IRQ_INDEX, nr);
     } else {
         Error *err = NULL;
         int32_t fd;
@@ -573,6 +580,12 @@ static void vfio_msix_vector_release(PCIDevice *pdev, unsigned int nr)
     VFIOMSIVector *vector = &vdev->msi_vectors[nr];
 
     trace_vfio_msix_vector_release(vdev->vbasedev.name, nr);
+
+    /* just mask vector if peer supports it */
+    if (vdev->vbasedev.can_mask_irq) {
+        vfio_mask_single_irq(&vdev->vbasedev, VFIO_PCI_MSIX_IRQ_INDEX, nr);
+        return;
+    }
 
     /*
      * There are still old guests that mask and unmask vectors on every
@@ -644,7 +657,7 @@ static void vfio_msix_enable(VFIOPCIDevice *vdev)
         if (ret) {
             error_report("vfio: failed to enable vectors, %d", ret);
         }
-    } else {
+    } else if (!vdev->vbasedev.can_mask_irq) {
         /*
          * Some communication channels between VF & PF or PF & fw rely on the
          * physical state of the device and expect that enabling MSI-X from the
@@ -660,6 +673,13 @@ static void vfio_msix_enable(VFIOPCIDevice *vdev)
          */
         vfio_msix_vector_do_use(&vdev->pdev, 0, NULL, NULL);
         vfio_msix_vector_release(&vdev->pdev, 0);
+    } else {
+        /*
+         * If we can use irq masking, send an invalid fd on vector 0
+         * to enable MSI-X without any vectors enabled.
+         */
+        vfio_set_irq_signaling(&vdev->vbasedev, VFIO_PCI_MSIX_IRQ_INDEX, 0,
+                               VFIO_IRQ_SET_ACTION_TRIGGER, -1, NULL);
     }
 
     trace_vfio_msix_enable(vdev->vbasedev.name);
@@ -3040,6 +3060,7 @@ static void vfio_realize(PCIDevice *pdev, Error **errp)
     vbasedev->dev = DEVICE(vdev);
     vbasedev->io = &vfio_dev_io_ioctl;
     vbasedev->use_regfds = false;
+    vbasedev->can_mask_irq = false;
 
     tmp = g_strdup_printf("%s/iommu_group", vbasedev->sysfsdev);
     len = readlink(tmp, group_path, sizeof(group_path));
