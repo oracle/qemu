@@ -113,6 +113,7 @@ typedef struct VFIOMSIXInfo {
     uint32_t table_offset;
     uint32_t pba_offset;
     unsigned long *pending;
+    MemoryRegion *pba_region;
 } VFIOMSIXInfo;
 
 /*
@@ -178,6 +179,7 @@ struct VFIOPCIDevice {
     bool no_vfio_ioeventfd;
     bool enable_ramfb;
     bool defer_kvm_irq_routing;
+    bool can_mask_msix;
     VFIODisplay *dpy;
     Notifier irqchip_change_notifier;
 };
