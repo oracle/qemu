@@ -3471,6 +3471,111 @@ type_init(register_vfio_pci_dev_type)
  * vfio-user routines.
  */
 
+/*
+ * The server maintains the device's pending interrupts,
+ * via its MSIX table and PBA, so we treat these acceses
+ * like PCI config space and forward them.
+ */
+static uint64_t vfio_user_table_read(void *opaque, hwaddr addr,
+                                     unsigned size)
+{
+    VFIOPCIDevice *vdev = opaque;
+    uint64_t data;
+
+    /* server doesn't change these, so local copy is good */
+    memory_region_dispatch_read(&vdev->pdev.msix_table_mmio, addr,
+                                &data, size_memop(size) | MO_LE,
+                                MEMTXATTRS_UNSPECIFIED);
+    return data;
+}
+
+static void vfio_user_table_write(void *opaque, hwaddr addr,
+                                  uint64_t data, unsigned size)
+{
+    VFIOPCIDevice *vdev = opaque;
+    VFIORegion *region = &vdev->bars[vdev->msix->table_bar].region;
+
+    /* forward, then perform locally */
+    vfio_region_write(region, addr + vdev->msix->table_offset, data, size);
+    memory_region_dispatch_write(&vdev->pdev.msix_table_mmio, addr,
+                                data, size_memop(size) | MO_LE,
+                                MEMTXATTRS_UNSPECIFIED);
+}
+
+static const MemoryRegionOps vfio_user_table_ops = {
+    .read = vfio_user_table_read,
+    .write = vfio_user_table_write,
+    .endianness = DEVICE_LITTLE_ENDIAN,
+};
+
+static uint64_t vfio_user_pba_read(void *opaque, hwaddr addr,
+                                   unsigned size)
+{
+    VFIOPCIDevice *vdev = opaque;
+    VFIORegion *region = &vdev->bars[vdev->msix->pba_bar].region;
+    uint64_t data;
+
+    /* server copy is what matters */
+    data = vfio_region_read(region, addr + vdev->msix->pba_offset, size);
+    return data;
+}
+
+static void vfio_user_pba_write(void *opaque, hwaddr addr,
+                                  uint64_t data, unsigned size)
+{
+    /* dropped */
+}
+
+static const MemoryRegionOps vfio_user_pba_ops = {
+    .read = vfio_user_pba_read,
+    .write = vfio_user_pba_write,
+    .endianness = DEVICE_LITTLE_ENDIAN,
+};
+
+static void vfio_user_msix_setup(VFIOPCIDevice *vdev)
+{
+    MemoryRegion *vfio_reg, *msix_reg, *new_reg;
+
+    vdev->msix->msix_regions = g_new0(MemoryRegion, 2);
+
+    vfio_reg = vdev->bars[vdev->msix->table_bar].mr;
+    msix_reg = &vdev->pdev.msix_table_mmio;
+    new_reg = &vdev->msix->msix_regions[0];
+    memory_region_init_io(new_reg, OBJECT(vdev), &vfio_user_table_ops, vdev,
+                          "VFIO MSIX table", int128_get64(msix_reg->size));
+    memory_region_add_subregion_overlap(vfio_reg, vdev->msix->table_offset,
+                                        new_reg, 1);
+
+    vfio_reg = vdev->bars[vdev->msix->pba_bar].mr;
+    msix_reg = &vdev->pdev.msix_pba_mmio;
+    new_reg = &vdev->msix->msix_regions[1];
+    memory_region_init_io(new_reg, OBJECT(vdev), &vfio_user_pba_ops, vdev,
+                          "VFIO MSIX PBA", int128_get64(msix_reg->size));
+    memory_region_add_subregion_overlap(vfio_reg, vdev->msix->pba_offset,
+                                        new_reg, 1);
+}
+
+static void vfio_user_msix_teardown(VFIOPCIDevice *vdev)
+{
+    MemoryRegion *mr, *sub;
+
+    mr = vdev->bars[vdev->msix->table_bar].mr;
+    sub = &vdev->msix->msix_regions[0];
+    memory_region_del_subregion(mr, sub);
+
+    mr = vdev->bars[vdev->msix->pba_bar].mr;
+    sub = &vdev->msix->msix_regions[1];
+    memory_region_del_subregion(mr, sub);
+
+    g_free(vdev->msix->msix_regions);
+    vdev->msix->msix_regions = NULL;
+}
+
+/*
+ * Incoming request message callback.
+ *
+ * Runs off main loop, so BQL held.
+ */
 static void vfio_user_pci_process_req(void *opaque, VFIOUserMsg *msg)
 {
 
@@ -3593,6 +3698,9 @@ static void vfio_user_pci_realize(PCIDevice *pdev, Error **errp)
     if (ret) {
         goto out_teardown;
     }
+    if (vdev->msix != NULL) {
+        vfio_user_msix_setup(vdev);
+    }
 
     ret = vfio_interrupt_setup(vdev, errp);
     if (ret) {
@@ -3613,6 +3721,10 @@ static void vfio_user_instance_finalize(Object *obj)
 {
     VFIOPCIDevice *vdev = VFIO_PCI_BASE(obj);
     VFIODevice *vbasedev = &vdev->vbasedev;
+
+    if (vdev->msix != NULL) {
+        vfio_user_msix_teardown(vdev);
+    }
 
     vfio_put_device(vdev);
 
