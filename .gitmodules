@@ -58,12 +58,12 @@
 [submodule "roms/qboot"]
 	path = roms/qboot
 	url = https://gitlab.com/qemu-project/qboot.git
-[submodule "meson"]
-	path = meson
-	url = https://gitlab.com/qemu-project/meson.git
 [submodule "roms/vbootrom"]
 	path = roms/vbootrom
 	url = https://gitlab.com/qemu-project/vbootrom.git
 [submodule "tests/lcitool/libvirt-ci"]
 	path = tests/lcitool/libvirt-ci
 	url = https://gitlab.com/libvirt/libvirt-ci.git
+[submodule "meson"]
+	path = meson
+	url = https://gitlab.com/qemu-project/meson.git
