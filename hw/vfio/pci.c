@@ -479,6 +479,7 @@ static int vfio_msix_vector_do_use(PCIDevice *pdev, unsigned int nr,
 {
     VFIOPCIDevice *vdev = VFIO_PCI_BASE(pdev);
     VFIOMSIVector *vector;
+    bool new_vec = false;
     int ret;
 
     trace_vfio_msix_vector_do_use(vdev->vbasedev.name, nr);
@@ -492,6 +493,7 @@ static int vfio_msix_vector_do_use(PCIDevice *pdev, unsigned int nr,
             error_report("vfio: Error: event_notifier_init failed");
         }
         vector->use = true;
+        new_vec = true;
         msix_vector_use(pdev, nr);
     }
 
@@ -518,6 +520,7 @@ static int vfio_msix_vector_do_use(PCIDevice *pdev, unsigned int nr,
                 kvm_irqchip_commit_route_changes(&vfio_route_change);
                 vfio_connect_kvm_msi_virq(vector);
             }
+            new_vec = true;
         }
     }
 
@@ -525,6 +528,8 @@ static int vfio_msix_vector_do_use(PCIDevice *pdev, unsigned int nr,
      * We don't want to have the host allocate all possible MSI vectors
      * for a device if they're not in use, so we shutdown and incrementally
      * increase them as needed.
+     * Otherwise, unmask the vector if the vector is already setup (and we can
+     * do so) or send the fd if not.
      */
     if (vdev->nr_vectors < nr + 1) {
         vdev->nr_vectors = nr + 1;
@@ -535,6 +540,8 @@ static int vfio_msix_vector_do_use(PCIDevice *pdev, unsigned int nr,
                 error_report("vfio: failed to enable vectors, %d", ret);
             }
         }
+    } else if (vdev->vbasedev.irq_mask_works && !new_vec) {
+        vfio_unmask_single_irq(&vdev->vbasedev, VFIO_PCI_MSIX_IRQ_INDEX, nr);
     } else {
         Error *err = NULL;
         int32_t fd;
@@ -575,6 +582,12 @@ static void vfio_msix_vector_release(PCIDevice *pdev, unsigned int nr)
     VFIOMSIVector *vector = &vdev->msi_vectors[nr];
 
     trace_vfio_msix_vector_release(vdev->vbasedev.name, nr);
+
+    /* just mask vector if peer supports it */
+    if (vdev->vbasedev.irq_mask_works) {
+        vfio_mask_single_irq(&vdev->vbasedev, VFIO_PCI_MSIX_IRQ_INDEX, nr);
+        return;
+    }
 
     /*
      * There are still old guests that mask and unmask vectors on every
@@ -646,7 +659,7 @@ static void vfio_msix_enable(VFIOPCIDevice *vdev)
         if (ret) {
             error_report("vfio: failed to enable vectors, %d", ret);
         }
-    } else {
+    } else if (!vdev->vbasedev.irq_mask_works) {
         /*
          * Some communication channels between VF & PF or PF & fw rely on the
          * physical state of the device and expect that enabling MSI-X from the
@@ -662,6 +675,13 @@ static void vfio_msix_enable(VFIOPCIDevice *vdev)
          */
         vfio_msix_vector_do_use(&vdev->pdev, 0, NULL, NULL);
         vfio_msix_vector_release(&vdev->pdev, 0);
+    } else {
+        /*
+         * If we can use irq masking, send an invalid fd on vector 0
+         * to enable MSI-X without any vectors enabled.
+         */
+        vfio_set_irq_signaling(&vdev->vbasedev, VFIO_PCI_MSIX_IRQ_INDEX, 0,
+                               VFIO_IRQ_SET_ACTION_TRIGGER, -1, NULL);
     }
 
     trace_vfio_msix_enable(vdev->vbasedev.name);
@@ -3042,6 +3062,7 @@ static void vfio_realize(PCIDevice *pdev, Error **errp)
     vbasedev->type = VFIO_DEVICE_TYPE_PCI;
     vbasedev->dev = DEVICE(vdev);
     vbasedev->io_ops = &vfio_dev_io_ioctl;
+    vbasedev->irq_mask_works = false;
 
     tmp = g_strdup_printf("%s/iommu_group", vbasedev->sysfsdev);
     len = readlink(tmp, group_path, sizeof(group_path));
@@ -3478,38 +3499,6 @@ type_init(register_vfio_pci_dev_type)
  * via its MSIX table and PBA, so we treat these acceses
  * like PCI config space and forward them.
  */
-static uint64_t vfio_user_table_read(void *opaque, hwaddr addr,
-                                     unsigned size)
-{
-    VFIOPCIDevice *vdev = opaque;
-    uint64_t data;
-
-    /* server doesn't change these, so local copy is good */
-    memory_region_dispatch_read(&vdev->pdev.msix_table_mmio, addr,
-                                &data, size_memop(size) | MO_LE,
-                                MEMTXATTRS_UNSPECIFIED);
-    return data;
-}
-
-static void vfio_user_table_write(void *opaque, hwaddr addr,
-                                  uint64_t data, unsigned size)
-{
-    VFIOPCIDevice *vdev = opaque;
-    VFIORegion *region = &vdev->bars[vdev->msix->table_bar].region;
-
-    /* forward, then perform locally */
-    vfio_region_write(region, addr + vdev->msix->table_offset, data, size);
-    memory_region_dispatch_write(&vdev->pdev.msix_table_mmio, addr,
-                                data, size_memop(size) | MO_LE,
-                                MEMTXATTRS_UNSPECIFIED);
-}
-
-static const MemoryRegionOps vfio_user_table_ops = {
-    .read = vfio_user_table_read,
-    .write = vfio_user_table_write,
-    .endianness = DEVICE_LITTLE_ENDIAN,
-};
-
 static uint64_t vfio_user_pba_read(void *opaque, hwaddr addr,
                                    unsigned size)
 {
@@ -3536,41 +3525,29 @@ static const MemoryRegionOps vfio_user_pba_ops = {
 
 static void vfio_user_msix_setup(VFIOPCIDevice *vdev)
 {
-    MemoryRegion *vfio_reg, *msix_reg, *new_reg;
+    MemoryRegion *vfio_reg, *msix_reg, *pba_reg;
 
-    vdev->msix->msix_regions = g_new0(MemoryRegion, 2);
-
-    vfio_reg = vdev->bars[vdev->msix->table_bar].mr;
-    msix_reg = &vdev->pdev.msix_table_mmio;
-    new_reg = &vdev->msix->msix_regions[0];
-    memory_region_init_io(new_reg, OBJECT(vdev), &vfio_user_table_ops, vdev,
-                          "VFIO MSIX table", int128_get64(msix_reg->size));
-    memory_region_add_subregion_overlap(vfio_reg, vdev->msix->table_offset,
-                                        new_reg, 1);
+    pba_reg = g_new0(MemoryRegion, 1);
+    vdev->msix->pba_region = pba_reg;
 
     vfio_reg = vdev->bars[vdev->msix->pba_bar].mr;
     msix_reg = &vdev->pdev.msix_pba_mmio;
-    new_reg = &vdev->msix->msix_regions[1];
-    memory_region_init_io(new_reg, OBJECT(vdev), &vfio_user_pba_ops, vdev,
+    memory_region_init_io(pba_reg, OBJECT(vdev), &vfio_user_pba_ops, vdev,
                           "VFIO MSIX PBA", int128_get64(msix_reg->size));
     memory_region_add_subregion_overlap(vfio_reg, vdev->msix->pba_offset,
-                                        new_reg, 1);
+                                        pba_reg, 1);
 }
 
 static void vfio_user_msix_teardown(VFIOPCIDevice *vdev)
 {
     MemoryRegion *mr, *sub;
 
-    mr = vdev->bars[vdev->msix->table_bar].mr;
-    sub = &vdev->msix->msix_regions[0];
-    memory_region_del_subregion(mr, sub);
-
     mr = vdev->bars[vdev->msix->pba_bar].mr;
-    sub = &vdev->msix->msix_regions[1];
+    sub = vdev->msix->pba_region;
     memory_region_del_subregion(mr, sub);
 
-    g_free(vdev->msix->msix_regions);
-    vdev->msix->msix_regions = NULL;
+    g_free(vdev->msix->pba_region);
+    vdev->msix->pba_region = NULL;
 }
 
 static void vfio_user_dma_read(VFIOPCIDevice *vdev, VFIOUserDMARW *msg)
@@ -3759,6 +3736,7 @@ static void vfio_user_pci_realize(PCIDevice *pdev, Error **errp)
     vbasedev->type = VFIO_DEVICE_TYPE_PCI;
     vbasedev->ops = &vfio_user_pci_ops;
     vbasedev->io_ops = &vfio_dev_io_sock;
+    vdev->vbasedev.irq_mask_works = true;
 
     /*
      * each device gets its own group and container
