@@ -112,7 +112,7 @@ typedef struct VFIOMSIXInfo {
     uint32_t table_offset;
     uint32_t pba_offset;
     unsigned long *pending;
-    MemoryRegion *msix_regions;
+    MemoryRegion *pba_region;
 } VFIOMSIXInfo;
 
 /*
