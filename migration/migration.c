@@ -2840,7 +2840,7 @@ bool migrate_multifd_flush_after_each_section(void)
      * Until the patch that remove this comment, we always return that
      * the property is enabled.
      */
-    return true || s->multifd_flush_after_each_section;
+    return s->multifd_flush_after_each_section;
 }
 
 /* migration thread support */
@@ -4445,7 +4445,7 @@ static Property migration_properties[] = {
     DEFINE_PROP_BOOL("decompress-error-check", MigrationState,
                       decompress_error_check, true),
     DEFINE_PROP_BOOL("multifd-flush-after-each-section", MigrationState,
-                      multifd_flush_after_each_section, true),
+                      multifd_flush_after_each_section, false),
     DEFINE_PROP_UINT8("x-clear-bitmap-shift", MigrationState,
                       clear_bitmap_shift, CLEAR_BITMAP_SHIFT_DEFAULT),
 
