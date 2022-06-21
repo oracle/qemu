@@ -45,6 +45,7 @@ GlobalProperty hw_compat_7_1[] = {
     { "virtio-rng-pci", "vectors", "0" },
     { "virtio-rng-pci-transitional", "vectors", "0" },
     { "virtio-rng-pci-non-transitional", "vectors", "0" },
+    { "migration", "multifd-flush-after-each-section", "on"},
 };
 const size_t hw_compat_7_1_len = G_N_ELEMENTS(hw_compat_7_1);
 
