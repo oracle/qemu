@@ -1451,13 +1451,19 @@ static int vfio_user_region_write(VFIOProxy *proxy, uint8_t index, off_t offset,
                                   uint32_t count, void *data, bool post)
 {
     VFIOUserRegionRW *msgp = NULL;
-    int flags = post ? VFIO_USER_NO_REPLY : 0;
     int size = sizeof(*msgp) + count;
+    int flags;
     int ret;
 
     if (count > max_xfer_size) {
         return -EINVAL;
     }
+
+    if (proxy->flags & VFIO_PROXY_NO_POST) {
+        post = false;
+    }
+
+    flags = post ? VFIO_USER_NO_REPLY : 0;
 
     msgp = g_malloc0(size);
     vfio_user_request_msg(&msgp->hdr, VFIO_USER_REGION_WRITE, size, flags);
@@ -1467,7 +1473,7 @@ static int vfio_user_region_write(VFIOProxy *proxy, uint8_t index, off_t offset,
     memcpy(&msgp->data, data, count);
 
     /* async send will free msg after it's sent */
-    if (post && !(proxy->flags & VFIO_PROXY_NO_POST)) {
+    if (post) {
         vfio_user_send_async(proxy, &msgp->hdr, NULL);
         return count;
     }
