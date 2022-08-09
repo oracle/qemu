@@ -365,6 +365,7 @@ Name                                    Command    Request Direction
 ``VFIO_USER_DMA_READ``                  11         server -> client
 ``VFIO_USER_DMA_WRITE``                 12         server -> client
 ``VFIO_USER_DEVICE_RESET``              13         client -> server
+``VFIO_USER_REGION_WRITE_MULT``         15         client -> server
 ======================================  =========  =================
 
 Header
@@ -1398,6 +1399,60 @@ Reply
 
 This command message is sent from the client to the server to reset the device.
 Neither the request or reply have a payload.
+
+
+``VFIO_USER_REGION_WRITE_MULTI``
+--------------------------------
+
+This message can be used to coalesce multiple device write operations
+into a single messgage.  It is only used as an optimization when the
+outgoing message queue is relatively full.
+
+Request
+^^^^^^^
+
++---------+--------+----------+
+| Name    | Offset | Size     |
++=========+========+==========+
+| wr_cnt  | 0      | 8        |
++---------+--------+----------+
+| wrs     | 8      | variable |
++---------+--------+----------+
+
+* *wr_cnt* is the number of device writes coalesced in the message
+* *wrs* is an array of device writes defined below
+
+Single Device Write Format
+""""""""""""""""""""""""""
+
++--------+--------+----------+
+| Name   | Offset | Size     |
++========+========+==========+
+| offset | 0      | 8        |
++--------+--------+----------+
+| region | 8      | 4        |
++--------+--------+----------+
+| count  | 12     | 4        |
++--------+--------+----------+
+| data   | 16     | 8        |
++--------+--------+----------+
+
+* *offset* into the region being accessed.
+* *region* is the index of the region being accessed.
+* *count* is the size of the data to be transferred.  This format can
+  only describe writes of 8 bytes or less.
+* *data* is the data to write.
+
+Reply
+^^^^^
+
++---------+--------+----------+
+| Name    | Offset | Size     |
++=========+========+==========+
+| wr_cnt  | 0      | 8        |
++---------+--------+----------+
+
+* *wr_cnt* is the number of device writes completed.
 
 
 Appendices

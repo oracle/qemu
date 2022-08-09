@@ -68,6 +68,7 @@ static void vfio_user_send_wait(VFIOProxy *proxy, VFIOUserHdr *hdr,
 static void vfio_user_wait_reqs(VFIOProxy *proxy);
 static void vfio_user_request_msg(VFIOUserHdr *hdr, uint16_t cmd,
                                   uint32_t size, uint32_t flags);
+static void vfio_user_flush_multi(VFIOProxy *proxy);
 
 static inline void vfio_user_set_error(VFIOUserHdr *hdr, uint32_t err)
 {
@@ -474,6 +475,11 @@ static void vfio_user_send(void *opaque)
         }
         qio_channel_set_aio_fd_handler(proxy->ioc, proxy->ctx,
                                        vfio_user_recv, NULL, proxy);
+
+        /* queue empty - send any pending multi write msgs */
+        if (proxy->wr_multi != NULL) {
+            vfio_user_flush_multi(proxy);
+        }
     }
 }
 
@@ -492,6 +498,7 @@ static int vfio_user_send_one(VFIOProxy *proxy, VFIOUserMsg *msg)
     }
 
     QTAILQ_REMOVE(&proxy->outgoing, msg, next);
+    proxy->num_outgoing--;
     if (msg->type == VFIO_MSG_ASYNC) {
         vfio_user_recycle(proxy, msg);
     } else {
@@ -602,6 +609,7 @@ static int vfio_user_send_queued(VFIOProxy *proxy, VFIOUserMsg *msg)
      */
     if (!QTAILQ_EMPTY(&proxy->outgoing)) {
         QTAILQ_INSERT_TAIL(&proxy->outgoing, msg, next);
+        proxy->num_outgoing++;
         return 0;
     }
 
@@ -615,6 +623,7 @@ static int vfio_user_send_queued(VFIOProxy *proxy, VFIOUserMsg *msg)
     }
     if (ret == QIO_CHANNEL_ERR_BLOCK) {
         QTAILQ_INSERT_HEAD(&proxy->outgoing, msg, next);
+        proxy->num_outgoing = 1;
         qio_channel_set_aio_fd_handler(proxy->ioc, proxy->ctx,
                                        vfio_user_recv, vfio_user_send,
                                        proxy);
@@ -679,6 +688,11 @@ static void vfio_user_send_nowait(VFIOProxy *proxy, VFIOUserHdr *hdr,
 
     QEMU_LOCK_GUARD(&proxy->lock);
 
+    /* older coalesced writes go first */
+    if (proxy->wr_multi != NULL) {
+        vfio_user_flush_multi(proxy);
+    }
+
     msg = vfio_user_getmsg(proxy, hdr, fds);
     msg->id = hdr->id;
     msg->rsize = rsize ? rsize : hdr->size;
@@ -715,6 +729,11 @@ static void vfio_user_send_wait(VFIOProxy *proxy, VFIOUserHdr *hdr,
         if (iolock) {
             qemu_mutex_unlock_iothread();
         }
+    }
+
+    /* older coalesced writes go first */
+    if (proxy->wr_multi != NULL) {
+        vfio_user_flush_multi(proxy);
     }
 
     msg = vfio_user_getmsg(proxy, hdr, fds);
@@ -1455,11 +1474,48 @@ static int vfio_user_region_read(VFIOProxy *proxy, uint8_t index, off_t offset,
     return msgp->count;
 }
 
+static void vfio_user_flush_multi(VFIOProxy *proxy)
+{
+    VFIOUserWRMulti *msgp = proxy->wr_multi;
+
+    vfio_user_send_async(proxy, &msgp->hdr, NULL);
+    proxy->wr_multi = NULL;
+}
+
+static void vfio_user_create_multi(VFIOProxy *proxy)
+{
+    VFIOUserWRMulti *msgp;
+
+    msgp = g_malloc0(sizeof(*msgp));
+    vfio_user_request_msg(&msgp->hdr, VFIO_USER_REGION_WRITE_MULTI,
+                          sizeof(*msgp), VFIO_USER_NO_REPLY);
+    proxy->wr_multi = msgp;
+}
+
+static int vfio_user_add_multi(VFIOProxy *proxy, uint8_t index, off_t offset,
+                               uint32_t count, void *data)
+{
+    VFIOUserWRMulti *msgp = proxy->wr_multi;
+    VFIOUserWROne *w1 = &msgp->wrs[msgp->wr_cnt];
+
+    w1->offset = offset;
+    w1->region = index;
+    w1->count = count;
+    memcpy(&w1->data, data, count);
+
+    msgp->wr_cnt++;
+    if (msgp->wr_cnt == VFIO_USER_MULTI_MAX ||
+        proxy->num_outgoing < VFIO_USER_OUT_LOW) {
+        vfio_user_flush_multi(proxy);
+    }
+    return count;
+}
+
 static int vfio_user_region_write(VFIOProxy *proxy, uint8_t index, off_t offset,
                                   uint32_t count, void *data, bool post)
 {
     VFIOUserRegionRW *msgp = NULL;
-    int flags = post ? VFIO_USER_NO_REPLY : 0;
+    int flags;
     int size = sizeof(*msgp) + count;
     int ret;
 
@@ -1467,6 +1523,29 @@ static int vfio_user_region_write(VFIOProxy *proxy, uint8_t index, off_t offset,
         return -EINVAL;
     }
 
+    if (proxy->flags & VFIO_PROXY_NO_POST) {
+        post = false;
+    }
+
+    if (proxy->wr_multi != NULL) {
+        /*
+         * if new write can be posted, add it
+         * else flush pending writes before sending current one
+         */
+        if (post && count <= VFIO_USER_MULTI_DATA) {
+            return vfio_user_add_multi(proxy, index, offset, count, data);
+        }
+        vfio_user_flush_multi(proxy);
+    }
+
+    /* if outgoing queue is over the highwater, start a WRITE_MULTI message */
+    if (proxy->num_outgoing > VFIO_USER_OUT_HIGH && post &&
+        count <= VFIO_USER_MULTI_DATA) {
+        vfio_user_create_multi(proxy);
+        return vfio_user_add_multi(proxy, index, offset, count, data);
+    }
+
+    flags = post ? VFIO_USER_NO_REPLY : 0;
     msgp = g_malloc0(size);
     vfio_user_request_msg(&msgp->hdr, VFIO_USER_REGION_WRITE, size, flags);
     msgp->offset = offset;
@@ -1475,7 +1554,7 @@ static int vfio_user_region_write(VFIOProxy *proxy, uint8_t index, off_t offset,
     memcpy(&msgp->data, data, count);
 
     /* async send will free msg after it's sent */
-    if (post && !(proxy->flags & VFIO_PROXY_NO_POST)) {
+    if (post) {
         vfio_user_send_async(proxy, &msgp->hdr, NULL);
         return count;
     }
