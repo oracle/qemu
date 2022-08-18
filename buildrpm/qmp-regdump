@@ -290,7 +290,7 @@ def main():
     exec_cmd(cmd)
 
     # query CPUs in VM
-    cmd = {'execute': 'query-cpus'}
+    cmd = {'execute': 'query-cpus-fast'}
     cpus = exec_cmd(cmd)
     ncpus = len(cpus)
 
@@ -300,7 +300,7 @@ def main():
         found = False
 
         for cpu in cpus:
-            if parsed_args.cpuid == cpu['CPU']:
+            if parsed_args.cpuid == cpu['cpu-index']:
                 print_cpuinfo(parsed_args.cpuid)
                 found = True
                 break
