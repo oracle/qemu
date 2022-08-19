@@ -84,8 +84,8 @@ typedef struct VFIOProxy {
 #define VFIO_PROXY_NO_POST       0x8
 
 /* coalescing high and low water marks for VFIOProxy num_outgoing */
-#define VFIO_USER_OUT_HIGH       (32 * 1024)
-#define VFIO_USER_OUT_LOW        (2 * 1024)
+#define VFIO_USER_OUT_HIGH       1024
+#define VFIO_USER_OUT_LOW        128
 
 VFIOProxy *vfio_user_connect_dev(SocketAddress *addr, Error **errp);
 void vfio_user_disconnect(VFIOProxy *proxy);
