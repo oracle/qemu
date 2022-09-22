@@ -60,6 +60,11 @@ if sudo -n losetup &>/dev/null; then
 else
     loopdev=false
 
+    # Check for usable FUSE in the host environment:
+    if test ! -c "/dev/fuse"; then
+        _notrun 'No passwordless sudo nor usable /dev/fuse'
+    fi
+
     # QSD --export fuse will either yield "Parameter 'id' is missing"
     # or "Invalid parameter 'fuse'", depending on whether there is
     # FUSE support or not.
@@ -326,7 +331,7 @@ else
 
     $QSD \
         --blockdev file,node-name=export-node,filename="$TEST_IMG" \
-        --export fuse,id=fuse-export,node-name=export-node,mountpoint="$export_mp",writable=on,growable=off \
+        --export fuse,id=fuse-export,node-name=export-node,mountpoint="$export_mp",writable=on,growable=off,allow-other=off \
         --pidfile "$TEST_DIR/qsd.pid" \
         --daemonize
 fi

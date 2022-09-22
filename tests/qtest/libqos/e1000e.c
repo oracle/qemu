@@ -17,13 +17,13 @@
  */
 
 #include "qemu/osdep.h"
-#include "libqtest.h"
+#include "../libqtest.h"
 #include "pci-pc.h"
 #include "qemu/sockets.h"
 #include "qemu/iov.h"
 #include "qemu/module.h"
 #include "qemu/bitops.h"
-#include "malloc.h"
+#include "libqos-malloc.h"
 #include "qgraph.h"
 #include "e1000e.h"
 

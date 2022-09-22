@@ -1,6 +1,24 @@
 #ifndef QEMU_CUTILS_H
 #define QEMU_CUTILS_H
 
+/*
+ * si_prefix:
+ * @exp10: exponent of 10, a multiple of 3 between -18 and 18 inclusive.
+ *
+ * Return a SI prefix (n, u, m, K, M, etc.) corresponding
+ * to the given exponent of 10.
+ */
+const char *si_prefix(unsigned int exp10);
+
+/*
+ * iec_binary_prefix:
+ * @exp2: exponent of 2, a multiple of 10 between 0 and 60 inclusive.
+ *
+ * Return an IEC binary prefix (Ki, Mi, etc.) corresponding
+ * to the given exponent of 2.
+ */
+const char *iec_binary_prefix(unsigned int exp2);
+
 /**
  * pstrcpy:
  * @buf: buffer to copy string into
@@ -193,15 +211,34 @@ int uleb128_decode_small(const uint8_t *in, uint32_t *n);
  */
 int qemu_pstrcmp0(const char **str1, const char **str2);
 
+/* Find program directory, and save it for later usage with
+ * qemu_get_exec_dir().
+ * Try OS specific API first, if not working, parse from argv0. */
+void qemu_init_exec_dir(const char *argv0);
+
+/* Get the saved exec dir.  */
+const char *qemu_get_exec_dir(void);
 
 /**
  * get_relocated_path:
  * @dir: the directory (typically a `CONFIG_*DIR` variable) to be relocated.
  *
  * Returns a path for @dir that uses the directory of the running executable
- * as the prefix.  For example, if `bindir` is `/usr/bin` and @dir is
- * `/usr/share/qemu`, the function will append `../share/qemu` to the
- * directory that contains the running executable and return the result.
+ * as the prefix.
+ *
+ * When a directory named `qemu-bundle` exists in the directory of the running
+ * executable, the path to the directory will be prepended to @dir. For
+ * example, if the directory of the running executable is `/qemu/build` @dir
+ * is `/usr/share/qemu`, the result will be
+ * `/qemu/build/qemu-bundle/usr/share/qemu`. The directory is expected to exist
+ * in the build tree.
+ *
+ * Otherwise, the directory of the running executable will be used as the
+ * prefix and it appends the relative path from `bindir` to @dir. For example,
+ * if the directory of the running executable is `/opt/qemu/bin`, `bindir` is
+ * `/usr/bin` and @dir is `/usr/share/qemu`, the result will be
+ * `/opt/qemu/bin/../share/qemu`.
+ *
  * The returned string should be freed by the caller.
  */
 char *get_relocated_path(const char *dir);

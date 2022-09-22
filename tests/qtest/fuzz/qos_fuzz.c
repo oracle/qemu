@@ -22,8 +22,8 @@
 #include "exec/memory.h"
 #include "qemu/main-loop.h"
 
-#include "tests/qtest/libqos/libqtest.h"
-#include "tests/qtest/libqos/malloc.h"
+#include "tests/qtest/libqtest.h"
+#include "tests/qtest/libqos/libqos-malloc.h"
 #include "tests/qtest/libqos/qgraph.h"
 #include "tests/qtest/libqos/qgraph_internal.h"
 #include "tests/qtest/libqos/qos_external.h"

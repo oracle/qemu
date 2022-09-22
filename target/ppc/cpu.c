@@ -88,7 +88,7 @@ static inline void fpscr_set_rounding_mode(CPUPPCState *env)
     int rnd_type;
 
     /* Set rounding mode */
-    switch (fpscr_rn) {
+    switch (env->fpscr & FP_RN) {
     case 0:
         /* Best approximation (round to nearest) */
         rnd_type = float_round_nearest_even;
@@ -120,6 +120,8 @@ void ppc_store_fpscr(CPUPPCState *env, target_ulong val)
         val |= FP_FEX;
     }
     env->fpscr = val;
+    env->fp_status.rebias_overflow  = (FP_OE & env->fpscr) ? true : false;
+    env->fp_status.rebias_underflow = (FP_UE & env->fpscr) ? true : false;
     if (tcg_enabled()) {
         fpscr_set_rounding_mode(env);
     }

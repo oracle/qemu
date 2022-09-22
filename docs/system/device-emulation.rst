@@ -84,6 +84,7 @@ Emulated Devices
 
    devices/can.rst
    devices/ccid.rst
+   devices/cxl.rst
    devices/ivshmem.rst
    devices/net.rst
    devices/nvme.rst
@@ -91,3 +92,4 @@ Emulated Devices
    devices/vhost-user.rst
    devices/virtio-pmem.rst
    devices/vhost-user-rng.rst
+   devices/canokey.rst

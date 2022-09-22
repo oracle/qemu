@@ -40,6 +40,7 @@ RUN export DEBIAN_FRONTEND=noninteractive && \
             libcacard-dev \
             libcap-ng-dev \
             libcapstone-dev \
+            libcmocka-dev \
             libcurl4-gnutls-dev \
             libdaxctl-dev \
             libdrm-dev \
@@ -58,6 +59,7 @@ RUN export DEBIAN_FRONTEND=noninteractive && \
             libiscsi-dev \
             libjemalloc-dev \
             libjpeg-turbo8-dev \
+            libjson-c-dev \
             liblttng-ust-dev \
             liblzo2-dev \
             libncursesw5-dev \
@@ -135,7 +137,7 @@ RUN export DEBIAN_FRONTEND=noninteractive && \
     ln -s /usr/bin/ccache /usr/libexec/ccache-wrappers/g++ && \
     ln -s /usr/bin/ccache /usr/libexec/ccache-wrappers/gcc
 
-RUN pip3 install meson==0.56.0
+RUN /usr/bin/pip3 install meson==0.56.0
 
 ENV LANG "en_US.UTF-8"
 ENV MAKE "/usr/bin/make"

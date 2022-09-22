@@ -490,6 +490,11 @@ static GuestDiskBusType win2qemu[] = {
 #if (_WIN32_WINNT >= 0x0601)
     [BusTypeVirtual] = GUEST_DISK_BUS_TYPE_VIRTUAL,
     [BusTypeFileBackedVirtual] = GUEST_DISK_BUS_TYPE_FILE_BACKED_VIRTUAL,
+    /*
+     * BusTypeSpaces currently is not suported
+     */
+    [BusTypeSpaces] = GUEST_DISK_BUS_TYPE_UNKNOWN,
+    [BusTypeNvme] = GUEST_DISK_BUS_TYPE_NVME,
 #endif
 };
 
@@ -2000,8 +2005,8 @@ GuestMemoryBlockInfo *qmp_guest_get_memory_block_info(Error **errp)
     return NULL;
 }
 
-/* add unsupported commands to the blacklist */
-GList *ga_command_blacklist_init(GList *blacklist)
+/* add unsupported commands to the list of blocked RPCs */
+GList *ga_command_init_blockedrpcs(GList *blockedrpcs)
 {
     const char *list_unsupported[] = {
         "guest-suspend-hybrid",
@@ -2012,7 +2017,7 @@ GList *ga_command_blacklist_init(GList *blacklist)
     char **p = (char **)list_unsupported;
 
     while (*p) {
-        blacklist = g_list_append(blacklist, g_strdup(*p++));
+        blockedrpcs = g_list_append(blockedrpcs, g_strdup(*p++));
     }
 
     if (!vss_init(true)) {
@@ -2023,11 +2028,11 @@ GList *ga_command_blacklist_init(GList *blacklist)
         p = (char **)list;
 
         while (*p) {
-            blacklist = g_list_append(blacklist, g_strdup(*p++));
+            blockedrpcs = g_list_append(blockedrpcs, g_strdup(*p++));
         }
     }
 
-    return blacklist;
+    return blockedrpcs;
 }
 
 /* register init/cleanup routines for stateful command groups */
@@ -2531,4 +2536,16 @@ char *qga_get_host_name(Error **errp)
     }
 
     return g_utf16_to_utf8(tmp, size, NULL, NULL, NULL);
+}
+
+GuestDiskStatsInfoList *qmp_guest_get_diskstats(Error **errp)
+{
+    error_setg(errp, QERR_UNSUPPORTED);
+    return NULL;
+}
+
+GuestCpuStatsList *qmp_guest_get_cpustats(Error **errp)
+{
+    error_setg(errp, QERR_UNSUPPORTED);
+    return NULL;
 }

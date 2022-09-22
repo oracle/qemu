@@ -21,6 +21,7 @@
 #include "qapi/error.h"
 #include "qemu/qemu-print.h"
 #include "cpu.h"
+#include "exec/exec-all.h"
 
 static void openrisc_cpu_set_pc(CPUState *cs, vaddr value)
 {
@@ -29,6 +30,15 @@ static void openrisc_cpu_set_pc(CPUState *cs, vaddr value)
     cpu->env.pc = value;
     cpu->env.dflag = 0;
 }
+
+static void openrisc_cpu_synchronize_from_tb(CPUState *cs,
+                                             const TranslationBlock *tb)
+{
+    OpenRISCCPU *cpu = OPENRISC_CPU(cs);
+
+    cpu->env.pc = tb->pc;
+}
+
 
 static bool openrisc_cpu_has_work(CPUState *cs)
 {
@@ -88,7 +98,6 @@ static void openrisc_cpu_set_irq(void *opaque, int irq, int level)
         cpu_interrupt(cs, CPU_INTERRUPT_HARD);
     } else {
         cpu_reset_interrupt(cs, CPU_INTERRUPT_HARD);
-        cpu->env.picsr = 0;
     }
 }
 #endif
@@ -186,6 +195,7 @@ static const struct SysemuCPUOps openrisc_sysemu_ops = {
 
 static const struct TCGCPUOps openrisc_tcg_ops = {
     .initialize = openrisc_translate_init,
+    .synchronize_from_tb = openrisc_cpu_synchronize_from_tb,
 
 #ifndef CONFIG_USER_ONLY
     .tlb_fill = openrisc_cpu_tlb_fill,

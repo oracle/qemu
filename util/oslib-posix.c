@@ -48,23 +48,14 @@
 #endif
 
 #ifdef __FreeBSD__
-#include <sys/sysctl.h>
-#include <sys/user.h>
 #include <sys/thr.h>
+#include <sys/types.h>
+#include <sys/user.h>
 #include <libutil.h>
 #endif
 
 #ifdef __NetBSD__
-#include <sys/sysctl.h>
 #include <lwp.h>
-#endif
-
-#ifdef __APPLE__
-#include <mach-o/dyld.h>
-#endif
-
-#ifdef __HAIKU__
-#include <kernel/image.h>
 #endif
 
 #include "qemu/mmap-alloc.h"
@@ -224,32 +215,20 @@ void qemu_anon_ram_free(void *ptr, size_t size)
     qemu_ram_munmap(-1, ptr, size);
 }
 
-void qemu_set_block(int fd)
+void qemu_socket_set_block(int fd)
 {
-    int f;
-    f = fcntl(fd, F_GETFL);
-    assert(f != -1);
-    f = fcntl(fd, F_SETFL, f & ~O_NONBLOCK);
-    assert(f != -1);
+    g_unix_set_fd_nonblocking(fd, false, NULL);
 }
 
-int qemu_try_set_nonblock(int fd)
+int qemu_socket_try_set_nonblock(int fd)
 {
-    int f;
-    f = fcntl(fd, F_GETFL);
-    if (f == -1) {
-        return -errno;
-    }
-    if (fcntl(fd, F_SETFL, f | O_NONBLOCK) == -1) {
-        return -errno;
-    }
-    return 0;
+    return g_unix_set_fd_nonblocking(fd, true, NULL) ? 0 : -errno;
 }
 
-void qemu_set_nonblock(int fd)
+void qemu_socket_set_nonblock(int fd)
 {
     int f;
-    f = qemu_try_set_nonblock(fd);
+    f = qemu_socket_try_set_nonblock(fd);
     assert(f == 0);
 }
 
@@ -274,28 +253,6 @@ void qemu_set_cloexec(int fd)
     assert(f != -1);
 }
 
-/*
- * Creates a pipe with FD_CLOEXEC set on both file descriptors
- */
-int qemu_pipe(int pipefd[2])
-{
-    int ret;
-
-#ifdef CONFIG_PIPE2
-    ret = pipe2(pipefd, O_CLOEXEC);
-    if (ret != -1 || errno != ENOSYS) {
-        return ret;
-    }
-#endif
-    ret = pipe(pipefd);
-    if (ret == 0) {
-        qemu_set_cloexec(pipefd[0]);
-        qemu_set_cloexec(pipefd[1]);
-    }
-
-    return ret;
-}
-
 char *
 qemu_get_local_state_dir(void)
 {
@@ -315,87 +272,6 @@ void qemu_set_tty_echo(int fd, bool echo)
     }
 
     tcsetattr(fd, TCSANOW, &tty);
-}
-
-static const char *exec_dir;
-
-void qemu_init_exec_dir(const char *argv0)
-{
-    char *p = NULL;
-    char buf[PATH_MAX];
-
-    if (exec_dir) {
-        return;
-    }
-
-#if defined(__linux__)
-    {
-        int len;
-        len = readlink("/proc/self/exe", buf, sizeof(buf) - 1);
-        if (len > 0) {
-            buf[len] = 0;
-            p = buf;
-        }
-    }
-#elif defined(__FreeBSD__) \
-      || (defined(__NetBSD__) && defined(KERN_PROC_PATHNAME))
-    {
-#if defined(__FreeBSD__)
-        static int mib[4] = {CTL_KERN, KERN_PROC, KERN_PROC_PATHNAME, -1};
-#else
-        static int mib[4] = {CTL_KERN, KERN_PROC_ARGS, -1, KERN_PROC_PATHNAME};
-#endif
-        size_t len = sizeof(buf) - 1;
-
-        *buf = '\0';
-        if (!sysctl(mib, ARRAY_SIZE(mib), buf, &len, NULL, 0) &&
-            *buf) {
-            buf[sizeof(buf) - 1] = '\0';
-            p = buf;
-        }
-    }
-#elif defined(__APPLE__)
-    {
-        char fpath[PATH_MAX];
-        uint32_t len = sizeof(fpath);
-        if (_NSGetExecutablePath(fpath, &len) == 0) {
-            p = realpath(fpath, buf);
-            if (!p) {
-                return;
-            }
-        }
-    }
-#elif defined(__HAIKU__)
-    {
-        image_info ii;
-        int32_t c = 0;
-
-        *buf = '\0';
-        while (get_next_image_info(0, &c, &ii) == B_OK) {
-            if (ii.type == B_APP_IMAGE) {
-                strncpy(buf, ii.name, sizeof(buf));
-                buf[sizeof(buf) - 1] = 0;
-                p = buf;
-                break;
-            }
-        }
-    }
-#endif
-    /* If we don't have any way of figuring out the actual executable
-       location then try argv[0].  */
-    if (!p && argv0) {
-        p = realpath(argv0, buf);
-    }
-    if (p) {
-        exec_dir = g_path_get_dirname(p);
-    } else {
-        exec_dir = CONFIG_BINDIR;
-    }
-}
-
-const char *qemu_get_exec_dir(void)
-{
-    return exec_dir;
 }
 
 #ifdef CONFIG_LINUX
@@ -894,21 +770,6 @@ size_t qemu_get_host_physmem(void)
         }
     }
 #endif
-    return 0;
-}
-
-/* Sets a specific flag */
-int fcntl_setfl(int fd, int flag)
-{
-    int flags;
-
-    flags = fcntl(fd, F_GETFL);
-    if (flags == -1) {
-        return -errno;
-    }
-    if (fcntl(fd, F_SETFL, flags | flag) == -1) {
-        return -errno;
-    }
     return 0;
 }
 

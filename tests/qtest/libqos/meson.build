@@ -1,9 +1,12 @@
-libqos_srcs = files('../libqtest.c',
+libqos_srcs = files(
+        '../libqtest.c',
+        '../libqmp.c',
+
         'qgraph.c',
         'qos_external.c',
         'pci.c',
         'fw_cfg.c',
-        'malloc.c',
+        'libqos-malloc.c',
         'libqos.c',
         'sdhci-cmd.c',
 
@@ -42,6 +45,7 @@ libqos_srcs = files('../libqtest.c',
         'virtio-scsi.c',
         'virtio-serial.c',
         'virtio-iommu.c',
+        'generic-pcihost.c',
 
         # qgraph machines:
         'aarch64-xlnx-zcu102-machine.c',
