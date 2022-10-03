@@ -160,6 +160,7 @@ static void vfio_user_recycle(VFIOProxy *proxy, VFIOUserMsg *msg)
     msg->hdr = NULL;
     msg->fds = NULL;
     msg->complete = false;
+    msg->pending = false;
     QTAILQ_INSERT_HEAD(&proxy->free, msg, next);
 }
 
@@ -504,6 +505,7 @@ static int vfio_user_send_one(VFIOProxy *proxy, VFIOUserMsg *msg)
         vfio_user_recycle(proxy, msg);
     } else {
         QTAILQ_INSERT_TAIL(&proxy->pending, msg, next);
+        msg->pending = true;
     }
 
     return 0;
@@ -647,6 +649,7 @@ static int vfio_user_send_queued(VFIOProxy *proxy, VFIOUserMsg *msg)
         vfio_user_recycle(proxy, msg);
     } else {
         QTAILQ_INSERT_TAIL(&proxy->pending, msg, next);
+        msg->pending = true;
     }
 
     return 0;
@@ -743,7 +746,10 @@ static void vfio_user_send_wait(VFIOProxy *proxy, VFIOUserHdr *hdr,
     if (ret == 0) {
         while (!msg->complete) {
             if (!qemu_cond_timedwait(&msg->cv, &proxy->lock, proxy->wait_time)) {
-                QTAILQ_REMOVE(&proxy->pending, msg, next);
+                VFIOUserMsgQ *list;
+
+                list = msg->pending ? &proxy->pending : &proxy->outgoing;
+                QTAILQ_REMOVE(list, msg, next);
                 vfio_user_set_error(hdr, ETIMEDOUT);
                 break;
             }
@@ -782,7 +788,10 @@ static void vfio_user_wait_reqs(VFIOProxy *proxy)
         msg->type = VFIO_MSG_WAIT;
         while (!msg->complete) {
             if (!qemu_cond_timedwait(&msg->cv, &proxy->lock, proxy->wait_time)) {
-                QTAILQ_REMOVE(&proxy->pending, msg, next);
+                VFIOUserMsgQ *list;
+
+                list = msg->pending ? &proxy->pending : &proxy->outgoing;
+                QTAILQ_REMOVE(list, msg, next);
                 error_printf("vfio_wait_reqs - timed out\n");
                 break;
             }
