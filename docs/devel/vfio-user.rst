@@ -500,6 +500,14 @@ Capabilities:
 |                    |         | see `Read and Write Operations`_. Optional,    |
 |                    |         | with a default value of 1048576 bytes.         |
 +--------------------+---------+------------------------------------------------+
+| pgsizes            | number  | Page sizes supported in DMA map operations     |
+|                    |         | or'ed together. Optional, with a default value |
+|                    |         | of supporting only 4k pages.                   |
++--------------------+---------+------------------------------------------------+
+| max_dma_maps       | number  | Maximum number DMA map windows that can be     |
+|                    |         | valid simultaneously.  Optional, with a        |
+|                    |         | value of 65535 (64k-1).                        |
++--------------------+---------+------------------------------------------------+
 | migration          | object  | Migration capability parameters. If missing    |
 |                    |         | then migration is not supported by the sender. |
 +--------------------+---------+------------------------------------------------+
@@ -509,12 +517,16 @@ Capabilities:
 
 The migration capability contains the following name/value pairs:
 
-+--------+--------+-----------------------------------------------+
-| Name   | Type   | Description                                   |
-+========+========+===============================================+
-| pgsize | number | Page size of dirty pages bitmap. The smallest |
-|        |        | between the client and the server is used.    |
-+--------+--------+-----------------------------------------------+
++-----------------+--------+--------------------------------------------------+
+| Name            | Type   | Description                                      |
++=================+========+==================================================+
+| pgsize          | number | Page size of dirty pages bitmap. The smallest    |
+|                 |        | between the client and the server is used.       |
++-----------------+--------+--------------------------------------------------+
+| max_bitmap_size | number | Maximum bitmap size in ``VFIO_USER_DIRTY_PAGES`` |
+|                 |        | ``VFIO_DMA_UNMAP`` messages.  Optional, with a   |
+|                 |        | default value of 256MB.                          |
++-----------------+--------+--------------------------------------------------+
 
 Reply
 ^^^^^
