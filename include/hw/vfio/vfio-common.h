@@ -206,6 +206,7 @@ struct VFIOContIO {
     int (*dma_unmap)(VFIOContainer *container,
                      struct vfio_iommu_type1_dma_unmap *unmap,
                      struct vfio_bitmap *bitmap);
+    int (*dma_unmap_all)(VFIOContainer *container, uint32_t flags);
     int (*dirty_bitmap)(VFIOContainer *container,
                         struct vfio_iommu_type1_dirty_bitmap *bitmap,
                         struct vfio_iommu_type1_dirty_bitmap_get *range);
@@ -216,6 +217,8 @@ struct VFIOContIO {
     ((cont)->io_ops->dma_map((cont), (mr), (map)))
 #define CONT_DMA_UNMAP(cont, unmap, bitmap) \
     ((cont)->io_ops->dma_unmap((cont), (unmap), (bitmap)))
+#define CONT_DMA_UNMAP_ALL(cont, flags) \
+    ((cont)->io_ops->dma_unmap_all((cont), (flags)))
 #define CONT_DIRTY_BITMAP(cont, bitmap, range) \
     ((cont)->io_ops->dirty_bitmap((cont), (bitmap), (range)))
 #define CONT_WAIT_COMMIT(cont) ((cont)->io_ops->wait_commit(cont))
