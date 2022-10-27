@@ -193,6 +193,7 @@ struct VFIOContainerIO {
     int (*dma_unmap)(VFIOContainer *container,
                      struct vfio_iommu_type1_dma_unmap *unmap,
                      struct vfio_bitmap *bitmap);
+    int (*dma_unmap_all)(VFIOContainer *container, uint32_t flags);
     int (*dirty_bitmap)(VFIOContainer *container,
                         struct vfio_iommu_type1_dirty_bitmap *bitmap,
                         struct vfio_iommu_type1_dirty_bitmap_get *range);
