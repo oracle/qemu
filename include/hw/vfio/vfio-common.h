@@ -90,6 +90,7 @@ typedef struct VFIOContainer {
     VFIOContainerIO *io;
     bool initialized;
     bool dirty_pages_supported;
+    bool unmap_all;
     uint64_t dirty_pgsizes;
     uint64_t max_dirty_bitmap_size;
     unsigned long pgsizes;

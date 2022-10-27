@@ -486,14 +486,18 @@ unmap_exit:
  */
 static int vfio_dma_unmap(VFIOContainer *container,
                           hwaddr iova, ram_addr_t size,
-                          IOMMUTLBEntry *iotlb)
+                          IOMMUTLBEntry *iotlb, uint32_t flags)
 {
     struct vfio_iommu_type1_dma_unmap unmap = {
         .argsz = sizeof(unmap),
-        .flags = 0,
+        .flags = flags,
         .iova = iova,
         .size = size,
     };
+
+    if (flags & VFIO_DMA_UNMAP_FLAG_ALL) {
+        return container->io->dma_unmap(container, &unmap);
+    }
 
     if (iotlb && container->dirty_pages_supported &&
         vfio_devices_all_running_and_saving(container)) {
@@ -653,7 +657,7 @@ static void vfio_iommu_map_notify(IOMMUNotifier *n, IOMMUTLBEntry *iotlb)
                          iotlb->addr_mask + 1, vaddr);
         }
     } else {
-        ret = vfio_dma_unmap(container, iova, iotlb->addr_mask + 1, iotlb);
+        ret = vfio_dma_unmap(container, iova, iotlb->addr_mask + 1, iotlb, 0);
         if (ret) {
             error_report("vfio_dma_unmap(%p, 0x%"HWADDR_PRIx", "
                          "0x%"HWADDR_PRIx") = %d (%m)",
@@ -675,7 +679,7 @@ static void vfio_ram_discard_notify_discard(RamDiscardListener *rdl,
     int ret;
 
     /* Unmap with a single call. */
-    ret = vfio_dma_unmap(vrdl->container, iova, size , NULL);
+    ret = vfio_dma_unmap(vrdl->container, iova, size, NULL, 0);
     if (ret) {
         error_report("%s: vfio_dma_unmap() failed: %s", __func__,
                      strerror(-ret));
@@ -1186,17 +1190,12 @@ static void vfio_listener_region_del(MemoryListener *listener,
 
     if (try_unmap) {
         if (int128_eq(llsize, int128_2_64())) {
-            /* The unmap ioctl doesn't accept a full 64-bit span. */
-            llsize = int128_rshift(llsize, 1);
-            ret = vfio_dma_unmap(container, iova, int128_get64(llsize), NULL);
-            if (ret) {
-                error_report("vfio_dma_unmap(%p, 0x%"HWADDR_PRIx", "
-                             "0x%"HWADDR_PRIx") = %d (%m)",
-                             container, iova, int128_get64(llsize), ret);
-            }
-            iova += int128_get64(llsize);
+            ret = vfio_dma_unmap(container, 0, 0,
+                                 NULL, VFIO_DMA_UNMAP_FLAG_ALL);
+        } else {
+            ret = vfio_dma_unmap(container, iova, int128_get64(llsize),
+                                 NULL, 0);
         }
-        ret = vfio_dma_unmap(container, iova, int128_get64(llsize), NULL);
         if (ret) {
             error_report("vfio_dma_unmap(%p, 0x%"HWADDR_PRIx", "
                          "0x%"HWADDR_PRIx") = %d (%m)",
@@ -1912,6 +1911,10 @@ static int vfio_init_container(VFIOContainer *container, int group_fd,
     }
 
     container->iommu_type = iommu_type;
+
+    container->unmap_all = (ioctl(container->fd, VFIO_CHECK_EXTENSION,
+                                  VFIO_UNMAP_ALL) != 0);
+
     return 0;
 }
 
@@ -2764,16 +2767,38 @@ static int vfio_io_dma_map(VFIOContainer *container, MemoryRegion *mr,
      */
     if (ioctl(container->fd, VFIO_IOMMU_MAP_DMA, map) == 0 ||
         (errno == EBUSY &&
-         vfio_dma_unmap(container, map->iova, map->size, NULL) == 0 &&
+         vfio_dma_unmap(container, map->iova, map->size, NULL, 0) == 0 &&
          ioctl(container->fd, VFIO_IOMMU_MAP_DMA, map) == 0)) {
         return 0;
     }
     return -errno;
 }
 
+#define TWO_GB    0x8000000000000000
+
 static int vfio_io_dma_unmap(VFIOContainer *container,
                              struct vfio_iommu_type1_dma_unmap *unmap)
 {
+    int ret;
+
+    /* use unmap all if supported */
+    if (unmap->flags & VFIO_DMA_UNMAP_FLAG_ALL) {
+        unmap->iova = 0;
+        unmap->size = 0;
+        if (container->unmap_all) {
+            ret = ioctl(container->fd, VFIO_IOMMU_UNMAP_DMA, unmap);
+        } else {
+            /* unmap in halves */
+            unmap->flags &= ~VFIO_DMA_UNMAP_FLAG_ALL;
+            unmap->size = TWO_GB;
+            ret = ioctl(container->fd, VFIO_IOMMU_UNMAP_DMA, unmap);
+            if (ret == 0) {
+                unmap->iova += TWO_GB;
+                ret = ioctl(container->fd, VFIO_IOMMU_UNMAP_DMA, unmap);
+            }
+        }
+        return ret ? -errno : 0;
+    }
 
     while (ioctl(container->fd, VFIO_IOMMU_UNMAP_DMA, unmap)) {
         /*
