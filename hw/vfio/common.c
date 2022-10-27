@@ -508,6 +508,14 @@ static int vfio_dma_unmap(VFIOContainer *container,
     return container->io->dma_unmap(container, &unmap, NULL);
 }
 
+/*
+ * DMA - Mapping and unmapping for the "type1" IOMMU interface used on x86
+ */
+static int vfio_dma_unmap_all(VFIOContainer *container)
+{
+    return container->io->dma_unmap_all(container, VFIO_DMA_UNMAP_FLAG_ALL);
+}
+
 static int vfio_dma_map(VFIOContainer *container, MemoryRegion *mr, hwaddr iova,
                         ram_addr_t size, void *vaddr, bool readonly)
 {
@@ -1256,17 +1264,10 @@ static void vfio_listener_region_del(MemoryListener *listener,
 
     if (try_unmap) {
         if (int128_eq(llsize, int128_2_64())) {
-            /* The unmap ioctl doesn't accept a full 64-bit span. */
-            llsize = int128_rshift(llsize, 1);
+            ret = vfio_dma_unmap_all(container);
+        } else {
             ret = vfio_dma_unmap(container, iova, int128_get64(llsize), NULL);
-            if (ret) {
-                error_report("vfio_dma_unmap(%p, 0x%"HWADDR_PRIx", "
-                             "0x%"HWADDR_PRIx") = %d (%m)",
-                             container, iova, int128_get64(llsize), ret);
-            }
-            iova += int128_get64(llsize);
         }
-        ret = vfio_dma_unmap(container, iova, int128_get64(llsize), NULL);
         if (ret) {
             error_report("vfio_dma_unmap(%p, 0x%"HWADDR_PRIx", "
                          "0x%"HWADDR_PRIx") = %d (%m)",
@@ -2867,6 +2868,31 @@ static int vfio_io_dma_unmap(VFIOContainer *container,
     return 0;
 }
 
+static int vfio_io_dma_unmap_all(VFIOContainer *container, uint32_t flags)
+{
+    struct vfio_iommu_type1_dma_unmap unmap = {
+        .argsz = sizeof(unmap),
+        .flags = 0,
+        .size = 0x8000000000000000,
+    };
+    int ret;
+
+    /* The unmap ioctl doesn't accept a full 64-bit span. */
+    unmap.iova = 0;
+    ret = ioctl(container->fd, VFIO_IOMMU_UNMAP_DMA, &unmap);
+    if (ret) {
+        return -errno;
+    }
+
+    unmap.iova += unmap.size;
+    ret = ioctl(container->fd, VFIO_IOMMU_UNMAP_DMA, &unmap);
+    if (ret) {
+        return -errno;
+    }
+
+    return 0;
+}
+
 static int vfio_io_dirty_bitmap(VFIOContainer *container,
                                 struct vfio_iommu_type1_dirty_bitmap *bitmap,
                                 struct vfio_iommu_type1_dirty_bitmap_get *range)
@@ -2886,6 +2912,7 @@ static void vfio_io_wait_commit(VFIOContainer *container)
 static VFIOContainerIO vfio_cont_io_ioctl = {
     .dma_map = vfio_io_dma_map,
     .dma_unmap = vfio_io_dma_unmap,
+    .dma_unmap_all = vfio_io_dma_unmap_all,
     .dirty_bitmap = vfio_io_dirty_bitmap,
     .wait_commit = vfio_io_wait_commit,
 };
