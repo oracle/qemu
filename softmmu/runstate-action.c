@@ -16,6 +16,7 @@
 RebootAction reboot_action = REBOOT_ACTION_RESET;
 ShutdownAction shutdown_action = SHUTDOWN_ACTION_POWEROFF;
 PanicAction panic_action = PANIC_ACTION_SHUTDOWN;
+MceAction mce_action = MCE_ACTION_DEFAULT;
 
 /*
  * Receives actions to be applied for specific guest events
@@ -25,6 +26,7 @@ void qmp_set_action(bool has_reboot, RebootAction reboot,
                     bool has_shutdown, ShutdownAction shutdown,
                     bool has_panic, PanicAction panic,
                     bool has_watchdog, WatchdogAction watchdog,
+                    bool has_mce, MceAction mce,
                     Error **errp)
 {
     if (has_reboot) {
@@ -37,6 +39,10 @@ void qmp_set_action(bool has_reboot, RebootAction reboot,
 
     if (has_watchdog) {
         qmp_watchdog_set_action(watchdog, errp);
+    }
+
+    if (has_mce) {
+        mce_action = mce;
     }
 
     /* Process shutdown last, in case the panic action needs to be altered */

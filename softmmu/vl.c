@@ -495,6 +495,9 @@ static QemuOptsList qemu_action_opts = {
         },{
             .name = "watchdog",
             .type = QEMU_OPT_STRING,
+        },{
+            .name = "x-mce",
+            .type = QEMU_OPT_STRING,
         },
         { /* end of list */ }
     },

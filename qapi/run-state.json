@@ -377,6 +377,18 @@
   'data': [ 'pause', 'shutdown', 'exit-failure', 'none' ] }
 
 ##
+# @MceAction:
+#
+# Possible QEMU actions upon MCE
+#
+# @default: default QEMU action
+#
+# @exit: print a message and exit
+##
+{ 'enum': 'MceAction',
+  'data': [ 'default', 'exit' ] }
+
+##
 # @watchdog-set-action:
 #
 # Set watchdog action
@@ -397,7 +409,9 @@
 #
 # @panic: @PanicAction action taken on guest panic.
 #
-# @watchdog: @WatchdogAction action taken when watchdog timer expires .
+# @watchdog: @WatchdogAction action taken when watchdog timer expires.
+#
+# @x-mce: @MceAction action taken upon MCE.
 #
 # Returns: Nothing on success.
 #
@@ -416,7 +430,8 @@
   'data': { '*reboot': 'RebootAction',
             '*shutdown': 'ShutdownAction',
             '*panic': 'PanicAction',
-            '*watchdog': 'WatchdogAction' },
+            '*watchdog': 'WatchdogAction',
+            '*x-mce': 'MceAction' },
   'allow-preconfig': true }
 
 ##

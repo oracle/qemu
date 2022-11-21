@@ -29,6 +29,7 @@
 #include "sysemu/hw_accel.h"
 #include "sysemu/kvm_int.h"
 #include "sysemu/runstate.h"
+#include "sysemu/runstate-action.h"
 #include "kvm_i386.h"
 #include "sev.h"
 #include "hyperv.h"
@@ -623,6 +624,14 @@ void kvm_arch_on_sigbus_vcpu(CPUState *c, int code, void *addr)
         ram_addr = qemu_ram_addr_from_host(addr);
         if (ram_addr != RAM_ADDR_INVALID &&
             kvm_physical_memory_addr_from_host(c->kvm_state, addr, &paddr)) {
+
+            if (mce_action == MCE_ACTION_EXIT) {
+                error_report("Guest MCE Memory Error at QEMU addr %p and "
+                    "GUEST addr 0x%" HWADDR_PRIx " of type %s", addr, paddr,
+                    code == BUS_MCEERR_AR ? "BUS_MCEERR_AR" : "BUS_MCEERR_AO");
+                exit(1);
+            }
+
             kvm_hwpoison_page_add(ram_addr);
             kvm_mce_inject(cpu, paddr, code);
 

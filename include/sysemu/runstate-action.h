@@ -16,4 +16,6 @@ extern RebootAction reboot_action;
 extern ShutdownAction shutdown_action;
 extern PanicAction panic_action;
 
+extern MceAction mce_action;
+
 #endif /* RUNSTATE_ACTION_H */
