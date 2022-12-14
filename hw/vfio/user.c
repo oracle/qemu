@@ -795,18 +795,24 @@ static void vfio_user_wait_reqs(VFIOProxy *proxy)
             }
         }
 
-        if (msg->hdr->flags & VFIO_USER_ERROR) {
-            error_printf("vfio_user_wait_reqs - error reply on async request ");
-            error_printf("command %x error %s\n", msg->hdr->command,
-                         strerror(msg->hdr->error_reply));
+        /*
+         * Re-check last_nowait in case things changed while we slept.
+         * Only reap msg if no one else beat us to it.
+         */
+        if (proxy->last_nowait == msg) {
+            if (msg->hdr->flags & VFIO_USER_ERROR) {
+                error_printf("vfio_user_wait_reqs - error reply on async ");
+                error_printf("request: command %x error %s\n",
+                             msg->hdr->command,
+                             strerror(msg->hdr->error_reply));
+            }
+            proxy->last_nowait = NULL;
         }
 
-        proxy->last_nowait = NULL;
-        /*
-         * Change type back to NOWAIT to free
-         */
-        msg->type = VFIO_MSG_NOWAIT;
-        vfio_user_recycle(proxy, msg);
+        if (msg->type == VFIO_MSG_WAIT) {
+            msg->type = VFIO_MSG_NOWAIT;
+            vfio_user_recycle(proxy, msg);
+        }
     }
 
     /* lock order is BQL->proxy - don't hold proxy when getting BQL */
