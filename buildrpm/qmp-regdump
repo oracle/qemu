@@ -1,0 +1,318 @@
+#!/usr/bin/env python3
+#
+# Tool to print VM register and stack information. Optionally, this
+# tool can associate the PC (RIP) with source information via either
+# vmlinux (with debug symbols) or System.map files.
+#
+# This tool is built on top of QMP and requires QEMU to be started
+# with a monitor socket:
+#
+# qemu -qmp unix:<socket> or -qmp tcp:<host>:<port>
+#
+
+
+import sys
+import argparse
+import subprocess
+import socket
+import json
+import os
+import platform
+
+
+# globals for parsed arguments and socket items
+parsed_args = None
+sock_obj = None
+sock_file = None
+
+
+if platform.machine() == 'x86_64':
+    reg_ip = 'RIP'
+    reg_sp = 'RSP'
+elif platform.machine() == 'aarch64':
+    reg_ip = 'PC'
+    reg_sp = 'SP'
+else:
+    sys.exit('Unsupported platform: %s\n' % platform.machine())
+
+
+def fail(msg):
+    """
+    Close socket and bail out with message.
+
+    """
+    qmp_close()
+    sys.exit('error: %s\n' % msg)
+
+
+def debugprint(msg):
+    """
+    Print debug message (if enabled).
+
+    """
+    if parsed_args.debug:
+        print('debug: %s\n' % msg)
+
+
+def qmp_connect():
+    """
+    Connect to qmp socket.
+
+    """
+    global sock_obj
+    global sock_file
+
+    # if 'socket' has a colon, assume it's a TCP socket <host>:<port>
+    # else, assume it's a unix socket file
+    addr = parsed_args.socket.split(':')
+    if len(addr) == 2:
+        sock_obj = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock_obj.connect((addr[0], int(addr[1])))
+
+    else:
+        sock_obj = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock_obj.connect(parsed_args.socket)
+
+    sock_file = sock_obj.makefile()
+
+    output = sock_file.readline()
+    if not output:
+        fail('failed to receive qmp banner')
+
+    debugprint(output)
+
+
+def qmp_close():
+    """
+    Close socket items.
+
+    """
+    sock_obj.close()
+    sock_file.close()
+
+
+def exec_cmd(cmd):
+    """
+    Execute qmp command and capture output.
+
+    """
+    debugprint(cmd)
+    json_cmd = json.dumps(cmd)
+
+    try:
+        sock_obj.sendall(json_cmd.encode())
+    except socket.error as err:
+        if err[0] == os.errno.EPIPE:
+            return
+        raise socket.error(err)
+
+    output = sock_file.readline()
+    if not output:
+        return
+
+    output = json.loads(output)
+
+    debugprint(output)
+
+    # successful cmds will have a 'return' key
+    if 'return' not in list(output.keys()):
+        fail('cmd \'%s\' failed:\n%s' % (cmd, output))
+
+    return output['return']
+
+
+def print_cpuinfo(cpuid):
+    """
+    Print registers and stack.
+
+    """
+    # print registers
+    print('**CPU %d registers**' % cpuid)
+
+    cmd = {'execute': 'human-monitor-command', 'arguments':
+          {'command-line': 'info registers', 'cpu-index': cpuid}}
+
+    registers = exec_cmd(cmd)
+    print(registers)
+
+    if parsed_args.kernel:
+        print_kerninfo(cpuid, registers)
+
+    if parsed_args.mapfile:
+        print_mapinfo(cpuid, registers)
+
+    # print stack
+    if parsed_args.qwords:
+        print('**CPU %d stack**' % cpuid)
+
+        rsp = get_register(reg_sp, registers)
+
+        for qword in range(parsed_args.qwords):
+            cmd = {'execute': 'human-monitor-command', 'arguments':
+                  {'command-line': ('x /g 0x%s + %d' % (rsp, qword * 8)),
+                  'cpu-index': cpuid}}
+
+            print(exec_cmd(cmd).rstrip())
+
+
+def print_kerninfo(cpuid, registers):
+    """
+    Using vmlinux file, find/print function, file, line.
+
+    """
+    print('**CPU %d %s function, file:line**' % (cpuid, reg_ip))
+
+    rip = get_register(reg_ip, registers)
+
+    if not os.path.isfile(parsed_args.kernel):
+        print('failed to find ' + parsed_args.kernel)
+        return
+
+    cmd = ['addr2line', '-e', parsed_args.kernel, '-f', rip]
+
+    try:
+        output = subprocess.check_output(cmd)
+    except OSError as e:
+        if e.errno == os.errno.ENOENT:
+            print('addr2line not found - required to parse vmlinux')
+        else:
+            print('encounterred failure with addr2line: %d'
+                  % e.errno)
+        return
+
+    print(output)
+
+    if '??' in output:
+        print('failed to find symbols - possible causes:\n'
+              '  \'%s\' missing debug symbols?\n'
+              '  executing in user space?\n'
+               % parsed_args.kernel)
+
+
+def print_mapinfo(cpuid, registers):
+    """
+    Using System.map file, print nearest symbol + offset.
+
+    """
+    print('**CPU %d %s symbol**' % (cpuid, reg_ip))
+
+    rip = int(get_register(reg_ip, registers), 16)
+
+    # limit the symbol search to 8KB
+    search_boundary = 0x2000
+
+    if rip > search_boundary:
+        rip_search_boundary = rip - search_boundary
+    else:
+        rip_search_boundary = 0
+
+    # read in mapfile
+    try:
+        with open(parsed_args.mapfile) as mapfile:
+            lines = mapfile.readlines()
+    except:
+        print('failed to find ' + parsed_args.mapfile)
+        return
+
+    # find closet matching symbol (before RIP)
+    addr = -1
+    symbol = None
+
+    for line in lines:
+        mapaddr = int(line.split(' ')[0], 16)
+
+        if ((mapaddr > rip_search_boundary) and (mapaddr <= rip)):
+            if (mapaddr > addr):
+                addr = mapaddr
+                symbol = line.split(' ')[2].rstrip()
+
+    if symbol:
+        print(symbol + ' + ' + hex(rip - addr) + '\n')
+        return
+
+    print('failed to find symbol within %d KB of %s\n'
+          '  executing in user space?\n' % (search_boundary, reg_ip))
+
+
+def get_register(name, registers):
+    """
+    Find register value in 'registers' output.
+
+    """
+    try:
+        reg = registers.split(name + '=')[1].split()[0]
+    except:
+        fail('failed to find %s in register output' % name)
+
+    return reg
+
+
+def main():
+    global parsed_args
+
+    parser = argparse.ArgumentParser(
+        description = 'Display VM register and stack information. '
+            'Requires QEMU to be started with a QMP socket '
+            'e.g.: # qemu -qmp unix:<socket> or -qmp tcp:<host>:<port>')
+
+    parser.add_argument('-s', '--socket',
+                        help = 'QMP socket: unix socket file or <host>:<port>',
+                        required = True)
+
+    parser.add_argument('-c', '--cpuid',
+                        help = 'VCPU ID (default all VCPUs)',
+                        type = int)
+
+    parser.add_argument('-q', '--qwords',
+                        help = 'number of qwords in stack output (default 5)',
+                        type = int,
+                        default = 5)
+
+    parser.add_argument('-k', '--kernel',
+                        help = 'location of VM vmlinux kernel file')
+
+    parser.add_argument('-m', '--mapfile',
+                        help = 'location of VM system.map file')
+
+    parser.add_argument('-d', '--debug',
+                        help = 'enable debug prints',
+                        action = 'store_true')
+
+    parsed_args = parser.parse_args()
+
+    try:
+        qmp_connect()
+    except:
+        sys.exit('failed to connect to: %s' % parsed_args.socket)
+
+    # enable QMP capabilities
+    cmd = {'execute': 'qmp_capabilities'}
+    exec_cmd(cmd)
+
+    # query CPUs in VM
+    cmd = {'execute': 'query-cpus'}
+    cpus = exec_cmd(cmd)
+    ncpus = len(cpus)
+
+    debugprint('Found %d CPUs' % ncpus)
+
+    if parsed_args.cpuid is not None:
+        found = False
+
+        for cpu in cpus:
+            if parsed_args.cpuid == cpu['CPU']:
+                print_cpuinfo(parsed_args.cpuid)
+                found = True
+                break
+
+        if not found:
+            fail('CPU %d not in VM' % parsed_args.cpuid)
+    else:
+        for cpuid in range(ncpus):
+            print("\n**********CPU %d**********\n" % cpuid)
+            print_cpuinfo(cpuid)
+
+    qmp_close()
+
+if __name__ == '__main__':
+    main()
