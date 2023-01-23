@@ -1,0 +1,331 @@
+#! /usr/bin/python3
+#
+# qemu-submodule-init
+#
+# A QEMU-specific replacement for the command "git submodule update
+# --init --recursive", intended for use by Oracle's build team. This
+# script substitutes mirrored repositories hosted on the server
+# linux-git.us.oracle.com for submodule repositories that are
+# normally hosted on git.qemu.org, github.com, and other servers.
+# This satisfies a build team requirement that QEMU be built from
+# internal source code repositories.
+#
+# Copyright (c) 2020-2022 Oracle and/or its affiliates. All rights reserved.
+
+
+import logging
+import os
+from pathlib import Path
+import re
+import subprocess
+import sys
+
+logging.basicConfig(format='%(message)s')
+
+
+# url_maps is a dictionary that maps upstream Git repository URLs to their
+# mirrors on linux-git.us.oracle.com.
+url_map = {
+    # Referenced by QEMU (top level .gitmodules file)
+    'https://gitlab.com/qemu-project/seabios.git': 'https://linux-git.oraclecorp.com/QEMU/seabios.git',
+    'https://gitlab.com/qemu-project/SLOF.git': 'https://linux-git.oraclecorp.com/QEMU/SLOF.git',
+    'https://gitlab.com/qemu-project/ipxe.git': 'https://linux-git.oraclecorp.com/OVM/ipxe.git',
+    'https://gitlab.com/qemu-project/openbios.git': 'https://linux-git.oraclecorp.com/QEMU/openbios.git',
+    'https://gitlab.com/qemu-project/qemu-palcode.git': 'https://linux-git.oraclecorp.com/QEMU/qemu-palcode.git',
+    'https://gitlab.com/qemu-project/sgabios.git': 'https://linux-git.oraclecorp.com/QEMU/sgabios.git',
+    'https://gitlab.com/qemu-project/dtc.git': 'https://linux-git.oraclecorp.com/QEMU/dtc.git',
+    'https://gitlab.com/qemu-project/u-boot.git': 'https://linux-git.oraclecorp.com/QEMU/u-boot.git',
+    'https://gitlab.com/qemu-project/skiboot.git': 'https://linux-git.oraclecorp.com/QEMU/skiboot.git',
+    'https://gitlab.com/qemu-project/QemuMacDrivers.git': 'https://linux-git.oraclecorp.com/QEMU/QemuMacDrivers.git',
+    'https://gitlab.com/qemu-project/keycodemapdb.git': 'https://linux-git.oraclecorp.com/QEMU/keycodemapdb.git',
+    'https://gitlab.com/qemu-project/seabios-hppa.git': 'https://linux-git.oraclecorp.com/QEMU/seabios-hppa.git',
+    'https://gitlab.com/qemu-project/u-boot-sam460ex.git': 'https://linux-git.oraclecorp.com/QEMU/u-boot-sam460ex.git',
+    'https://gitlab.com/qemu-project/berkeley-testfloat-3.git': 'https://linux-git.oraclecorp.com/QEMU/berkeley-testfloat-3.git',
+    'https://gitlab.com/qemu-project/berkeley-softfloat-3.git': 'https://linux-git.oraclecorp.com/QEMU/berkeley-softfloat-3.git',
+    'https://gitlab.com/qemu-project/edk2.git': 'https://linux-git.oraclecorp.com/QEMU/edk2.git',
+    'https://gitlab.com/qemu-project/opensbi.git': 'https://linux-git.oraclecorp.com/QEMU/opensbi.git',
+    'https://gitlab.com/qemu-project/qboot.git': 'https://linux-git.oraclecorp.com/QEMU/qboot.git',
+    'https://gitlab.com/qemu-project/meson.git': 'https://linux-git.oraclecorp.com/QEMU/meson.git',
+    'https://gitlab.com/qemu-project/vbootrom.git': 'https://linux-git.oraclecorp.com/QEMU/vbootrom.git',
+    'https://gitlab.com/qemu-project/libvfio-user.git': 'https://linux-git.oraclecorp.com/QEMU/libvfio-user.git',
+    'https://gitlab.com/libvirt/libvirt-ci.git': 'https://linux-git.oraclecorp.com/QEMU/libvirt-ci.git',
+
+    # Referenced by EDK2 (roms/edk2/.gitmodules)
+    'https://github.com/openssl/openssl': 'https://linux-git.oraclecorp.com/QEMU/openssl.git',
+    'https://github.com/ucb-bar/berkeley-softfloat-3.git': 'https://linux-git.oraclecorp.com/QEMU/berkeley-softfloat-3.git',
+    'https://github.com/tianocore/edk2-cmocka.git': 'https://linux-git.oraclecorp.com/QEMU/cmocka.git',
+    'https://github.com/kkos/oniguruma': 'https://linux-git.oraclecorp.com/QEMU/oniguruma.git',
+    'https://github.com/google/brotli': 'https://linux-git.oraclecorp.com/QEMU/brotli.git',
+    'https://github.com/akheron/jansson': 'https://linux-git.oraclecorp.com/QEMU/jansson.git',
+
+    # Referenced by OpenSSL via EDK2 (roms/edk2/CryptoPkg/Library/OpensslLib/openssl/.gitmodules)
+    'https://boringssl.googlesource.com/boringssl': 'https://linux-git.oraclecorp.com/QEMU/boringssl.git',
+    'https://github.com/pyca/cryptography.git': 'https://linux-git.oraclecorp.com/QEMU/cryptography.git',
+    'https://github.com/krb5/krb5': 'https://linux-git.oraclecorp.com/QEMU/krb5.git',
+}
+
+
+def config_list(gitmodules_path):
+    """
+    Run "git config -l" with a .gitmodules file.
+
+    :param gitmodules_path: Path to a .gitmodules file
+    :type gitmodules_path: pathlib.PurePath or string
+    :return: Submodule names and URLs extracted from the .gitmodules file
+    :rtype: List of (submodule name, URL) tuples (or None)
+    """
+
+    try:
+        config_result = subprocess.run(['git', 'config', '-f', gitmodules_path,
+                                        '-l'], encoding='utf-8',
+                                       stdout=subprocess.PIPE,
+                                       stderr=subprocess.DEVNULL, check=True)
+
+    except subprocess.CalledProcessError:
+        logging.error(f"\"git config\" failed for {gitmodules_path}")
+        return None
+
+    names_urls = []
+    for entry in config_result.stdout.splitlines():
+
+        # Interesting lines in the output of "git config -l" for a
+        # .gitmodules file have the following format:
+        # submodule.<submodule name>.url=<URL>
+        # Grab everything to the left of the = sign (the submodule
+        # name) as one string and everything to the right of it
+        # (the associated URL) as another string; we'll store these
+        # two strings as a tuple in names_urls.
+        urlentry = re.match(r'(^submodule\..*\.url)\=(.*)', entry)
+        if urlentry:
+            name = urlentry.group(1)
+            url = urlentry.group(2)
+
+            # Sometimes an URL ends with a /, which is inconvenient for
+            # URL matching purposes later on, so strip it if it's present.
+            if url[-1] == '/':
+                url = url[:-1]
+            names_urls.append((name, url))
+
+    return names_urls
+
+
+def config_switch_url(gitmodules_path, submodule_name, new_url):
+    """
+    Run "git config" to switch the URL associated with a submodule
+    specified in a .gitmodules file.
+
+    Note that the output of the "git config" command is displayed to the
+    user. If "git config" fails, the process exits with an error.
+
+    :param gitmodules_path: Path to a .gitmodules file
+    :type gitmodules_path: pathlib.PurePath or string
+    :param submodule_name: Name of the submodule whose URL is being switched
+    :type submodule_name: string
+    :param new_url: New URL for the submodule
+    :type new_url: string
+    :return: No value
+    :rtype: (none)
+    """
+
+    try:
+        subprocess.run(['git', 'config', '-f', gitmodules_path,
+                        submodule_name, new_url], stdout=subprocess.DEVNULL,
+                       stderr=subprocess.DEVNULL, check=True)
+
+    except subprocess.CalledProcessError:
+        logging.error(f"\"git config\" failed to switch {submodule_name} to URL {new_url} in file {gitmodules_path}")
+        sys.exit(2)
+
+
+def submodule_init(submodule_dir):
+    """
+    Run "git submodule init".
+
+    Note that the output of the "git submodule init" command is displayed
+    to the user. If "git submodule init" fails, the process exits with an
+    error.
+
+    :param submodule_dir: Path to submodule directory
+    :type submodule_dir: pathlib.PurePath or string
+    :return: No value
+    :rtype: (none)
+    """
+
+    try:
+        subprocess.run(['git', 'submodule', 'init', '.'], check=True,
+                       cwd=submodule_dir)
+
+    except subprocess.CalledProcessError:
+        logging.error(f"\"git submodule init\" failed in directory {submodule_dir}")
+        sys.exit(3)
+
+
+def submodule_sync(submodule_dir):
+    """
+    Run "git submodule sync".
+
+    Note that the output of the "git submodule sync" command is displayed
+    to the user. If "git submodule sync" fails, the process exits with
+    an error.
+
+    :param submodule_dir: Path to submodule directory
+    :type submodule_dir: pathlib.PurePath or string
+    :return: No value
+    :rtype: (none)
+    """
+
+    try:
+        subprocess.run(['git', 'submodule', 'sync', '.'], check=True,
+                       cwd=submodule_dir)
+
+    except subprocess.CalledProcessError:
+        logging.error(f"\"git submodule sync\" failed in directory {submodule_dir}")
+        sys.exit(4)
+
+
+def submodule_update(submodule_dir):
+    """
+    Run "git submodule update".
+
+    Note that the output of the "git submodule update" command is displayed
+    to the user. If "git submodule update" fails, the process exits with
+    an error.
+
+    :param submodule_dir: Path to submodule directory
+    :type submodule_dir: pathlib.PurePath or string
+    :return: No value
+    :rtype: (none)
+    """
+
+    try:
+        subprocess.run(['git', 'submodule', 'update', '.'], check=True,
+                       cwd=submodule_dir)
+
+    except subprocess.CalledProcessError:
+        logging.error(f"\"git submodule update\" failed in directory {submodule_dir}")
+        sys.exit(5)
+
+
+def external_urls_present(toppath):
+    """
+    Check for external URLs in a Git repository's .gitmodules files.
+
+    An external URL in this case means one that doesn't start with
+    linux-git.us.oracle.com (i.e. it's external to Oracle's network).
+
+    :param toppath: Path to top level directory of a Git repository
+    :type toppath: pathlib.PurePath or string
+    :return: True if at least one external URL was found, False otherwise
+    :rtype: bool
+    """
+
+    external_found = False
+    for p in toppath.rglob('.gitmodules'):
+        names_urls = config_list(p)
+        for (_, url) in names_urls:
+            if not url.startswith('https://linux-git.oraclecorp.com'):
+                logging.error(f"File {p} contains external reference {url}")
+                external_found = True
+    return external_found
+
+
+def main():
+
+    # Complain if the current working directory doesn't look like a
+    # Git repository.
+    toppath = Path.cwd()
+    if not (toppath / '.git').is_dir():
+        logging.error("Current directory is not a Git repository")
+        sys.exit(1)
+
+    # Ideally this loop structure would be replaced with:
+    # for p in toppath.rglob('.gitmodules'):
+    # to loop through all of the .gitmodules files in the repository,
+    # but that has two disadvantages: 1) it's unbounded, and 2) it
+    # goes depth-first through the repository, which makes debugging
+    # failures of this utility difficult. Instead we're going to go
+    # one layer of .gitmodules files at a time (breadth-first) and
+    # set a maximum number of iterations for going through this
+    # process.
+
+    # A list of the .gitmodules files we've already switched over to
+    # linux-git.us.oracle.com URLs.
+    visited_gitmodules_files = []
+
+    # Variables to track the number of iterations we go through the
+    # repository looking for .gitmodules files. Note that as we
+    # initialize submodules we'll uncover more submodules, so there's
+    # no way of knowing how deep this might go. MAX_ITERATIONS is set
+    # to a "reasonable" maximum.
+    MAX_ITERATIONS = 20
+    iterations = 0
+
+    # This variable tracks whether we're processed another .gitmodules
+    # file - when it's False we've run out of .gitmodules files.
+    switched_another_file = True
+
+    while (iterations < MAX_ITERATIONS) and switched_another_file:
+
+        # Update the loop conditions.
+        iterations += 1
+        switched_another_file = False
+
+        # Get a snapshot of the .gitmodules files currently in the
+        # repository by converting the iterator returned by
+        # toppath.rglob() to a list, then loop through the items.
+        gitmodules_list = list(toppath.rglob('.gitmodules'))
+        for p in gitmodules_list:
+
+            # If we haven't seen this .gitmodules file before...
+            if p not in visited_gitmodules_files:
+
+                # Append it to the list of .gitmodules files we've seen.
+                visited_gitmodules_files.append(p)
+
+                # Loop through the submodule names and URLs in the file.
+                for (name, url) in config_list(p):
+
+                    # Switch the submodule's URL to a mirror repository
+                    # hosted on linux-git.us.oracle.com. If we _don't_
+                    # know about this URL, we'll catch it in the call to
+                    # external_urls_present() below.
+                    if url in url_map:
+                        config_switch_url(p, name, url_map[url])
+
+                # Get the path to the directory where the .gitmodules
+                # file is stored.
+                parent_dir = (p / '..').resolve()
+
+                # This sequence of calls is basically a magic Git
+                # incantation. "git submodule init" initializes the
+                # index, "git submodule sync" synchronizes the URLs,
+                # and "git submodule update" clones the submodule
+                # and updates the working tree.
+                submodule_init(parent_dir)
+                submodule_sync(parent_dir)
+                submodule_update(parent_dir)
+
+                # The init/sync/update sequence above may have
+                # uncovered one or more additional .gitmodules files,
+                # so set switched_another_file so we search through
+                # the repository again.
+                switched_another_file = True
+
+    # Exit with an error if we ran through too many iterations.
+    if iterations >= MAX_ITERATIONS:
+        logging.error(f"Exceeded {MAX_ITERATIONS} iterations through .gitmodules files")
+        logging.error("which suggests the submodules are nested extremely")
+        logging.error("deeply or this utility is broken.")
+        sys.exit(6)
+
+    # A last check: Scan through all of the .gitmodules files in the
+    # repository and exit with an error if we failed to switch any
+    # of the submodule references to linux-git.us.oracle.com.
+    if external_urls_present(toppath):
+        sys.exit(7)
+
+    sys.exit(0)
+
+
+if __name__ == '__main__':
+    main()
