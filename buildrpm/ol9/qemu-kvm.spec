@@ -216,6 +216,9 @@
 # Support for module upgrades
 %global have_module_upgrades 1
 
+# Support for slirp
+%global have_slirp 1
+
 # Include dependencies on EDK2 packages
 %ifarch x86_64 aarch64
 %global have_edk2 1
@@ -449,6 +452,9 @@ BuildRequires: libxkbcommon-devel
 %endif
 %if 0%{?have_virtiofsd}
 BuildRequires: libcap-ng-devel
+%endif
+%if 0%{?have_slirp}
+BuildRequires: libslirp-devel
 %endif
 
 Requires: qemu-kvm-core = %{epoch}:%{version}-%{release}
@@ -1085,6 +1091,12 @@ mkdir -p %{build_dir}
     %global moduleupgradeflags --disable-module-upgrades
 %endif
 
+%if 0%{?have_slirp}
+    %global slirpflags --enable-slirp
+%else
+    %global slirpflags --disable-slirp
+%endif
+
 %global block_drivers_rw_list qcow2,raw,file,host_device,nbd,blkdebug,luks,null-co,nvme,copy-on-read,throttle
 %global block_drivers_ro_list vmdk,vhdx,vpc,https,ssh
 
@@ -1213,7 +1225,8 @@ pushd %{build_dir}
     %{debugmutexflags} \
     %{xkbcommonflags} \
     %{multiprocessflags} \
-    %{moduleupgradeflags}
+    %{moduleupgradeflags} \
+    %{slirpflags}
 
 %make_build
 
