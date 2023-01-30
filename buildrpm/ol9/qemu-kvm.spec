@@ -219,6 +219,9 @@
 # Support for slirp
 %global have_slirp 1
 
+# Support for vfio-user-server
+%global have_vfio_user_server 1
+
 # Include dependencies on EDK2 packages
 %ifarch x86_64 aarch64
 %global have_edk2 1
@@ -1097,6 +1100,12 @@ mkdir -p %{build_dir}
     %global slirpflags --disable-slirp
 %endif
 
+%if 0%{?have_vfio_user_server}
+    %global vfiouserserverflags --enable-vfio-user-server
+%else
+    %global vfiouserserfverflags --disable-vfio-user-server
+%endif
+
 %global block_drivers_rw_list qcow2,raw,file,host_device,nbd,blkdebug,luks,null-co,nvme,copy-on-read,throttle
 %global block_drivers_ro_list vmdk,vhdx,vpc,https,ssh
 
@@ -1226,7 +1235,8 @@ pushd %{build_dir}
     %{xkbcommonflags} \
     %{multiprocessflags} \
     %{moduleupgradeflags} \
-    %{slirpflags}
+    %{slirpflags} \
+    %{vfiouserserfverflags}
 
 %make_build
 
