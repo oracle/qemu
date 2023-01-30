@@ -222,6 +222,9 @@
 # Support for vfio-user-server
 %global have_vfio_user_server 1
 
+# Support for vduse-blk-export
+%global have_vduse_blk_export 1
+
 # Include dependencies on EDK2 packages
 %ifarch x86_64 aarch64
 %global have_edk2 1
@@ -1105,6 +1108,12 @@ mkdir -p %{build_dir}
     %global vfiouserserfverflags --disable-vfio-user-server
 %endif
 
+%if 0%{?have_vduse_blk_export}
+    %global vduseblkexportflags --enable-vduse-blk-export
+%else
+    %global vduseblkexportflags --disable-vduse-blk-export
+%endif
+
 %global block_drivers_rw_list qcow2,raw,file,host_device,nbd,blkdebug,luks,null-co,nvme,copy-on-read,throttle
 %global block_drivers_ro_list vmdk,vhdx,vpc,https,ssh
 
@@ -1235,7 +1244,8 @@ pushd %{build_dir}
     %{multiprocessflags} \
     %{moduleupgradeflags} \
     %{slirpflags} \
-    %{vfiouserserfverflags}
+    %{vfiouserserfverflags} \
+    %{vduseblkexportflags}
 
 %make_build
 
