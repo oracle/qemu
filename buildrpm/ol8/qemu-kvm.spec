@@ -213,6 +213,9 @@
 # Support for xkbcommon
 %global have_xkbcommon 0
 
+# Support for module upgrades
+%global have_module_upgrades 1
+
 # Include dependencies on EDK2 packages
 %ifarch x86_64 aarch64
 %global have_edk2 1
@@ -1075,6 +1078,12 @@ mkdir -p %{build_dir}
    %global xkbcommonflags --disable-xkbcommon
 %endif
 
+%if 0%{?have_module_upgrades}
+    %global moduleupgradeflags --enable-module-upgrades
+%else
+    %global moduleupgradeflags --disable-module-upgrades
+%endif
+
 %global block_drivers_rw_list qcow2,raw,file,host_device,nbd,blkdebug,luks,null-co,nvme,copy-on-read,throttle
 %global block_drivers_ro_list vmdk,vhdx,vpc,https,ssh
 
@@ -1202,7 +1211,8 @@ pushd %{build_dir}
     %{vhostvdpaflags} \
     %{debugmutexflags} \
     %{xkbcommonflags} \
-    %{multiprocessflags}
+    %{multiprocessflags} \
+    %{moduleupgradeflags}
 
 %make_build
 
