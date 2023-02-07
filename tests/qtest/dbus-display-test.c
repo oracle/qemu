@@ -1,9 +1,10 @@
 #include "qemu/osdep.h"
 #include "qemu/dbus.h"
+#include "qemu/sockets.h"
 #include <gio/gio.h>
 #include <gio/gunixfdlist.h>
 #include "libqtest.h"
-#include "dbus-display1.h"
+#include "ui/dbus-display1.h"
 
 static GDBusConnection*
 test_dbus_p2p_from_fd(int fd)
@@ -36,7 +37,7 @@ test_setup(QTestState **qts, GDBusConnection **conn)
 
     *qts = qtest_init("-display dbus,p2p=yes -name dbus-test");
 
-    g_assert_cmpint(socketpair(AF_UNIX, SOCK_STREAM, 0, pair), ==, 0);
+    g_assert_cmpint(qemu_socketpair(AF_UNIX, SOCK_STREAM, 0, pair), ==, 0);
 
     qtest_qmp_add_client(*qts, "@dbus-display", pair[1]);
 
@@ -152,7 +153,7 @@ test_dbus_display_console(void)
 
     test_setup(&qts, &conn);
 
-    g_assert_cmpint(socketpair(AF_UNIX, SOCK_STREAM, 0, pair), ==, 0);
+    g_assert_cmpint(qemu_socketpair(AF_UNIX, SOCK_STREAM, 0, pair), ==, 0);
     fd_list = g_unix_fd_list_new();
     idx = g_unix_fd_list_append(fd_list, pair[1], NULL);
 

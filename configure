@@ -57,7 +57,7 @@ GNUmakefile: ;
 
 EOF
     cd build
-    exec $source_path/configure "$@"
+    exec "$source_path/configure" "$@"
 fi
 
 # Temporary directory used for files created while
@@ -67,8 +67,7 @@ fi
 # it when configure exits.)
 TMPDIR1="config-temp"
 rm -rf "${TMPDIR1}"
-mkdir -p "${TMPDIR1}"
-if [ $? -ne 0 ]; then
+if ! mkdir -p "${TMPDIR1}"; then
     echo "ERROR: failed to create temporary directory"
     exit 1
 fi
@@ -76,7 +75,6 @@ fi
 TMPB="qemu-conf"
 TMPC="${TMPDIR1}/${TMPB}.c"
 TMPO="${TMPDIR1}/${TMPB}.o"
-TMPCXX="${TMPDIR1}/${TMPB}.cxx"
 TMPM="${TMPDIR1}/${TMPB}.m"
 TMPE="${TMPDIR1}/${TMPB}.exe"
 
@@ -85,9 +83,10 @@ rm -f config.log
 # Print a helpful header at the top of config.log
 echo "# QEMU configure log $(date)" >> config.log
 printf "# Configured with:" >> config.log
-printf " '%s'" "$0" "$@" >> config.log
-echo >> config.log
-echo "#" >> config.log
+# repeat the invocation to log and stdout for CI
+invoke=$(printf " '%s'" "$0" "$@")
+test -n "$GITLAB_CI" && echo "configuring with: $invoke"
+{ echo "$invoke"; echo; echo "#"; } >> config.log
 
 quote_sh() {
     printf "%s" "$1" | sed "s,','\\\\'',g; s,.*,'&',"
@@ -111,7 +110,7 @@ error_exit() {
 do_compiler() {
   # Run the compiler, capturing its output to the log. First argument
   # is compiler binary to execute.
-  local compiler="$1"
+  compiler="$1"
   shift
   if test -n "$BASH_VERSION"; then eval '
       echo >>config.log "
@@ -159,10 +158,6 @@ do_cc() {
     do_compiler_werror "$cc" $CPU_CFLAGS "$@"
 }
 
-do_cxx() {
-    do_compiler_werror "$cxx" $CPU_CFLAGS "$@"
-}
-
 do_objc() {
     do_compiler_werror "$objcc" $CPU_CFLAGS "$@"
 }
@@ -170,24 +165,6 @@ do_objc() {
 # Append $2 to the variable named $1, with space separation
 add_to() {
     eval $1=\${$1:+\"\$$1 \"}\$2
-}
-
-update_cxxflags() {
-    # Set QEMU_CXXFLAGS from QEMU_CFLAGS by filtering out those
-    # options which some versions of GCC's C++ compiler complain about
-    # because they only make sense for C programs.
-    QEMU_CXXFLAGS="-D__STDC_LIMIT_MACROS -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS"
-    CONFIGURE_CXXFLAGS=$(echo "$CONFIGURE_CFLAGS" | sed s/-std=gnu11/-std=gnu++11/)
-    for arg in $QEMU_CFLAGS; do
-        case $arg in
-            -Wstrict-prototypes|-Wmissing-prototypes|-Wnested-externs|\
-            -Wold-style-declaration|-Wold-style-definition|-Wredundant-decls)
-                ;;
-            *)
-                QEMU_CXXFLAGS=${QEMU_CXXFLAGS:+$QEMU_CXXFLAGS }$arg
-                ;;
-        esac
-    done
 }
 
 compile_object() {
@@ -232,10 +209,6 @@ version_ge () {
         shift ${2:+2}
         local_ver2=$*
     done
-}
-
-glob() {
-    eval test -z '"${1#'"$2"'}"'
 }
 
 if printf %s\\n "$source_path" "$PWD" | grep -q "[[:space:]:]";
@@ -311,7 +284,6 @@ pie=""
 coroutine=""
 plugins="$default_feature"
 meson=""
-meson_args=""
 ninja=""
 bindir="bin"
 skip_meson=no
@@ -321,11 +293,6 @@ vfio_user_server="disabled"
 # are included in the automatically generated help message)
 
 # 1. Track which submodules are needed
-if test "$default_feature" = no ; then
-  slirp="disabled"
-else
-  slirp="auto"
-fi
 fdt="auto"
 
 # 2. Automatically enable/disable other options
@@ -371,9 +338,6 @@ for opt do
   ;;
   esac
 done
-# OS specific
-# Using uname is really, really broken.  Once we have the right set of checks
-# we can eliminate its usage altogether.
 
 # Preferred compiler:
 #  ${CC} (if set)
@@ -402,6 +366,7 @@ smbd="$SMBD"
 strip="${STRIP-${cross_prefix}strip}"
 widl="${WIDL-${cross_prefix}widl}"
 windres="${WINDRES-${cross_prefix}windres}"
+windmc="${WINDMC-${cross_prefix}windmc}"
 pkg_config_exe="${PKG_CONFIG-${cross_prefix}pkg-config}"
 query_pkg_config() {
     "${pkg_config_exe}" ${QEMU_PKG_CONFIG_FLAGS} "$@"
@@ -415,8 +380,6 @@ sdl2_config="${SDL2_CONFIG-${cross_prefix}sdl2-config}"
 # 2s-complement style results. (Both clang and gcc agree that it
 # provides these semantics.)
 QEMU_CFLAGS="-fno-strict-aliasing -fno-common -fwrapv"
-QEMU_CFLAGS="-Wundef -Wwrite-strings -Wmissing-prototypes $QEMU_CFLAGS"
-QEMU_CFLAGS="-Wstrict-prototypes -Wredundant-decls $QEMU_CFLAGS"
 QEMU_CFLAGS="-D_GNU_SOURCE -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE $QEMU_CFLAGS"
 
 QEMU_LDFLAGS=
@@ -523,13 +486,6 @@ sunos)
   QEMU_CFLAGS="-D_XOPEN_SOURCE=600 $QEMU_CFLAGS"
 # needed for TIOCWIN* defines in termios.h
   QEMU_CFLAGS="-D__EXTENSIONS__ $QEMU_CFLAGS"
-  # $(uname -m) returns i86pc even on an x86_64 box, so default based on isainfo
-  # Note that this check is broken for cross-compilation: if you're
-  # cross-compiling to one of these OSes then you'll need to specify
-  # the correct CPU with the --cpu option.
-  if test -z "$cpu" && test "$(isainfo -k)" = "amd64"; then
-    cpu="x86_64"
-  fi
 ;;
 haiku)
   pie="no"
@@ -584,16 +540,21 @@ elif check_define __aarch64__ ; then
 elif check_define __loongarch64 ; then
   cpu="loongarch64"
 else
+  # Using uname is really broken, but it is just a fallback for architectures
+  # that are going to use TCI anyway
   cpu=$(uname -m)
+  echo "WARNING: unrecognized host CPU, proceeding with 'uname -m' output '$cpu'"
 fi
 
-# Normalise host CPU name, set multilib cflags
+# Normalise host CPU name and set multilib cflags.  The canonicalization
+# isn't really necessary, because the architectures that we check for
+# should not hit the 'uname -m' case, but better safe than sorry.
 # Note that this case should only have supported host CPUs, not guests.
 case "$cpu" in
   armv*b|armv*l|arm)
     cpu="arm" ;;
 
-  i386|i486|i586|i686|i86pc|BePC)
+  i386|i486|i586|i686)
     cpu="i386"
     CPU_CFLAGS="-m32" ;;
   x32)
@@ -668,7 +629,6 @@ if test "$mingw32" = "yes" ; then
   EXESUF=".exe"
   # MinGW needs -mthreads for TLS and macro _MT.
   CONFIGURE_CFLAGS="-mthreads $CONFIGURE_CFLAGS"
-  write_c_skeleton;
   prefix="/qemu"
   bindir=""
   qemu_suffix=""
@@ -692,7 +652,7 @@ meson_option_build_array() {
   printf ']\n'
 }
 
-. $source_path/scripts/meson-buildoptions.sh
+. "$source_path/scripts/meson-buildoptions.sh"
 
 meson_options=
 meson_option_add() {
@@ -712,7 +672,7 @@ for opt do
   case "$opt" in
   --help|-h) show_help=yes
   ;;
-  --version|-V) exec cat $source_path/VERSION
+  --version|-V) exec cat "$source_path/VERSION"
   ;;
   --prefix=*) prefix="$optarg"
   ;;
@@ -829,14 +789,6 @@ for opt do
   ;;
   --disable-tsan) tsan="no"
   ;;
-  --disable-slirp) slirp="disabled"
-  ;;
-  --enable-slirp) slirp="enabled"
-  ;;
-  --enable-slirp=git) slirp="internal"
-  ;;
-  --enable-slirp=*) slirp="$optarg"
-  ;;
   --disable-tcg) tcg="disabled"
                  plugins="no"
   ;;
@@ -891,17 +843,6 @@ for opt do
   ;;
   --with-coroutine=*) coroutine="$optarg"
   ;;
-  --disable-zlib-test)
-  ;;
-  --disable-virtio-blk-data-plane|--enable-virtio-blk-data-plane)
-      echo "$0: $opt is obsolete, virtio-blk data-plane is always on" >&2
-  ;;
-  --enable-vhdx|--disable-vhdx)
-      echo "$0: $opt is obsolete, VHDX driver is always built" >&2
-  ;;
-  --enable-uuid|--disable-uuid)
-      echo "$0: $opt is obsolete, UUID support is always built" >&2
-  ;;
   --with-git=*) git="$optarg"
   ;;
   --with-git-submodules=*)
@@ -921,18 +862,9 @@ for opt do
   ;;
   --gdb=*) gdb_bin="$optarg"
   ;;
-  # backwards compatibility options
-  --enable-trace-backend=*) meson_option_parse "--enable-trace-backends=$optarg" "$optarg"
-  ;;
-  --disable-blobs) meson_option_parse --disable-install-blobs ""
-  ;;
   --enable-vfio-user-server) vfio_user_server="enabled"
   ;;
   --disable-vfio-user-server) vfio_user_server="disabled"
-  ;;
-  --enable-tcmalloc) meson_option_parse --enable-malloc=tcmalloc tcmalloc
-  ;;
-  --enable-jemalloc) meson_option_parse --enable-malloc=jemalloc jemalloc
   ;;
   # everything else has the same name in configure and meson
   --*) meson_option_parse "$opt" "$optarg"
@@ -986,7 +918,7 @@ default_target_list=""
 mak_wilds=""
 
 if [ "$linux_user" != no ]; then
-    if [ "$targetos" = linux ] && [ -d $source_path/linux-user/include/host/$cpu ]; then
+    if [ "$targetos" = linux ] && [ -d "$source_path/linux-user/include/host/$cpu" ]; then
         linux_user=yes
     elif [ "$linux_user" = yes ]; then
         error_exit "linux-user not supported on this architecture"
@@ -996,7 +928,7 @@ if [ "$bsd_user" != no ]; then
     if [ "$bsd_user" = "" ]; then
         test $targetos = freebsd && bsd_user=yes
     fi
-    if [ "$bsd_user" = yes ] && ! [ -d $source_path/bsd-user/$targetos ]; then
+    if [ "$bsd_user" = yes ] && ! [ -d "$source_path/bsd-user/$targetos" ]; then
         error_exit "bsd-user not supported on this host OS"
     fi
 fi
@@ -1094,7 +1026,7 @@ exit 0
 fi
 
 # Remove old dependency files to make sure that they get properly regenerated
-rm -f */config-devices.mak.d
+rm -f ./*/config-devices.mak.d
 
 if test -z "$python"
 then
@@ -1112,16 +1044,13 @@ if ! $python -c 'import sys; sys.exit(sys.version_info < (3,6))'; then
       "Use --python=/path/to/python to specify a supported Python."
 fi
 
-# Preserve python version since some functionality is dependent on it
-python_version=$($python -c 'import sys; print("%d.%d.%d" % (sys.version_info[0], sys.version_info[1], sys.version_info[2]))' 2>/dev/null)
-
 # Suppress writing compiled files
 python="$python -B"
 
 if test -z "$meson"; then
-    if test "$explicit_python" = no && has meson && version_ge "$(meson --version)" 0.59.3; then
+    if test "$explicit_python" = no && has meson && version_ge "$(meson --version)" 0.61.5; then
         meson=meson
-    elif test $git_submodules_action != 'ignore' ; then
+    elif test "$git_submodules_action" != 'ignore' ; then
         meson=git
     elif test -e "${source_path}/meson/meson.py" ; then
         meson=internal
@@ -1237,6 +1166,11 @@ fi
 # just silently disable some features, so it's too error prone.
 
 warn_flags=
+add_to warn_flags -Wundef
+add_to warn_flags -Wwrite-strings
+add_to warn_flags -Wmissing-prototypes
+add_to warn_flags -Wstrict-prototypes
+add_to warn_flags -Wredundant-decls
 add_to warn_flags -Wold-style-declaration
 add_to warn_flags -Wold-style-definition
 add_to warn_flags -Wtype-limits
@@ -1249,6 +1183,7 @@ add_to warn_flags -Wnested-externs
 add_to warn_flags -Wendif-labels
 add_to warn_flags -Wexpansion-to-defined
 add_to warn_flags -Wimplicit-fallthrough=2
+add_to warn_flags -Wmissing-format-attribute
 
 nowarn_flags=
 add_to nowarn_flags -Wno-initializer-overrides
@@ -1258,6 +1193,7 @@ add_to nowarn_flags -Wno-string-plus-int
 add_to nowarn_flags -Wno-typedef-redefinition
 add_to nowarn_flags -Wno-tautological-type-limit-compare
 add_to nowarn_flags -Wno-psabi
+add_to nowarn_flags -Wno-gnu-variable-sized-type-not-at-end
 
 gcc_flags="$warn_flags $nowarn_flags"
 
@@ -1298,7 +1234,7 @@ if test "$stack_protector" != "no"; then
   cat > $TMPC << EOF
 int main(int argc, char *argv[])
 {
-    char arr[64], *p = arr, *c = argv[0];
+    char arr[64], *p = arr, *c = argv[argc - 1];
     while (*c) {
         *p++ = *c++;
     }
@@ -1367,23 +1303,22 @@ static THREAD int tls_var;
 int main(void) { return tls_var; }
 EOF
 
+# Meson currently only handles pie as a boolean for now so if we have
+# explicitly disabled PIE we need to extend our cflags because it wont.
 if test "$static" = "yes"; then
   if test "$pie" != "no" && compile_prog "-Werror -fPIE -DPIE" "-static-pie"; then
     CONFIGURE_CFLAGS="-fPIE -DPIE $CONFIGURE_CFLAGS"
-    QEMU_LDFLAGS="-static-pie $QEMU_LDFLAGS"
     pie="yes"
   elif test "$pie" = "yes"; then
     error_exit "-static-pie not available due to missing toolchain support"
   else
-    QEMU_LDFLAGS="-static $QEMU_LDFLAGS"
     pie="no"
+    QEMU_CFLAGS="-fno-pie -no-pie $QEMU_CFLAGS"
   fi
 elif test "$pie" = "no"; then
   if compile_prog "-Werror -fno-pie" "-no-pie"; then
     CONFIGURE_CFLAGS="-fno-pie $CONFIGURE_CFLAGS"
     CONFIGURE_LDFLAGS="-no-pie $CONFIGURE_LDFLAGS"
-    # Meson currently only handles pie as a boolean for now so if we have
-    # explicitly disabled PIE we need to extend our cflags because it wont.
     QEMU_CFLAGS="-fno-pie -no-pie $QEMU_CFLAGS"
   fi
 elif compile_prog "-Werror -fPIE -DPIE" "-pie"; then
@@ -1395,12 +1330,6 @@ elif test "$pie" = "yes"; then
 else
   echo "Disabling PIE due to missing toolchain support"
   pie="no"
-fi
-
-# Detect support for PT_GNU_RELRO + DT_BIND_NOW.
-# The combination is known as "full relro", because .got.plt is read-only too.
-if compile_prog "" "-Wl,-z,relro -Wl,-z,now" ; then
-  QEMU_LDFLAGS="-Wl,-z,relro -Wl,-z,now $QEMU_LDFLAGS"
 fi
 
 ##########################################
@@ -1471,30 +1400,31 @@ if test "$tcg" = "enabled"; then
     git_submodules="$git_submodules tests/fp/berkeley-softfloat-3"
 fi
 
-# ---
+##########################################
 # big/little endian test
 cat > $TMPC << EOF
-#include <stdio.h>
-short big_endian[] = { 0x4269, 0x4765, 0x4e64, 0x4961, 0x4e00, 0, };
-short little_endian[] = { 0x694c, 0x7454, 0x654c, 0x6e45, 0x6944, 0x6e41, 0, };
-int main(int argc, char *argv[])
-{
-    return printf("%s %s\n", (char *)big_endian, (char *)little_endian);
-}
+#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+# error LITTLE
+#endif
+int main(void) { return 0; }
 EOF
 
-if compile_prog ; then
-    if strings -a $TMPE | grep -q BiGeNdIaN ; then
-        bigendian="yes"
-    elif strings -a $TMPE | grep -q LiTtLeEnDiAn ; then
-        bigendian="no"
-    else
-        echo big/little test failed
-        exit 1
-    fi
+if ! compile_prog ; then
+  bigendian="no"
 else
+  cat > $TMPC << EOF
+#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+# error BIG
+#endif
+int main(void) { return 0; }
+EOF
+
+  if ! compile_prog ; then
+    bigendian="yes"
+  else
     echo big/little test failed
     exit 1
+  fi
 fi
 
 ##########################################
@@ -1653,7 +1583,7 @@ fi
 
 if test "$safe_stack" = "yes"; then
 cat > $TMPC << EOF
-int main(int argc, char *argv[])
+int main(void)
 {
 #if ! __has_feature(safe_stack)
 #error SafeStack Disabled
@@ -1675,7 +1605,7 @@ EOF
   fi
 else
 cat > $TMPC << EOF
-int main(int argc, char *argv[])
+int main(void)
 {
 #if defined(__has_feature)
 #if __has_feature(safe_stack)
@@ -1721,7 +1651,7 @@ static const int Z = 1;
 #define TAUT(X) ((X) == Z)
 #define PAREN(X, Y) (X == Y)
 #define ID(X) (X)
-int main(int argc, char *argv[])
+int main(void)
 {
     int x = 0, y = 0;
     x = ID(x);
@@ -1823,22 +1753,17 @@ EOF
 fi
 
 ##########################################
-# check for slirp
-
-case "$slirp" in
-  auto | enabled | internal)
-    # Simpler to always update submodule, even if not needed.
-    git_submodules="${git_submodules} slirp"
-    ;;
-esac
-
-##########################################
 # functions to probe cross compilers
 
 container="no"
-if test $use_containers = "yes"; then
-    if has "docker" || has "podman"; then
-        container=$($python $source_path/tests/docker/docker.py probe)
+if test $use_containers = "yes" && (has "docker" || has "podman"); then
+    case $($python "$source_path"/tests/docker/docker.py probe) in
+        *docker) container=docker ;;
+        podman) container=podman ;;
+        no) container=no ;;
+    esac
+    if test "$container" != "no"; then
+        docker_py="$python $source_path/tests/docker/docker.py --engine $container"
     fi
 fi
 
@@ -1894,6 +1819,16 @@ compute_target_variable() {
   fi
 }
 
+have_target() {
+  for i; do
+    case " $target_list " in
+      *" $i "*) return 0;;
+      *) ;;
+    esac
+  done
+  return 1
+}
+
 # probe_target_compiler TARGET
 #
 # Look for a compiler for the given target, either native or cross.
@@ -1918,6 +1853,13 @@ probe_target_compiler() {
   container_cross_objcopy=
   container_cross_ranlib=
   container_cross_strip=
+
+  # We shall skip configuring the target compiler if the user didn't
+  # bother enabling an appropriate guest. This avoids building
+  # extraneous firmware images and tests.
+  if test "${target_list#*$1}" = "$1"; then
+      return 1
+  fi
 
   target_arch=${1%%-*}
   case $target_arch in
@@ -2070,7 +2012,6 @@ probe_target_compiler() {
     : ${container_cross_strip:=${container_cross_prefix}strip}
   done
 
-  local t try
   try=cross
   case "$target_arch:$cpu" in
     aarch64_be:aarch64 | \
@@ -2083,8 +2024,8 @@ probe_target_compiler() {
       try='native cross' ;;
   esac
   eval "target_cflags=\${cross_cc_cflags_$target_arch}"
-  for t in $try; do
-    case $t in
+  for thistry in $try; do
+    case $thistry in
     native)
       target_cc=$cc
       target_ccas=$ccas
@@ -2175,53 +2116,53 @@ probe_target_compiler() {
     target_ranlib=
     target_strip=
   fi
+  test -n "$target_cc"
 }
 
 write_target_makefile() {
   echo "EXTRA_CFLAGS=$target_cflags"
-  if test -n "$target_cc"; then
-    echo "CC=$target_cc"
-    echo "CCAS=$target_ccas"
-  fi
-  if test -n "$target_ar"; then
-    echo "AR=$target_ar"
-  fi
-  if test -n "$target_as"; then
-    echo "AS=$target_as"
-  fi
-  if test -n "$target_ld"; then
-    echo "LD=$target_ld"
-  fi
-  if test -n "$target_nm"; then
-    echo "NM=$target_nm"
-  fi
-  if test -n "$target_objcopy"; then
-    echo "OBJCOPY=$target_objcopy"
-  fi
-  if test -n "$target_ranlib"; then
-    echo "RANLIB=$target_ranlib"
-  fi
-  if test -n "$target_strip"; then
-    echo "STRIP=$target_strip"
+  if test -z "$target_cc" && test -z "$target_as"; then
+    test -z "$container_image" && error_exit "Internal error: could not find cross compiler for $1?"
+    echo "$1: docker-image-$container_image" >> Makefile.prereqs
+    if test -n "$container_cross_cc"; then
+      echo "CC=$docker_py cc --cc $container_cross_cc -i qemu/$container_image -s $source_path --"
+      echo "CCAS=$docker_py cc --cc $container_cross_cc -i qemu/$container_image -s $source_path --"
+    fi
+    echo "AR=$docker_py cc --cc $container_cross_ar -i qemu/$container_image -s $source_path --"
+    echo "AS=$docker_py cc --cc $container_cross_as -i qemu/$container_image -s $source_path --"
+    echo "LD=$docker_py cc --cc $container_cross_ld -i qemu/$container_image -s $source_path --"
+    echo "NM=$docker_py cc --cc $container_cross_nm -i qemu/$container_image -s $source_path --"
+    echo "OBJCOPY=$docker_py cc --cc $container_cross_objcopy -i qemu/$container_image -s $source_path --"
+    echo "RANLIB=$docker_py cc --cc $container_cross_ranlib -i qemu/$container_image -s $source_path --"
+    echo "STRIP=$docker_py cc --cc $container_cross_strip -i qemu/$container_image -s $source_path --"
+  else
+    if test -n "$target_cc"; then
+      echo "CC=$target_cc"
+      echo "CCAS=$target_ccas"
+    fi
+    if test -n "$target_ar"; then
+      echo "AR=$target_ar"
+    fi
+    if test -n "$target_as"; then
+      echo "AS=$target_as"
+    fi
+    if test -n "$target_ld"; then
+      echo "LD=$target_ld"
+    fi
+    if test -n "$target_nm"; then
+      echo "NM=$target_nm"
+    fi
+    if test -n "$target_objcopy"; then
+      echo "OBJCOPY=$target_objcopy"
+    fi
+    if test -n "$target_ranlib"; then
+      echo "RANLIB=$target_ranlib"
+    fi
+    if test -n "$target_strip"; then
+      echo "STRIP=$target_strip"
+    fi
   fi
 }
-
-write_container_target_makefile() {
-  echo "EXTRA_CFLAGS=$target_cflags"
-  if test -n "$container_cross_cc"; then
-    echo "CC=\$(DOCKER_SCRIPT) cc --cc $container_cross_cc -i qemu/$container_image -s $source_path --"
-    echo "CCAS=\$(DOCKER_SCRIPT) cc --cc $container_cross_cc -i qemu/$container_image -s $source_path --"
-  fi
-  echo "AR=\$(DOCKER_SCRIPT) cc --cc $container_cross_ar -i qemu/$container_image -s $source_path --"
-  echo "AS=\$(DOCKER_SCRIPT) cc --cc $container_cross_as -i qemu/$container_image -s $source_path --"
-  echo "LD=\$(DOCKER_SCRIPT) cc --cc $container_cross_ld -i qemu/$container_image -s $source_path --"
-  echo "NM=\$(DOCKER_SCRIPT) cc --cc $container_cross_nm -i qemu/$container_image -s $source_path --"
-  echo "OBJCOPY=\$(DOCKER_SCRIPT) cc --cc $container_cross_objcopy -i qemu/$container_image -s $source_path --"
-  echo "RANLIB=\$(DOCKER_SCRIPT) cc --cc $container_cross_ranlib -i qemu/$container_image -s $source_path --"
-  echo "STRIP=\$(DOCKER_SCRIPT) cc --cc $container_cross_strip -i qemu/$container_image -s $source_path --"
-}
-
-
 
 ##########################################
 # check for vfio_user_server
@@ -2270,28 +2211,6 @@ if test "$have_ubsan" = "yes"; then
   QEMU_LDFLAGS="-fsanitize=undefined $QEMU_LDFLAGS"
 fi
 
-##########################################
-
-# Exclude --warn-common with TSan to suppress warnings from the TSan libraries.
-if test "$solaris" = "no" && test "$tsan" = "no"; then
-    if $ld --version 2>/dev/null | grep "GNU ld" >/dev/null 2>/dev/null ; then
-        QEMU_LDFLAGS="-Wl,--warn-common $QEMU_LDFLAGS"
-    fi
-fi
-
-# Guest agent Windows MSI package
-
-if test "$QEMU_GA_MANUFACTURER" = ""; then
-  QEMU_GA_MANUFACTURER=QEMU
-fi
-if test "$QEMU_GA_DISTRO" = ""; then
-  QEMU_GA_DISTRO=Linux
-fi
-if test "$QEMU_GA_VERSION" = ""; then
-    QEMU_GA_VERSION=$(cat $source_path/VERSION)
-fi
-
-
 #######################################
 # cross-compiled firmware targets
 
@@ -2304,7 +2223,6 @@ fi
 # tests might fail. Prefer to keep the relevant files in their own
 # directory and symlink the directory instead.
 LINKS="Makefile"
-LINKS="$LINKS tests/tcg/Makefile.target"
 LINKS="$LINKS pc-bios/optionrom/Makefile"
 LINKS="$LINKS pc-bios/s390-ccw/Makefile"
 LINKS="$LINKS pc-bios/vof/Makefile"
@@ -2315,38 +2233,28 @@ LINKS="$LINKS python"
 LINKS="$LINKS contrib/plugins/Makefile "
 for f in $LINKS ; do
     if [ -e "$source_path/$f" ]; then
-        mkdir -p `dirname ./$f`
+        mkdir -p "$(dirname ./"$f")"
         symlink "$source_path/$f" "$f"
     fi
 done
 
+echo "# Automatically generated by configure - do not modify" > Makefile.prereqs
+
 # Mac OS X ships with a broken assembler
 roms=
-probe_target_compiler i386-softmmu
-if test -n "$target_cc" &&
+if have_target i386-softmmu x86_64-softmmu && \
         test "$targetos" != "darwin" && test "$targetos" != "sunos" && \
-        test "$targetos" != "haiku" && test "$softmmu" = yes ; then
-    # Different host OS linkers have different ideas about the name of the ELF
-    # emulation. Linux and OpenBSD/amd64 use 'elf_i386'; FreeBSD uses the _fbsd
-    # variant; OpenBSD/i386 uses the _obsd variant; and Windows uses i386pe.
-    for emu in elf_i386 elf_i386_fbsd elf_i386_obsd i386pe; do
-        if "$target_ld" -verbose 2>&1 | grep -q "^[[:space:]]*${emu}[[:space:]]*$"; then
-            ld_i386_emulation="$emu"
-            break
-        fi
-    done
-    if test -n "$ld_i386_emulation"; then
-        roms="pc-bios/optionrom"
-        config_mak=pc-bios/optionrom/config.mak
-        echo "# Automatically generated by configure - do not modify" > $config_mak
-        echo "TOPSRC_DIR=$source_path" >> $config_mak
-        echo "LD_I386_EMULATION=$ld_i386_emulation" >> $config_mak
-        write_target_makefile >> $config_mak
-    fi
+        test "$targetos" != "haiku" && \
+        probe_target_compiler i386-softmmu; then
+    roms="pc-bios/optionrom"
+    config_mak=pc-bios/optionrom/config.mak
+    echo "# Automatically generated by configure - do not modify" > $config_mak
+    echo "TOPSRC_DIR=$source_path" >> $config_mak
+    write_target_makefile >> $config_mak
 fi
 
-probe_target_compiler ppc-softmmu
-if test -n "$target_cc" && test "$softmmu" = yes; then
+if have_target ppc-softmmu ppc64-softmmu && \
+        probe_target_compiler ppc-softmmu; then
     roms="$roms pc-bios/vof"
     config_mak=pc-bios/vof/config.mak
     echo "# Automatically generated by configure - do not modify" > $config_mak
@@ -2356,8 +2264,7 @@ fi
 
 # Only build s390-ccw bios if the compiler has -march=z900 or -march=z10
 # (which is the lowest architecture level that Clang supports)
-probe_target_compiler s390x-softmmu
-if test -n "$target_cc" && test "$softmmu" = yes; then
+if have_target s390x-softmmu && probe_target_compiler s390x-softmmu; then
   write_c_skeleton
   do_compiler "$target_cc" $target_cc_cflags -march=z900 -o $TMPO -c $TMPC
   has_z900=$?
@@ -2380,38 +2287,6 @@ fi
 #######################################
 # generate config-host.mak
 
-# Check that the C++ compiler exists and works with the C compiler.
-# All the QEMU_CXXFLAGS are based on QEMU_CFLAGS. Keep this at the end to don't miss any other that could be added.
-if has $cxx; then
-    cat > $TMPC <<EOF
-int c_function(void);
-int main(void) { return c_function(); }
-EOF
-
-    compile_object
-
-    cat > $TMPCXX <<EOF
-extern "C" {
-   int c_function(void);
-}
-int c_function(void) { return 42; }
-EOF
-
-    update_cxxflags
-
-    if do_cxx $CXXFLAGS $EXTRA_CXXFLAGS $CONFIGURE_CXXFLAGS $QEMU_CXXFLAGS -o $TMPE $TMPCXX $TMPO $QEMU_LDFLAGS; then
-        # C++ compiler $cxx works ok with C compiler $cc
-        :
-    else
-        echo "C++ compiler $cxx does not work with C compiler $cc"
-        echo "Disabling C++ specific optional code"
-        cxx=
-    fi
-else
-    echo "No C++ compiler available; disabling C++ specific optional code"
-    cxx=
-fi
-
 if ! (GIT="$git" "$source_path/scripts/git-submodule.sh" "$git_submodules_action" "$git_submodules"); then
     exit 1
 fi
@@ -2431,9 +2306,9 @@ if test "$debug_tcg" = "yes" ; then
 fi
 if test "$mingw32" = "yes" ; then
   echo "CONFIG_WIN32=y" >> $config_host_mak
-  echo "QEMU_GA_MANUFACTURER=${QEMU_GA_MANUFACTURER}" >> $config_host_mak
-  echo "QEMU_GA_DISTRO=${QEMU_GA_DISTRO}" >> $config_host_mak
-  echo "QEMU_GA_VERSION=${QEMU_GA_VERSION}" >> $config_host_mak
+  echo "QEMU_GA_MANUFACTURER=${QEMU_GA_MANUFACTURER-QEMU}" >> $config_host_mak
+  echo "QEMU_GA_DISTRO=${QEMU_GA_DISTRO-Linux}" >> $config_host_mak
+  echo "QEMU_GA_VERSION=${QEMU_GA_VERSION-$(cat "$source_path"/VERSION)}" >> $config_host_mak
 else
   echo "CONFIG_POSIX=y" >> $config_host_mak
 fi
@@ -2481,9 +2356,14 @@ if test -n "$gdb_bin"; then
     gdb_version=$($gdb_bin --version | head -n 1)
     if version_ge ${gdb_version##* } 9.1; then
         echo "HAVE_GDB_BIN=$gdb_bin" >> $config_host_mak
+    else
+        gdb_bin=""
     fi
 fi
 
+if test "$container" != no; then
+    echo "ENGINE=$container" >> $config_host_mak
+fi
 echo "ROMS=$roms" >> $config_host_mak
 echo "MAKE=$make" >> $config_host_mak
 echo "PYTHON=$python" >> $config_host_mak
@@ -2492,12 +2372,11 @@ echo "MESON=$meson" >> $config_host_mak
 echo "NINJA=$ninja" >> $config_host_mak
 echo "CC=$cc" >> $config_host_mak
 echo "QEMU_CFLAGS=$QEMU_CFLAGS" >> $config_host_mak
-echo "QEMU_CXXFLAGS=$QEMU_CXXFLAGS" >> $config_host_mak
 echo "QEMU_OBJCFLAGS=$QEMU_OBJCFLAGS" >> $config_host_mak
 echo "GLIB_CFLAGS=$glib_cflags" >> $config_host_mak
 echo "GLIB_LIBS=$glib_libs" >> $config_host_mak
 echo "GLIB_BINDIR=$glib_bindir" >> $config_host_mak
-echo "GLIB_VERSION=$(pkg-config --modversion glib-2.0)" >> $config_host_mak
+echo "GLIB_VERSION=$($pkg_config --modversion glib-2.0)" >> $config_host_mak
 echo "QEMU_LDFLAGS=$QEMU_LDFLAGS" >> $config_host_mak
 echo "EXESUF=$EXESUF" >> $config_host_mak
 
@@ -2537,7 +2416,7 @@ fi
 for target in $target_list; do
     target_dir="$target"
     target_name=$(echo $target | cut -d '-' -f 1)$EXESUF
-    mkdir -p $target_dir
+    mkdir -p "$target_dir"
     case $target in
         *-user) symlink "../qemu-$target_name" "$target_dir/qemu-$target_name" ;;
         *) symlink "../qemu-system-$target_name" "$target_dir/qemu-system-$target_name" ;;
@@ -2557,29 +2436,31 @@ if test "$safe_stack" = "yes"; then
 fi
 
 # tests/tcg configuration
-(makefile=tests/tcg/Makefile.prereqs
-echo "# Automatically generated by configure - do not modify" > $makefile
-
-config_host_mak=tests/tcg/config-host.mak
+(config_host_mak=tests/tcg/config-host.mak
+mkdir -p tests/tcg
 echo "# Automatically generated by configure - do not modify" > $config_host_mak
 echo "SRC_PATH=$source_path" >> $config_host_mak
 echo "HOST_CC=$host_cc" >> $config_host_mak
+
+# versioned checked in the main config_host.mak above
+if test -n "$gdb_bin"; then
+    echo "HAVE_GDB_BIN=$gdb_bin" >> $config_host_mak
+fi
+if test "$plugins" = "yes" ; then
+    echo "CONFIG_PLUGIN=y" >> $config_host_mak
+fi
 
 tcg_tests_targets=
 for target in $target_list; do
   arch=${target%%-*}
 
-  config_target_mak=tests/tcg/config-$target.mak
-
-  echo "# Automatically generated by configure - do not modify" > $config_target_mak
-  echo "TARGET_NAME=$arch" >> $config_target_mak
   case $target in
     xtensa*-linux-user)
       # the toolchain is not complete with headers, only build softmmu tests
       continue
       ;;
     *-softmmu)
-      test -f $source_path/tests/tcg/$arch/Makefile.softmmu-target || continue
+      test -f "$source_path/tests/tcg/$arch/Makefile.softmmu-target" || continue
       qemu="qemu-system-$arch"
       ;;
     *-linux-user|*-bsd-user)
@@ -2587,85 +2468,26 @@ for target in $target_list; do
       ;;
   esac
 
-  probe_target_compiler $target
-  if test $got_cross_cc = yes; then
-      # Test for compiler features for optional tests. We only do this
-      # for cross compilers because ensuring the docker containers based
-      # compilers is a requirememt for adding a new test that needs a
-      # compiler feature.
-
-      echo "BUILD_STATIC=$build_static" >> $config_target_mak
-      write_target_makefile >> $config_target_mak
-      case $target in
-          aarch64-*)
-              if do_compiler "$target_cc" $target_cflags \
-                             -march=armv8.1-a+sve -o $TMPE $TMPC; then
-                  echo "CROSS_CC_HAS_SVE=y" >> $config_target_mak
-              fi
-              if do_compiler "$target_cc" $target_cflags \
-                             -march=armv8.1-a+sve2 -o $TMPE $TMPC; then
-                  echo "CROSS_CC_HAS_SVE2=y" >> $config_target_mak
-              fi
-              if do_compiler "$target_cc" $target_cflags \
-                             -march=armv8.3-a -o $TMPE $TMPC; then
-                  echo "CROSS_CC_HAS_ARMV8_3=y" >> $config_target_mak
-              fi
-              if do_compiler "$target_cc" $target_cflags \
-                             -mbranch-protection=standard -o $TMPE $TMPC; then
-                  echo "CROSS_CC_HAS_ARMV8_BTI=y" >> $config_target_mak
-              fi
-              if do_compiler "$target_cc" $target_cflags \
-                             -march=armv8.5-a+memtag -o $TMPE $TMPC; then
-                  echo "CROSS_CC_HAS_ARMV8_MTE=y" >> $config_target_mak
-              fi
-              ;;
-          ppc*)
-              if do_compiler "$target_cc" $target_cflags \
-                             -mpower8-vector -o $TMPE $TMPC; then
-                  echo "CROSS_CC_HAS_POWER8_VECTOR=y" >> $config_target_mak
-              fi
-              if do_compiler "$target_cc" $target_cflags \
-                             -mpower10 -o $TMPE $TMPC; then
-                  echo "CROSS_CC_HAS_POWER10=y" >> $config_target_mak
-              fi
-              ;;
-          i386-linux-user)
-              if do_compiler "$target_cc" $target_cflags \
-                             -Werror -fno-pie -o $TMPE $TMPC; then
-                  echo "CROSS_CC_HAS_I386_NOPIE=y" >> $config_target_mak
-              fi
-              ;;
-      esac
-  elif test -n "$container_image"; then
-      echo "build-tcg-tests-$target: docker-image-$container_image" >> $makefile
-      echo "BUILD_STATIC=y" >> $config_target_mak
-      write_container_target_makefile >> $config_target_mak
-      case $target in
-          aarch64-*)
-              echo "CROSS_CC_HAS_SVE=y" >> $config_target_mak
-              echo "CROSS_CC_HAS_SVE2=y" >> $config_target_mak
-              echo "CROSS_CC_HAS_ARMV8_3=y" >> $config_target_mak
-              echo "CROSS_CC_HAS_ARMV8_BTI=y" >> $config_target_mak
-              echo "CROSS_CC_HAS_ARMV8_MTE=y" >> $config_target_mak
-              ;;
-          ppc*)
-              echo "CROSS_CC_HAS_POWER8_VECTOR=y" >> $config_target_mak
-              echo "CROSS_CC_HAS_POWER10=y" >> $config_target_mak
-              ;;
-          i386-linux-user)
-              echo "CROSS_CC_HAS_I386_NOPIE=y" >> $config_target_mak
-              ;;
-      esac
-      got_cross_cc=yes
-  fi
-  if test $got_cross_cc = yes; then
-      mkdir -p tests/tcg/$target
-      echo "QEMU=$PWD/$qemu" >> $config_target_mak
-      echo "run-tcg-tests-$target: $qemu\$(EXESUF)" >> $makefile
+  if probe_target_compiler $target || test -n "$container_image"; then
+      test -n "$container_image" && build_static=y
+      mkdir -p "tests/tcg/$target"
+      config_target_mak=tests/tcg/$target/config-target.mak
+      ln -sf "$source_path/tests/tcg/Makefile.target" "tests/tcg/$target/Makefile"
+      echo "# Automatically generated by configure - do not modify" > "$config_target_mak"
+      echo "TARGET_NAME=$arch" >> "$config_target_mak"
+      echo "TARGET=$target" >> "$config_target_mak"
+      write_target_makefile "build-tcg-tests-$target" >> "$config_target_mak"
+      echo "BUILD_STATIC=$build_static" >> "$config_target_mak"
+      echo "QEMU=$PWD/$qemu" >> "$config_target_mak"
+      echo "run-tcg-tests-$target: $qemu\$(EXESUF)" >> Makefile.prereqs
       tcg_tests_targets="$tcg_tests_targets $target"
   fi
 done
-echo "TCG_TESTS_TARGETS=$tcg_tests_targets" >> $makefile)
+
+if test "$tcg" = "enabled"; then
+    echo "TCG_TESTS_TARGETS=$tcg_tests_targets" >> config-host.mak
+fi
+)
 
 if test "$skip_meson" = no; then
   cross="config-meson.cross.new"
@@ -2683,7 +2505,6 @@ if test "$skip_meson" = no; then
       echo "${a}-softmmu = '$c'" >> $cross
   done
 
-  test -z "$cxx" && echo "link_language = 'c'" >> $cross
   echo "[built-in options]" >> $cross
   echo "c_args = [$(meson_quote $CFLAGS $EXTRA_CFLAGS)]" >> $cross
   echo "cpp_args = [$(meson_quote $CXXFLAGS $EXTRA_CXXFLAGS)]" >> $cross
@@ -2704,6 +2525,7 @@ if test "$skip_meson" = no; then
   echo "strip = [$(meson_quote $strip)]" >> $cross
   echo "widl = [$(meson_quote $widl)]" >> $cross
   echo "windres = [$(meson_quote $windres)]" >> $cross
+  echo "windmc = [$(meson_quote $windmc)]" >> $cross
   if test "$cross_compile" = "yes"; then
     cross_arg="--cross-file config-meson.cross"
     echo "[host_machine]" >> $cross
@@ -2740,7 +2562,6 @@ if test "$skip_meson" = no; then
   test "$fdt" != auto && meson_option_add "-Dfdt=$fdt"
   test -n "${LIB_FUZZING_ENGINE+xxx}" && meson_option_add "-Dfuzzing_engine=$LIB_FUZZING_ENGINE"
   test "$qemu_suffix" != qemu && meson_option_add "-Dqemu_suffix=$qemu_suffix"
-  test "$slirp" != auto && meson_option_add "-Dslirp=$slirp"
   test "$smbd" != '' && meson_option_add "-Dsmbd=$smbd"
   test "$tcg" != enabled && meson_option_add "-Dtcg=$tcg"
   test "$vfio_user_server" != auto && meson_option_add "-Dvfio_user_server=$vfio_user_server"
@@ -2750,16 +2571,6 @@ if test "$skip_meson" = no; then
   eval run_meson $meson_options
   if test "$?" -ne 0 ; then
       error_exit "meson setup failed"
-  fi
-else
-  if test -f meson-private/cmd_line.txt; then
-    # Adjust old command line options whose type was changed
-    # Avoids having to use "setup --wipe" when Meson is upgraded
-    perl -i -ne '
-      s/^gettext = true$/gettext = auto/;
-      s/^gettext = false$/gettext = disabled/;
-      /^b_staticpic/ && next;
-      print;' meson-private/cmd_line.txt
   fi
 fi
 
@@ -2806,11 +2617,15 @@ preserve_env PKG_CONFIG
 preserve_env PKG_CONFIG_LIBDIR
 preserve_env PKG_CONFIG_PATH
 preserve_env PYTHON
+preserve_env QEMU_GA_MANUFACTURER
+preserve_env QEMU_GA_DISTRO
+preserve_env QEMU_GA_VERSION
 preserve_env SDL2_CONFIG
 preserve_env SMBD
 preserve_env STRIP
 preserve_env WIDL
 preserve_env WINDRES
+preserve_env WINDMC
 
 printf "exec" >>config.status
 for i in "$0" "$@"; do

@@ -31,7 +31,7 @@
 static QGuestAllocator *alloc;
 static char *local_test_path;
 
-/* Concatenates the passed 2 pathes. Returned result must be freed. */
+/* Concatenates the passed 2 paths. Returned result must be freed. */
 static char *concat_path(const char* a, const char* b)
 {
     return g_build_filename(a, b, NULL);
@@ -211,6 +211,7 @@ static void *virtio_9p_pci_create(void *pci_bus, QGuestAllocator *t_alloc,
  *                      variable arguments of this function to this
  *                      replacement string
  */
+G_GNUC_PRINTF(3, 4)
 static void regex_replace(GString *haystack, const char *pattern,
                           const char *replace_fmt, ...)
 {

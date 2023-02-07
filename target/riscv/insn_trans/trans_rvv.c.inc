@@ -196,7 +196,7 @@ static bool do_vsetvl(DisasContext *s, int rd, int rs1, TCGv s2)
     mark_vs_dirty(s);
 
     gen_set_pc_imm(s, s->pc_succ_insn);
-    tcg_gen_lookup_and_goto_ptr();
+    lookup_and_goto_ptr(s);
     s->base.is_jmp = DISAS_NORETURN;
 
     if (rd == 0 && rs1 == 0) {
@@ -222,7 +222,7 @@ static bool do_vsetivli(DisasContext *s, int rd, TCGv s1, TCGv s2)
     gen_set_gpr(s, rd, dst);
     mark_vs_dirty(s);
     gen_set_pc_imm(s, s->pc_succ_insn);
-    tcg_gen_lookup_and_goto_ptr();
+    lookup_and_goto_ptr(s);
     s->base.is_jmp = DISAS_NORETURN;
 
     return true;
@@ -2679,13 +2679,9 @@ static bool do_opfv(DisasContext *s, arg_rmr *a,
                     int rm)
 {
     if (checkfn(s, a)) {
-        if (rm != RISCV_FRM_DYN) {
-            gen_set_rm(s, RISCV_FRM_DYN);
-        }
-
         uint32_t data = 0;
         TCGLabel *over = gen_new_label();
-        gen_set_rm(s, rm);
+        gen_set_rm_chkfrm(s, rm);
         tcg_gen_brcondi_tl(TCG_COND_EQ, cpu_vl, 0, over);
         tcg_gen_brcond_tl(TCG_COND_GEU, cpu_vstart, cpu_vl, over);
 
@@ -2882,17 +2878,13 @@ static bool opffv_widen_check(DisasContext *s, arg_rmr *a)
 static bool trans_##NAME(DisasContext *s, arg_rmr *a)              \
 {                                                                  \
     if (CHECK(s, a)) {                                             \
-        if (FRM != RISCV_FRM_DYN) {                                \
-            gen_set_rm(s, RISCV_FRM_DYN);                          \
-        }                                                          \
-                                                                   \
         uint32_t data = 0;                                         \
         static gen_helper_gvec_3_ptr * const fns[2] = {            \
             gen_helper_##HELPER##_h,                               \
             gen_helper_##HELPER##_w,                               \
         };                                                         \
         TCGLabel *over = gen_new_label();                          \
-        gen_set_rm(s, FRM);                                        \
+        gen_set_rm_chkfrm(s, FRM);                                 \
         tcg_gen_brcondi_tl(TCG_COND_EQ, cpu_vl, 0, over);          \
         tcg_gen_brcond_tl(TCG_COND_GEU, cpu_vstart, cpu_vl, over); \
                                                                    \
@@ -3005,17 +2997,13 @@ static bool opffv_narrow_check(DisasContext *s, arg_rmr *a)
 static bool trans_##NAME(DisasContext *s, arg_rmr *a)              \
 {                                                                  \
     if (CHECK(s, a)) {                                             \
-        if (FRM != RISCV_FRM_DYN) {                                \
-            gen_set_rm(s, RISCV_FRM_DYN);                          \
-        }                                                          \
-                                                                   \
         uint32_t data = 0;                                         \
         static gen_helper_gvec_3_ptr * const fns[2] = {            \
             gen_helper_##HELPER##_h,                               \
             gen_helper_##HELPER##_w,                               \
         };                                                         \
         TCGLabel *over = gen_new_label();                          \
-        gen_set_rm(s, FRM);                                        \
+        gen_set_rm_chkfrm(s, FRM);                                 \
         tcg_gen_brcondi_tl(TCG_COND_EQ, cpu_vl, 0, over);          \
         tcg_gen_brcond_tl(TCG_COND_GEU, cpu_vstart, cpu_vl, over); \
                                                                    \
@@ -3060,10 +3048,6 @@ static bool opxfv_narrow_check(DisasContext *s, arg_rmr *a)
 static bool trans_##NAME(DisasContext *s, arg_rmr *a)              \
 {                                                                  \
     if (opxfv_narrow_check(s, a)) {                                \
-        if (FRM != RISCV_FRM_DYN) {                                \
-            gen_set_rm(s, RISCV_FRM_DYN);                          \
-        }                                                          \
-                                                                   \
         uint32_t data = 0;                                         \
         static gen_helper_gvec_3_ptr * const fns[3] = {            \
             gen_helper_##HELPER##_b,                               \
@@ -3071,7 +3055,7 @@ static bool trans_##NAME(DisasContext *s, arg_rmr *a)              \
             gen_helper_##HELPER##_w,                               \
         };                                                         \
         TCGLabel *over = gen_new_label();                          \
-        gen_set_rm(s, FRM);                                        \
+        gen_set_rm_chkfrm(s, FRM);                                 \
         tcg_gen_brcondi_tl(TCG_COND_EQ, cpu_vl, 0, over);          \
         tcg_gen_brcond_tl(TCG_COND_GEU, cpu_vstart, cpu_vl, over); \
                                                                    \
@@ -3136,7 +3120,8 @@ static bool freduction_check(DisasContext *s, arg_rmrr *a)
            require_zve64f(s);
 }
 
-GEN_OPFVV_TRANS(vfredsum_vs, freduction_check)
+GEN_OPFVV_TRANS(vfredusum_vs, freduction_check)
+GEN_OPFVV_TRANS(vfredosum_vs, freduction_check)
 GEN_OPFVV_TRANS(vfredmax_vs, freduction_check)
 GEN_OPFVV_TRANS(vfredmin_vs, freduction_check)
 
@@ -3148,7 +3133,8 @@ static bool freduction_widen_check(DisasContext *s, arg_rmrr *a)
            (s->sew != MO_8);
 }
 
-GEN_OPFVV_WIDEN_TRANS(vfwredsum_vs, freduction_widen_check)
+GEN_OPFVV_WIDEN_TRANS(vfwredusum_vs, freduction_widen_check)
+GEN_OPFVV_WIDEN_TRANS(vfwredosum_vs, freduction_widen_check)
 
 /*
  *** Vector Mask Operations

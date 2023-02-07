@@ -24,7 +24,9 @@
 #ifndef BLOCK_INT_IO_H
 #define BLOCK_INT_IO_H
 
-#include "block_int-common.h"
+#include "block/block_int-common.h"
+#include "qemu/hbitmap.h"
+#include "qemu/main-loop.h"
 
 /*
  * I/O API functions. These functions are thread-safe.
@@ -73,7 +75,7 @@ static inline int coroutine_fn bdrv_co_pwrite(BdrvChild *child,
     return bdrv_co_pwritev(child, offset, bytes, &qiov, flags);
 }
 
-bool coroutine_fn bdrv_make_request_serialising(BdrvTrackedRequest *req,
+void coroutine_fn bdrv_make_request_serialising(BdrvTrackedRequest *req,
                                                 uint64_t align);
 BdrvTrackedRequest *coroutine_fn bdrv_co_get_self_request(BlockDriverState *bs);
 
@@ -120,7 +122,10 @@ int coroutine_fn bdrv_co_copy_range_to(BdrvChild *src, int64_t src_offset,
                                        BdrvRequestFlags read_flags,
                                        BdrvRequestFlags write_flags);
 
-int refresh_total_sectors(BlockDriverState *bs, int64_t hint);
+int coroutine_fn bdrv_co_refresh_total_sectors(BlockDriverState *bs,
+                                               int64_t hint);
+int co_wrapper_mixed
+bdrv_refresh_total_sectors(BlockDriverState *bs, int64_t hint);
 
 BdrvChild *bdrv_cow_child(BlockDriverState *bs);
 BdrvChild *bdrv_filter_child(BlockDriverState *bs);
@@ -178,17 +183,5 @@ void bdrv_bsc_invalidate_range(BlockDriverState *bs,
  * Mark the range [offset, offset + bytes) as a data region.
  */
 void bdrv_bsc_fill(BlockDriverState *bs, int64_t offset, int64_t bytes);
-
-
-/*
- * "I/O or GS" API functions. These functions can run without
- * the BQL, but only in one specific iothread/main loop.
- *
- * See include/block/block-io.h for more information about
- * the "I/O or GS" API.
- */
-
-void bdrv_apply_subtree_drain(BdrvChild *child, BlockDriverState *new_parent);
-void bdrv_unapply_subtree_drain(BdrvChild *child, BlockDriverState *old_parent);
 
 #endif /* BLOCK_INT_IO_H */

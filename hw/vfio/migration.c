@@ -456,11 +456,10 @@ static void vfio_save_cleanup(void *opaque)
     trace_vfio_save_cleanup(vbasedev->name);
 }
 
-static void vfio_save_pending(QEMUFile *f, void *opaque,
-                              uint64_t threshold_size,
-                              uint64_t *res_precopy_only,
-                              uint64_t *res_compatible,
-                              uint64_t *res_postcopy_only)
+static void vfio_state_pending(void *opaque,
+                               uint64_t *res_precopy_only,
+                               uint64_t *res_compatible,
+                               uint64_t *res_postcopy_only)
 {
     VFIODevice *vbasedev = opaque;
     VFIOMigration *migration = vbasedev->migration;
@@ -473,7 +472,7 @@ static void vfio_save_pending(QEMUFile *f, void *opaque,
 
     *res_precopy_only += migration->pending_bytes;
 
-    trace_vfio_save_pending(vbasedev->name, *res_precopy_only,
+    trace_vfio_state_pending(vbasedev->name, *res_precopy_only,
                             *res_postcopy_only, *res_compatible);
 }
 
@@ -515,9 +514,9 @@ static int vfio_save_iterate(QEMUFile *f, void *opaque)
     }
 
     /*
-     * Reset pending_bytes as .save_live_pending is not called during savevm or
-     * snapshot case, in such case vfio_update_pending() at the start of this
-     * function updates pending_bytes.
+     * Reset pending_bytes as state_pending* are not called during
+     * savevm or snapshot case, in such case vfio_update_pending() at
+     * the start of this function updates pending_bytes.
      */
     migration->pending_bytes = 0;
     trace_vfio_save_iterate(vbasedev->name, data_size);
@@ -685,7 +684,8 @@ static int vfio_load_state(QEMUFile *f, void *opaque, int version_id)
 static SaveVMHandlers savevm_vfio_handlers = {
     .save_setup = vfio_save_setup,
     .save_cleanup = vfio_save_cleanup,
-    .save_live_pending = vfio_save_pending,
+    .state_pending_exact = vfio_state_pending,
+    .state_pending_estimate = vfio_state_pending,
     .save_live_iterate = vfio_save_iterate,
     .save_live_complete_precopy = vfio_save_complete_precopy,
     .save_state = vfio_save_state,
@@ -806,6 +806,8 @@ static int vfio_migration_init(VFIODevice *vbasedev,
     }
 
     vbasedev->migration = g_new0(VFIOMigration, 1);
+    vbasedev->migration->device_state = VFIO_DEVICE_STATE_V1_RUNNING;
+    vbasedev->migration->vm_running = runstate_is_running();
 
     ret = vfio_region_setup(obj, vbasedev, &vbasedev->migration->region,
                             info->index, "migration");

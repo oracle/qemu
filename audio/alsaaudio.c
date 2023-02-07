@@ -449,7 +449,7 @@ static int alsa_open(bool in, struct alsa_params_req *req,
     snd_pcm_hw_params_t *hw_params;
     int err;
     unsigned int freq, nchannels;
-    const char *pcm_name = apdo->has_dev ? apdo->dev : "default";
+    const char *pcm_name = apdo->dev ?: "default";
     snd_pcm_uframes_t obt_buffer_size;
     const char *typ = in ? "ADC" : "DAC";
     snd_pcm_format_t obtfmt;
@@ -600,6 +600,42 @@ static int alsa_open(bool in, struct alsa_params_req *req,
  err:
     alsa_anal_close1 (&handle);
     return -1;
+}
+
+static size_t alsa_buffer_get_free(HWVoiceOut *hw)
+{
+    ALSAVoiceOut *alsa = (ALSAVoiceOut *)hw;
+    snd_pcm_sframes_t avail;
+    size_t alsa_free, generic_free, generic_in_use;
+
+    avail = snd_pcm_avail_update(alsa->handle);
+    if (avail < 0) {
+        if (avail == -EPIPE) {
+            if (!alsa_recover(alsa->handle)) {
+                avail = snd_pcm_avail_update(alsa->handle);
+            }
+        }
+        if (avail < 0) {
+            alsa_logerr(avail,
+                        "Could not obtain number of available frames\n");
+            avail = 0;
+        }
+    }
+
+    alsa_free = avail * hw->info.bytes_per_frame;
+    generic_free = audio_generic_buffer_get_free(hw);
+    generic_in_use = hw->samples * hw->info.bytes_per_frame - generic_free;
+    if (generic_in_use) {
+        /*
+         * This code can only be reached in the unlikely case that
+         * snd_pcm_avail_update() returned a larger number of frames
+         * than snd_pcm_writei() could write. Make sure that all
+         * remaining bytes in the generic buffer can be written.
+         */
+        alsa_free = alsa_free > generic_in_use ? alsa_free - generic_in_use : 0;
+    }
+
+    return alsa_free;
 }
 
 static size_t alsa_write(HWVoiceOut *hw, void *buf, size_t len)
@@ -916,7 +952,7 @@ static struct audio_pcm_ops alsa_pcm_ops = {
     .init_out = alsa_init_out,
     .fini_out = alsa_fini_out,
     .write    = alsa_write,
-    .buffer_get_free = audio_generic_buffer_get_free,
+    .buffer_get_free = alsa_buffer_get_free,
     .run_buffer_out = audio_generic_run_buffer_out,
     .enable_out = alsa_enable_out,
 

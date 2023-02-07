@@ -11,6 +11,7 @@
 
 #include "qemu/osdep.h"
 #include "qemu/module.h"
+#include "block/block-io.h"
 #include "block/block_int.h"
 #include "sysemu/replay.h"
 #include "qapi/error.h"
@@ -26,11 +27,8 @@ static int blkreplay_open(BlockDriverState *bs, QDict *options, int flags,
     int ret;
 
     /* Open the image file */
-    bs->file = bdrv_open_child(NULL, options, "image", bs, &child_of_bds,
-                               BDRV_CHILD_FILTERED | BDRV_CHILD_PRIMARY,
-                               false, errp);
-    if (!bs->file) {
-        ret = -EINVAL;
+    ret = bdrv_open_file_child(NULL, options, "image", bs, errp);
+    if (ret < 0) {
         goto fail;
     }
 
@@ -42,9 +40,9 @@ fail:
     return ret;
 }
 
-static int64_t blkreplay_getlength(BlockDriverState *bs)
+static int64_t coroutine_fn blkreplay_co_getlength(BlockDriverState *bs)
 {
-    return bdrv_getlength(bs->file->bs);
+    return bdrv_co_getlength(bs->file->bs);
 }
 
 /* This bh is used for synchronization of return from coroutines.
@@ -138,7 +136,7 @@ static BlockDriver bdrv_blkreplay = {
 
     .bdrv_open              = blkreplay_open,
     .bdrv_child_perm        = bdrv_default_perms,
-    .bdrv_getlength         = blkreplay_getlength,
+    .bdrv_co_getlength      = blkreplay_co_getlength,
 
     .bdrv_co_preadv         = blkreplay_co_preadv,
     .bdrv_co_pwritev        = blkreplay_co_pwritev,

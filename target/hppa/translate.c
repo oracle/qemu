@@ -2899,14 +2899,22 @@ static bool trans_cmpiclr(DisasContext *ctx, arg_rri_cf *a)
 
 static bool trans_ld(DisasContext *ctx, arg_ldst *a)
 {
-    return do_load(ctx, a->t, a->b, a->x, a->scale ? a->size : 0,
+    if (unlikely(TARGET_REGISTER_BITS == 32 && a->size > MO_32)) {
+        return gen_illegal(ctx);
+    } else {
+        return do_load(ctx, a->t, a->b, a->x, a->scale ? a->size : 0,
                    a->disp, a->sp, a->m, a->size | MO_TE);
+    }
 }
 
 static bool trans_st(DisasContext *ctx, arg_ldst *a)
 {
     assert(a->x == 0 && a->scale == 0);
-    return do_store(ctx, a->t, a->b, a->disp, a->sp, a->m, a->size | MO_TE);
+    if (unlikely(TARGET_REGISTER_BITS == 32 && a->size > MO_32)) {
+        return gen_illegal(ctx);
+    } else {
+        return do_store(ctx, a->t, a->b, a->disp, a->sp, a->m, a->size | MO_TE);
+    }
 }
 
 static bool trans_ldc(DisasContext *ctx, arg_ldst *a)
@@ -3612,6 +3620,17 @@ static bool trans_bve(DisasContext *ctx, arg_bve *a)
 static void gen_fcpy_f(TCGv_i32 dst, TCGv_env unused, TCGv_i32 src)
 {
     tcg_gen_mov_i32(dst, src);
+}
+
+static bool trans_fid_f(DisasContext *ctx, arg_fid_f *a)
+{
+    nullify_over(ctx);
+#if TARGET_REGISTER_BITS == 64
+    save_frd(0, tcg_const_i64(0x13080000000000ULL)); /* PA8700 (PCX-W2) */
+#else
+    save_frd(0, tcg_const_i64(0x0f080000000000ULL)); /* PA7300LC (PCX-L2) */
+#endif
+    return nullify_end(ctx);
 }
 
 static bool trans_fcpy_f(DisasContext *ctx, arg_fclass01 *a)
@@ -4345,17 +4364,4 @@ void gen_intermediate_code(CPUState *cs, TranslationBlock *tb, int max_insns,
 {
     DisasContext ctx;
     translator_loop(cs, tb, max_insns, pc, host_pc, &hppa_tr_ops, &ctx.base);
-}
-
-void restore_state_to_opc(CPUHPPAState *env, TranslationBlock *tb,
-                          target_ulong *data)
-{
-    env->iaoq_f = data[0];
-    if (data[1] != (target_ureg)-1) {
-        env->iaoq_b = data[1];
-    }
-    /* Since we were executing the instruction at IAOQ_F, and took some
-       sort of action that provoked the cpu_restore_state, we can infer
-       that the instruction was not nullified.  */
-    env->psw_n = 0;
 }

@@ -11,8 +11,6 @@
 #define CXL_PCI_H
 
 #include "qemu/compiler.h"
-#include "hw/pci/pci.h"
-#include "hw/pci/pcie.h"
 
 #define CXL_VENDOR_ID 0x1e98
 

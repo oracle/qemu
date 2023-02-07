@@ -18,6 +18,7 @@
 #include "qemu/error-report.h"
 #include "qemu/module.h"
 #include "qemu/option.h"
+#include "block/block-io.h"
 #include "block/block_int.h"
 #include "block/qdict.h"
 #include "crypto/secret.h"
@@ -536,13 +537,13 @@ static int qemu_rbd_do_create(BlockdevCreateOptions *options,
     int ret;
 
     assert(options->driver == BLOCKDEV_DRIVER_RBD);
-    if (opts->location->has_snapshot) {
+    if (opts->location->snapshot) {
         error_setg(errp, "Can't use snapshot name for image creation");
         return -EINVAL;
     }
 
 #ifndef LIBRBD_SUPPORTS_ENCRYPTION
-    if (opts->has_encrypt) {
+    if (opts->encrypt) {
         error_setg(errp, "RBD library does not support image encryption");
         return -ENOTSUP;
     }
@@ -574,7 +575,7 @@ static int qemu_rbd_do_create(BlockdevCreateOptions *options,
     }
 
 #ifdef LIBRBD_SUPPORTS_ENCRYPTION
-    if (opts->has_encrypt) {
+    if (opts->encrypt) {
         rbd_image_t image;
 
         ret = rbd_open(io_ctx, opts->location->image, &image, NULL);
@@ -686,7 +687,6 @@ static int coroutine_fn qemu_rbd_co_create_opts(BlockDriver *drv,
         goto exit;
     }
     rbd_opts->encrypt     = encrypt;
-    rbd_opts->has_encrypt = !!encrypt;
 
     /*
      * Caution: while qdict_get_try_str() is fine, getting non-string
@@ -697,11 +697,8 @@ static int coroutine_fn qemu_rbd_co_create_opts(BlockDriver *drv,
     loc = rbd_opts->location;
     loc->pool        = g_strdup(qdict_get_try_str(options, "pool"));
     loc->conf        = g_strdup(qdict_get_try_str(options, "conf"));
-    loc->has_conf    = !!loc->conf;
     loc->user        = g_strdup(qdict_get_try_str(options, "user"));
-    loc->has_user    = !!loc->user;
     loc->q_namespace = g_strdup(qdict_get_try_str(options, "namespace"));
-    loc->has_q_namespace = !!loc->q_namespace;
     loc->image       = g_strdup(qdict_get_try_str(options, "image"));
     keypairs         = qdict_get_try_str(options, "=keyvalue-pairs");
 
@@ -767,7 +764,6 @@ static int qemu_rbd_connect(rados_t *cluster, rados_ioctx_t *io_ctx,
             return -EINVAL;
         }
         opts->key_secret = g_strdup(secretid);
-        opts->has_key_secret = true;
     }
 
     mon_host = qemu_rbd_mon_host(opts, &local_err);
@@ -785,7 +781,7 @@ static int qemu_rbd_connect(rados_t *cluster, rados_ioctx_t *io_ctx,
 
     /* try default location when conf=NULL, but ignore failure */
     r = rados_conf_read_file(*cluster, opts->conf);
-    if (opts->has_conf && r < 0) {
+    if (opts->conf && r < 0) {
         error_setg_errno(errp, -r, "error reading conf file %s", opts->conf);
         goto failed_shutdown;
     }
@@ -833,7 +829,7 @@ static int qemu_rbd_connect(rados_t *cluster, rados_ioctx_t *io_ctx,
     }
 
 #ifdef HAVE_RBD_NAMESPACE_EXISTS
-    if (opts->has_q_namespace && strlen(opts->q_namespace) > 0) {
+    if (opts->q_namespace && strlen(opts->q_namespace) > 0) {
         bool exists;
 
         r = rbd_namespace_exists(*io_ctx, opts->q_namespace, &exists);
@@ -991,7 +987,7 @@ static int qemu_rbd_open(BlockDriverState *bs, QDict *options, int flags,
         goto failed_open;
     }
 
-    if (opts->has_encrypt) {
+    if (opts->encrypt) {
 #ifdef LIBRBD_SUPPORTS_ENCRYPTION
         r = qemu_rbd_encryption_load(s->image, opts->encrypt, errp);
         if (r < 0) {
@@ -1244,7 +1240,8 @@ coroutine_fn qemu_rbd_co_pwrite_zeroes(BlockDriverState *bs, int64_t offset,
 }
 #endif
 
-static int qemu_rbd_getinfo(BlockDriverState *bs, BlockDriverInfo *bdi)
+static int coroutine_fn
+qemu_rbd_co_get_info(BlockDriverState *bs, BlockDriverInfo *bdi)
 {
     BDRVRBDState *s = bs->opaque;
     bdi->cluster_size = s->object_size;
@@ -1434,7 +1431,7 @@ static int coroutine_fn qemu_rbd_co_block_status(BlockDriverState *bs,
     return status;
 }
 
-static int64_t qemu_rbd_getlength(BlockDriverState *bs)
+static int64_t coroutine_fn qemu_rbd_co_getlength(BlockDriverState *bs)
 {
     BDRVRBDState *s = bs->opaque;
     int r;
@@ -1655,10 +1652,10 @@ static BlockDriver bdrv_rbd = {
     .bdrv_co_create         = qemu_rbd_co_create,
     .bdrv_co_create_opts    = qemu_rbd_co_create_opts,
     .bdrv_has_zero_init     = bdrv_has_zero_init_1,
-    .bdrv_get_info          = qemu_rbd_getinfo,
+    .bdrv_co_get_info       = qemu_rbd_co_get_info,
     .bdrv_get_specific_info = qemu_rbd_get_specific_info,
     .create_opts            = &qemu_rbd_create_opts,
-    .bdrv_getlength         = qemu_rbd_getlength,
+    .bdrv_co_getlength      = qemu_rbd_co_getlength,
     .bdrv_co_truncate       = qemu_rbd_co_truncate,
     .protocol_name          = "rbd",
 

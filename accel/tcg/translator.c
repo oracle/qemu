@@ -75,7 +75,7 @@ void translator_loop(CPUState *cpu, TranslationBlock *tb, int max_insns,
     ops->tb_start(db, cpu);
     tcg_debug_assert(db->is_jmp == DISAS_NEXT);  /* no early exit */
 
-    plugin_enabled = plugin_gen_tb_start(cpu, tb, cflags & CF_MEMI_ONLY);
+    plugin_enabled = plugin_gen_tb_start(cpu, db, cflags & CF_MEMI_ONLY);
 
     while (true) {
         db->num_insns++;
@@ -100,17 +100,22 @@ void translator_loop(CPUState *cpu, TranslationBlock *tb, int max_insns,
             ops->translate_insn(db, cpu);
         }
 
-        /* Stop translation if translate_insn so indicated.  */
-        if (db->is_jmp != DISAS_NEXT) {
-            break;
-        }
-
         /*
          * We can't instrument after instructions that change control
          * flow although this only really affects post-load operations.
+         *
+         * Calling plugin_gen_insn_end() before we possibly stop translation
+         * is important. Even if this ends up as dead code, plugin generation
+         * needs to see a matching plugin_gen_insn_{start,end}() pair in order
+         * to accurately track instrumented helpers that might access memory.
          */
         if (plugin_enabled) {
             plugin_gen_insn_end();
+        }
+
+        /* Stop translation if translate_insn so indicated.  */
+        if (db->is_jmp != DISAS_NEXT) {
+            break;
         }
 
         /* Stop translation if the output buffer is full,
@@ -157,7 +162,7 @@ static void *translator_access(CPUArchState *env, DisasContextBase *db,
     tb = db->tb;
 
     /* Use slow path if first page is MMIO. */
-    if (unlikely(tb->page_addr[0] == -1)) {
+    if (unlikely(tb_page_addr0(tb) == -1)) {
         return NULL;
     }
 
@@ -169,13 +174,14 @@ static void *translator_access(CPUArchState *env, DisasContextBase *db,
         host = db->host_addr[1];
         base = TARGET_PAGE_ALIGN(db->pc_first);
         if (host == NULL) {
-            tb->page_addr[1] =
+            tb_page_addr_t phys_page =
                 get_page_addr_code_hostp(env, base, &db->host_addr[1]);
+            /* We cannot handle MMIO as second page. */
+            assert(phys_page != -1);
+            tb_set_page_addr1(tb, phys_page);
 #ifdef CONFIG_USER_ONLY
             page_protect(end);
 #endif
-            /* We cannot handle MMIO as second page. */
-            assert(tb->page_addr[1] != -1);
             host = db->host_addr[1];
         }
 

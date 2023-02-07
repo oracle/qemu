@@ -129,6 +129,32 @@ struct IOMMUTLBEntry {
 /*
  * Bitmap for different IOMMUNotifier capabilities. Each notifier can
  * register with one or multiple IOMMU Notifier capability bit(s).
+ *
+ * Normally there're two use cases for the notifiers:
+ *
+ *   (1) When the device needs accurate synchronizations of the vIOMMU page
+ *       tables, it needs to register with both MAP|UNMAP notifies (which
+ *       is defined as IOMMU_NOTIFIER_IOTLB_EVENTS below).
+ *
+ *       Regarding to accurate synchronization, it's when the notified
+ *       device maintains a shadow page table and must be notified on each
+ *       guest MAP (page table entry creation) and UNMAP (invalidation)
+ *       events (e.g. VFIO). Both notifications must be accurate so that
+ *       the shadow page table is fully in sync with the guest view.
+ *
+ *   (2) When the device doesn't need accurate synchronizations of the
+ *       vIOMMU page tables, it needs to register only with UNMAP or
+ *       DEVIOTLB_UNMAP notifies.
+ *
+ *       It's when the device maintains a cache of IOMMU translations
+ *       (IOTLB) and is able to fill that cache by requesting translations
+ *       from the vIOMMU through a protocol similar to ATS (Address
+ *       Translation Service).
+ *
+ *       Note that in this mode the vIOMMU will not maintain a shadowed
+ *       page table for the address space, and the UNMAP messages can cover
+ *       more than the pages that used to get mapped.  The IOMMU notifiee
+ *       should be able to take care of over-sized invalidations.
  */
 typedef enum {
     IOMMU_NOTIFIER_NONE = 0,
@@ -561,7 +587,7 @@ typedef void (*ReplayRamDiscard)(MemoryRegionSection *section, void *opaque);
  * A #RamDiscardManager coordinates which parts of specific RAM #MemoryRegion
  * regions are currently populated to be used/accessed by the VM, notifying
  * after parts were discarded (freeing up memory) and before parts will be
- * populated (consuming memory), to be used/acessed by the VM.
+ * populated (consuming memory), to be used/accessed by the VM.
  *
  * A #RamDiscardManager can only be set for a RAM #MemoryRegion while the
  * #MemoryRegion isn't mapped yet; it cannot change while the #MemoryRegion is
@@ -585,7 +611,7 @@ typedef void (*ReplayRamDiscard)(MemoryRegionSection *section, void *opaque);
  * Listeners are called in multiples of the minimum granularity (unless it
  * would exceed the registered range) and changes are aligned to the minimum
  * granularity within the #MemoryRegion. Listeners have to prepare for memory
- * becomming discarded in a different granularity than it was populated and the
+ * becoming discarded in a different granularity than it was populated and the
  * other way around.
  */
 struct RamDiscardManagerClass {
@@ -712,6 +738,10 @@ void ram_discard_manager_register_listener(RamDiscardManager *rdm,
 
 void ram_discard_manager_unregister_listener(RamDiscardManager *rdm,
                                              RamDiscardListener *rdl);
+
+bool memory_get_xlat_addr(IOMMUTLBEntry *iotlb, void **vaddr,
+                          ram_addr_t *ram_addr, bool *read_only,
+                          bool *mr_has_discard_manager);
 
 typedef struct CoalescedMemoryRange CoalescedMemoryRange;
 typedef struct MemoryRegionIoeventfd MemoryRegionIoeventfd;
@@ -1243,7 +1273,7 @@ void memory_region_init_ram_flags_nomigrate(MemoryRegion *mr,
                                             Error **errp);
 
 /**
- * memory_region_init_resizeable_ram:  Initialize memory region with resizeable
+ * memory_region_init_resizeable_ram:  Initialize memory region with resizable
  *                                     RAM.  Accesses into the region will
  *                                     modify memory directly.  Only an initial
  *                                     portion of this RAM is actually used.
@@ -1970,7 +2000,7 @@ void memory_region_clear_dirty_bitmap(MemoryRegion *mr, hwaddr start,
  * querying the same page multiple times, which is especially useful for
  * display updates where the scanlines often are not page aligned.
  *
- * The dirty bitmap region which gets copyed into the snapshot (and
+ * The dirty bitmap region which gets copied into the snapshot (and
  * cleared afterwards) can be larger than requested.  The boundaries
  * are rounded up/down so complete bitmap longs (covering 64 pages on
  * 64bit hosts) can be copied over into the bitmap snapshot.  Which
@@ -2437,6 +2467,10 @@ void memory_global_dirty_log_start(unsigned int flags);
 void memory_global_dirty_log_stop(unsigned int flags);
 
 void mtree_info(bool flatview, bool dispatch_tree, bool owner, bool disabled);
+
+bool memory_region_access_valid(MemoryRegion *mr, hwaddr addr,
+                                unsigned size, bool is_write,
+                                MemTxAttrs attrs);
 
 /**
  * memory_region_dispatch_read: perform a read directly to the specified

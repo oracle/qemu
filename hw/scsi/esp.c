@@ -515,7 +515,7 @@ static void do_dma_pdma_cb(ESPState *s)
         } else {
             /*
              * Extra message out bytes received: update cmdfifo_cdb_offset
-             * and then switch to commmand phase
+             * and then switch to command phase
              */
             s->cmdfifo_cdb_offset = fifo8_num_used(&s->cmdfifo);
             s->rregs[ESP_RSTAT] = STAT_TC | STAT_CD;
@@ -627,7 +627,7 @@ static void esp_do_dma(ESPState *s)
         } else {
             /*
              * Extra message out bytes received: update cmdfifo_cdb_offset
-             * and then switch to commmand phase
+             * and then switch to command phase
              */
             s->cmdfifo_cdb_offset = fifo8_num_used(&s->cmdfifo);
             s->rregs[ESP_RSTAT] = STAT_TC | STAT_CD;
@@ -738,7 +738,7 @@ static void esp_do_nodma(ESPState *s)
         } else {
             /*
              * Extra message out bytes received: update cmdfifo_cdb_offset
-             * and then switch to commmand phase
+             * and then switch to command phase
              */
             s->cmdfifo_cdb_offset = fifo8_num_used(&s->cmdfifo);
             s->rregs[ESP_RSTAT] = STAT_TC | STAT_CD;
@@ -941,7 +941,7 @@ static void esp_soft_reset(ESPState *s)
 
 static void esp_bus_reset(ESPState *s)
 {
-    qbus_reset_all(BUS(&s->bus));
+    bus_cold_reset(BUS(&s->bus));
 }
 
 static void parent_esp_reset(ESPState *s, int irq, int level)

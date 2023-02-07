@@ -8,6 +8,8 @@ from fnmatch import fnmatch
 
 archs = [
     "SSE", "SSE2", "SSE3", "SSSE3", "SSE4_1", "SSE4_2",
+    "AES", "AVX", "AVX2", "AES+AVX", "VAES+AVX",
+    "F16C", "FMA",
 ]
 
 ignore = set(["FISTTP",
@@ -18,6 +20,7 @@ imask = {
     'vBLENDPS': 0x0f,
     'CMP[PS][SD]': 0x07,
     'VCMP[PS][SD]': 0x1f,
+    'vCVTPS2PH': 0x7,
     'vDPPD': 0x33,
     'vDPPS': 0xff,
     'vEXTRACTPS': 0x03,
@@ -42,7 +45,7 @@ imask = {
     'vROUND[PS][SD]': 0x7,
     'vSHUFPD': 0x0f,
     'vSHUFPS': 0xff,
-    'vAESKEYGENASSIST': 0,
+    'vAESKEYGENASSIST': 0xff,
     'VEXTRACT[FI]128': 0x01,
     'VINSERT[FI]128': 0x01,
     'VPBLENDD': 0xff,
@@ -85,7 +88,7 @@ def mem_w(w):
     else:
         raise Exception()
 
-    return t + " PTR 16[rdx]"
+    return t + " PTR 32[rdx]"
 
 class XMMArg():
     isxmm = True
@@ -220,8 +223,10 @@ def ArgGenerator(arg, op):
 class InsnGenerator:
     def __init__(self, op, args):
         self.op = op
-        if op[-2:] in ["PS", "PD", "SS", "SD"]:
-            if op[-1] == 'S':
+        if op[-2:] in ["PH", "PS", "PD", "SS", "SD"]:
+            if op[-1] == 'H':
+                self.optype = 'F16'
+            elif op[-1] == 'S':
                 self.optype = 'F32'
             else:
                 self.optype = 'F64'

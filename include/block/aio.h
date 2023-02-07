@@ -17,11 +17,12 @@
 #ifdef CONFIG_LINUX_IO_URING
 #include <liburing.h>
 #endif
-#include "qemu/coroutine.h"
+#include "qemu/coroutine-core.h"
 #include "qemu/queue.h"
 #include "qemu/event_notifier.h"
 #include "qemu/thread.h"
 #include "qemu/timer.h"
+#include "block/graph-lock.h"
 
 typedef struct BlockAIOCB BlockAIOCB;
 typedef void BlockCompletionFunc(void *opaque, int ret);
@@ -51,7 +52,6 @@ typedef void QEMUBHFunc(void *opaque);
 typedef bool AioPollFn(void *opaque);
 typedef void IOHandler(void *opaque);
 
-struct Coroutine;
 struct ThreadPool;
 struct LinuxAioState;
 struct LuringState;
@@ -126,6 +126,14 @@ struct AioContext {
 
     /* Used by AioContext users to protect from multi-threaded access.  */
     QemuRecMutex lock;
+
+    /*
+     * Keep track of readers and writers of the block layer graph.
+     * This is essential to avoid performing additions and removal
+     * of nodes and edges from block graph while some
+     * other thread is traversing it.
+     */
+    BdrvGraphRWlock *bdrv_graph;
 
     /* The list of registered AIO handlers.  Protected by ctx->list_lock. */
     AioHandlerList aio_handlers;
@@ -685,7 +693,7 @@ static inline bool aio_node_check(AioContext *ctx, bool is_external)
  * is the context in which the coroutine is running (i.e. the value of
  * qemu_get_current_aio_context() from the coroutine itself).
  */
-void aio_co_schedule(AioContext *ctx, struct Coroutine *co);
+void aio_co_schedule(AioContext *ctx, Coroutine *co);
 
 /**
  * aio_co_reschedule_self:
@@ -708,7 +716,7 @@ void coroutine_fn aio_co_reschedule_self(AioContext *new_ctx);
  * context.  The coroutine must not be entered by anyone else while
  * aio_co_wake() is active.
  */
-void aio_co_wake(struct Coroutine *co);
+void aio_co_wake(Coroutine *co);
 
 /**
  * aio_co_enter:
@@ -717,7 +725,7 @@ void aio_co_wake(struct Coroutine *co);
  *
  * Enter a coroutine in the specified AioContext.
  */
-void aio_co_enter(AioContext *ctx, struct Coroutine *co);
+void aio_co_enter(AioContext *ctx, Coroutine *co);
 
 /**
  * Return the AioContext whose event loop runs in the current thread.

@@ -10,6 +10,8 @@
 #ifndef CXL_DEVICE_H
 #define CXL_DEVICE_H
 
+#include "hw/cxl/cxl_component.h"
+#include "hw/pci/pci_device.h"
 #include "hw/register.h"
 
 /*
@@ -237,11 +239,15 @@ struct CXLType3Dev {
     /* Properties */
     HostMemoryBackend *hostmem;
     HostMemoryBackend *lsa;
+    uint64_t sn;
 
     /* State */
     AddressSpace hostmem_as;
     CXLComponentState cxl_cstate;
     CXLDeviceState cxl_dstate;
+
+    /* DOE */
+    DOECap doe_cdat;
 };
 
 #define TYPE_CXL_TYPE3 "cxl-type3"

@@ -41,6 +41,7 @@
 #include "sysemu/sysemu.h"
 #include "sysemu/qtest.h"
 #include "sysemu/runstate.h"
+#include "sysemu/reset.h"
 
 #include <libfdt.h>
 #include "qom/object.h"
@@ -322,7 +323,7 @@ static void boston_register_types(void)
 }
 type_init(boston_register_types)
 
-static void gen_firmware(uint32_t *p, hwaddr kernel_entry, hwaddr fdt_addr)
+static void gen_firmware(void *p, hwaddr kernel_entry, hwaddr fdt_addr)
 {
     uint64_t regaddr;
 
@@ -351,7 +352,10 @@ static void gen_firmware(uint32_t *p, hwaddr kernel_entry, hwaddr fdt_addr)
      * a2/$6 = 0
      * a3/$7 = 0
      */
-    bl_gen_jump_kernel(&p, 0, (int32_t)-2, fdt_addr, 0, 0, kernel_entry);
+    bl_gen_jump_kernel(&p,
+                       true, 0, true, (int32_t)-2,
+                       true, fdt_addr, true, 0, true, 0,
+                       kernel_entry);
 }
 
 static const void *boston_fdt_filter(void *opaque, const void *fdt_orig,
@@ -424,7 +428,7 @@ static inline XilinxPCIEHost *
 xilinx_pcie_init(MemoryRegion *sys_mem, uint32_t bus_nr,
                  hwaddr cfg_base, uint64_t cfg_size,
                  hwaddr mmio_base, uint64_t mmio_size,
-                 qemu_irq irq, bool link_up)
+                 qemu_irq irq)
 {
     DeviceState *dev;
     MemoryRegion *cfg, *mmio;
@@ -436,7 +440,6 @@ xilinx_pcie_init(MemoryRegion *sys_mem, uint32_t bus_nr,
     qdev_prop_set_uint64(dev, "cfg_size", cfg_size);
     qdev_prop_set_uint64(dev, "mmio_base", mmio_base);
     qdev_prop_set_uint64(dev, "mmio_size", mmio_size);
-    qdev_prop_set_bit(dev, "link_up", link_up);
 
     sysbus_realize_and_unref(SYS_BUS_DEVICE(dev), &error_fatal);
 
@@ -512,7 +515,7 @@ static const void *create_fdt(BostonState *s,
 {
     void *fdt;
     int cpu;
-    MachineState *mc = s->mach;
+    MachineState *ms = s->mach;
     uint32_t platreg_ph, gic_ph, clk_ph;
     char *name, *gic_name, *platreg_name, *stdout_name;
     static const char * const syscon_compat[2] = {
@@ -539,7 +542,7 @@ static const void *create_fdt(BostonState *s,
     qemu_fdt_setprop_cell(fdt, "/cpus", "#size-cells", 0x0);
     qemu_fdt_setprop_cell(fdt, "/cpus", "#address-cells", 0x1);
 
-    for (cpu = 0; cpu < mc->smp.cpus; cpu++) {
+    for (cpu = 0; cpu < ms->smp.cpus; cpu++) {
         name = g_strdup_printf("/cpus/cpu@%d", cpu);
         qemu_fdt_add_subnode(fdt, name);
         qemu_fdt_setprop_string(fdt, name, "compatible", "img,mips");
@@ -729,21 +732,21 @@ static void boston_mach_init(MachineState *machine)
                      boston_memmap[BOSTON_PCIE0].size,
                      boston_memmap[BOSTON_PCIE0_MMIO].base,
                      boston_memmap[BOSTON_PCIE0_MMIO].size,
-                     get_cps_irq(&s->cps, 2), false);
+                     get_cps_irq(&s->cps, 2));
 
     xilinx_pcie_init(sys_mem, 1,
                      boston_memmap[BOSTON_PCIE1].base,
                      boston_memmap[BOSTON_PCIE1].size,
                      boston_memmap[BOSTON_PCIE1_MMIO].base,
                      boston_memmap[BOSTON_PCIE1_MMIO].size,
-                     get_cps_irq(&s->cps, 1), false);
+                     get_cps_irq(&s->cps, 1));
 
     pcie2 = xilinx_pcie_init(sys_mem, 2,
                              boston_memmap[BOSTON_PCIE2].base,
                              boston_memmap[BOSTON_PCIE2].size,
                              boston_memmap[BOSTON_PCIE2_MMIO].base,
                              boston_memmap[BOSTON_PCIE2_MMIO].size,
-                             get_cps_irq(&s->cps, 0), true);
+                             get_cps_irq(&s->cps, 0));
 
     platreg = g_new(MemoryRegion, 1);
     memory_region_init_io(platreg, NULL, &boston_platreg_ops, s,
@@ -810,6 +813,8 @@ static void boston_mach_init(MachineState *machine)
             /* Calculate real fdt size after filter */
             dt_size = fdt_totalsize(dtb_load_data);
             rom_add_blob_fixed("dtb", dtb_load_data, dt_size, dtb_paddr);
+            qemu_register_reset_nosnapshotload(qemu_fdt_randomize_seeds,
+                                rom_ptr(dtb_paddr, dt_size));
         } else {
             /* Try to load file as FIT */
             fit_err = load_fit(&boston_fit_loader, machine->kernel_filename, s);

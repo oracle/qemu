@@ -1,5 +1,6 @@
 softmmu_ss.add([spice_headers, files('audio.c')])
 softmmu_ss.add(files(
+  'audio-hmp-cmds.c',
   'audio_legacy.c',
   'mixeng.c',
   'noaudio.c',
@@ -17,6 +18,7 @@ foreach m : [
   ['pa', pulse, files('paaudio.c')],
   ['sdl', sdl, files('sdlaudio.c')],
   ['jack', jack, files('jackaudio.c')],
+  ['sndio', sndio, files('sndioaudio.c')],
   ['spice', spice, files('spiceaudio.c')]
 ]
   if m[1].found()

@@ -254,7 +254,7 @@ static CachedL2Table *qed_new_l2_table(BDRVQEDState *s)
     return l2_table;
 }
 
-static bool qed_plug_allocating_write_reqs(BDRVQEDState *s)
+static bool coroutine_fn qed_plug_allocating_write_reqs(BDRVQEDState *s)
 {
     qemu_co_mutex_lock(&s->table_lock);
 
@@ -262,7 +262,7 @@ static bool qed_plug_allocating_write_reqs(BDRVQEDState *s)
     assert(!s->allocating_write_reqs_plugged);
     if (s->allocating_acb != NULL) {
         /* Another allocating write came concurrently.  This cannot happen
-         * from bdrv_qed_co_drain_begin, but it can happen when the timer runs.
+         * from bdrv_qed_drain_begin, but it can happen when the timer runs.
          */
         qemu_co_mutex_unlock(&s->table_lock);
         return false;
@@ -273,7 +273,7 @@ static bool qed_plug_allocating_write_reqs(BDRVQEDState *s)
     return true;
 }
 
-static void qed_unplug_allocating_write_reqs(BDRVQEDState *s)
+static void coroutine_fn qed_unplug_allocating_write_reqs(BDRVQEDState *s)
 {
     qemu_co_mutex_lock(&s->table_lock);
     assert(s->allocating_write_reqs_plugged);
@@ -282,9 +282,8 @@ static void qed_unplug_allocating_write_reqs(BDRVQEDState *s)
     qemu_co_mutex_unlock(&s->table_lock);
 }
 
-static void coroutine_fn qed_need_check_timer_entry(void *opaque)
+static void coroutine_fn qed_need_check_timer(BDRVQEDState *s)
 {
-    BDRVQEDState *s = opaque;
     int ret;
 
     trace_qed_need_check_timer_cb(s);
@@ -310,9 +309,20 @@ static void coroutine_fn qed_need_check_timer_entry(void *opaque)
     (void) ret;
 }
 
+static void coroutine_fn qed_need_check_timer_entry(void *opaque)
+{
+    BDRVQEDState *s = opaque;
+
+    qed_need_check_timer(opaque);
+    bdrv_dec_in_flight(s->bs);
+}
+
 static void qed_need_check_timer_cb(void *opaque)
 {
+    BDRVQEDState *s = opaque;
     Coroutine *co = qemu_coroutine_create(qed_need_check_timer_entry, opaque);
+
+    bdrv_inc_in_flight(s->bs);
     qemu_coroutine_enter(co);
 }
 
@@ -355,7 +365,7 @@ static void bdrv_qed_attach_aio_context(BlockDriverState *bs,
     }
 }
 
-static void coroutine_fn bdrv_qed_co_drain_begin(BlockDriverState *bs)
+static void bdrv_qed_drain_begin(BlockDriverState *bs)
 {
     BDRVQEDState *s = bs->opaque;
 
@@ -363,8 +373,12 @@ static void coroutine_fn bdrv_qed_co_drain_begin(BlockDriverState *bs)
      * header is flushed.
      */
     if (s->need_check_timer && timer_pending(s->need_check_timer)) {
+        Coroutine *co;
+
         qed_cancel_need_check_timer(s);
-        qed_need_check_timer_entry(s);
+        co = qemu_coroutine_create(qed_need_check_timer_entry, s);
+        bdrv_inc_in_flight(bs);
+        aio_co_enter(bdrv_get_aio_context(bs), co);
     }
 }
 
@@ -387,7 +401,7 @@ static int coroutine_fn bdrv_qed_do_open(BlockDriverState *bs, QDict *options,
     int64_t file_size;
     int ret;
 
-    ret = bdrv_pread(bs->file, 0, sizeof(le_header), &le_header, 0);
+    ret = bdrv_co_pread(bs->file, 0, sizeof(le_header), &le_header, 0);
     if (ret < 0) {
         error_setg(errp, "Failed to read QED header");
         return ret;
@@ -410,7 +424,7 @@ static int coroutine_fn bdrv_qed_do_open(BlockDriverState *bs, QDict *options,
     }
 
     /* Round down file size to the last cluster */
-    file_size = bdrv_getlength(bs->file->bs);
+    file_size = bdrv_co_getlength(bs->file->bs);
     if (file_size < 0) {
         error_setg(errp, "Failed to get file length");
         return file_size;
@@ -445,6 +459,8 @@ static int coroutine_fn bdrv_qed_do_open(BlockDriverState *bs, QDict *options,
     }
 
     if ((s->header.features & QED_F_BACKING_FILE)) {
+        g_autofree char *backing_file_str = NULL;
+
         if ((uint64_t)s->header.backing_filename_offset +
             s->header.backing_filename_size >
             s->header.cluster_size * s->header.header_size) {
@@ -452,16 +468,21 @@ static int coroutine_fn bdrv_qed_do_open(BlockDriverState *bs, QDict *options,
             return -EINVAL;
         }
 
+        backing_file_str = g_malloc(sizeof(bs->backing_file));
         ret = qed_read_string(bs->file, s->header.backing_filename_offset,
                               s->header.backing_filename_size,
-                              bs->auto_backing_file,
-                              sizeof(bs->auto_backing_file));
+                              backing_file_str, sizeof(bs->backing_file));
         if (ret < 0) {
             error_setg(errp, "Failed to read backing filename");
             return ret;
         }
-        pstrcpy(bs->backing_file, sizeof(bs->backing_file),
-                bs->auto_backing_file);
+
+        if (!g_str_equal(backing_file_str, bs->backing_file)) {
+            pstrcpy(bs->backing_file, sizeof(bs->backing_file),
+                    backing_file_str);
+            pstrcpy(bs->auto_backing_file, sizeof(bs->auto_backing_file),
+                    backing_file_str);
+        }
 
         if (s->header.features & QED_F_BACKING_FORMAT_NO_PROBE) {
             pstrcpy(bs->backing_format, sizeof(bs->backing_format), "raw");
@@ -485,7 +506,7 @@ static int coroutine_fn bdrv_qed_do_open(BlockDriverState *bs, QDict *options,
         }
 
         /* From here on only known autoclear feature bits are valid */
-        bdrv_flush(bs->file->bs);
+        bdrv_co_flush(bs->file->bs);
     }
 
     s->l1_table = qed_alloc_table(s);
@@ -554,11 +575,11 @@ static int bdrv_qed_open(BlockDriverState *bs, QDict *options, int flags,
         .errp = errp,
         .ret = -EINPROGRESS
     };
+    int ret;
 
-    bs->file = bdrv_open_child(NULL, options, "file", bs, &child_of_bds,
-                               BDRV_CHILD_IMAGE, false, errp);
-    if (!bs->file) {
-        return -EINVAL;
+    ret = bdrv_open_file_child(NULL, options, "file", bs, errp);
+    if (ret < 0) {
+        return ret;
     }
 
     bdrv_qed_init_state(bs);
@@ -686,12 +707,12 @@ static int coroutine_fn bdrv_qed_co_create(BlockdevCreateOptions *opts,
      * The QED format associates file length with allocation status,
      * so a new file (which is empty) must have a length of 0.
      */
-    ret = blk_truncate(blk, 0, true, PREALLOC_MODE_OFF, 0, errp);
+    ret = blk_co_truncate(blk, 0, true, PREALLOC_MODE_OFF, 0, errp);
     if (ret < 0) {
         goto out;
     }
 
-    if (qed_opts->has_backing_file) {
+    if (qed_opts->backing_file) {
         header.features |= QED_F_BACKING_FILE;
         header.backing_filename_offset = sizeof(le_header);
         header.backing_filename_size = strlen(qed_opts->backing_file);
@@ -705,18 +726,18 @@ static int coroutine_fn bdrv_qed_co_create(BlockdevCreateOptions *opts,
     }
 
     qed_header_cpu_to_le(&header, &le_header);
-    ret = blk_pwrite(blk, 0, sizeof(le_header), &le_header, 0);
+    ret = blk_co_pwrite(blk, 0, sizeof(le_header), &le_header, 0);
     if (ret < 0) {
         goto out;
     }
-    ret = blk_pwrite(blk, sizeof(le_header), header.backing_filename_size,
+    ret = blk_co_pwrite(blk, sizeof(le_header), header.backing_filename_size,
                      qed_opts->backing_file, 0);
     if (ret < 0) {
         goto out;
     }
 
     l1_table = g_malloc0(l1_size);
-    ret = blk_pwrite(blk, header.l1_table_offset, l1_size, l1_table, 0);
+    ret = blk_co_pwrite(blk, header.l1_table_offset, l1_size, l1_table, 0);
     if (ret < 0) {
         goto out;
     }
@@ -757,7 +778,7 @@ static int coroutine_fn bdrv_qed_co_create_opts(BlockDriver *drv,
     }
 
     /* Create and open the file (protocol layer) */
-    ret = bdrv_create_file(filename, opts, errp);
+    ret = bdrv_co_create_file(filename, opts, errp);
     if (ret < 0) {
         goto fail;
     }
@@ -1388,7 +1409,6 @@ static int coroutine_fn bdrv_qed_co_writev(BlockDriverState *bs,
                                            int64_t sector_num, int nb_sectors,
                                            QEMUIOVector *qiov, int flags)
 {
-    assert(!flags);
     return qed_co_request(bs, sector_num, qiov, nb_sectors, QED_AIOCB_WRITE);
 }
 
@@ -1460,13 +1480,14 @@ static int coroutine_fn bdrv_qed_co_truncate(BlockDriverState *bs,
     return ret;
 }
 
-static int64_t bdrv_qed_getlength(BlockDriverState *bs)
+static int64_t coroutine_fn bdrv_qed_co_getlength(BlockDriverState *bs)
 {
     BDRVQEDState *s = bs->opaque;
     return s->header.image_size;
 }
 
-static int bdrv_qed_get_info(BlockDriverState *bs, BlockDriverInfo *bdi)
+static int coroutine_fn
+bdrv_qed_co_get_info(BlockDriverState *bs, BlockDriverInfo *bdi)
 {
     BDRVQEDState *s = bs->opaque;
 
@@ -1633,15 +1654,15 @@ static BlockDriver bdrv_qed = {
     .bdrv_co_writev           = bdrv_qed_co_writev,
     .bdrv_co_pwrite_zeroes    = bdrv_qed_co_pwrite_zeroes,
     .bdrv_co_truncate         = bdrv_qed_co_truncate,
-    .bdrv_getlength           = bdrv_qed_getlength,
-    .bdrv_get_info            = bdrv_qed_get_info,
+    .bdrv_co_getlength        = bdrv_qed_co_getlength,
+    .bdrv_co_get_info         = bdrv_qed_co_get_info,
     .bdrv_refresh_limits      = bdrv_qed_refresh_limits,
     .bdrv_change_backing_file = bdrv_qed_change_backing_file,
     .bdrv_co_invalidate_cache = bdrv_qed_co_invalidate_cache,
     .bdrv_co_check            = bdrv_qed_co_check,
     .bdrv_detach_aio_context  = bdrv_qed_detach_aio_context,
     .bdrv_attach_aio_context  = bdrv_qed_attach_aio_context,
-    .bdrv_co_drain_begin      = bdrv_qed_co_drain_begin,
+    .bdrv_drain_begin         = bdrv_qed_drain_begin,
 };
 
 static void bdrv_qed_init(void)

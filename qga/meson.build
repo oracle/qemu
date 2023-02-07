@@ -72,6 +72,12 @@ qga_ss.add(when: 'CONFIG_POSIX', if_true: files(
   'commands-posix.c',
   'commands-posix-ssh.c',
 ))
+qga_ss.add(when: 'CONFIG_LINUX', if_true: files(
+  'commands-linux.c',
+))
+qga_ss.add(when: 'CONFIG_BSD', if_true: files(
+  'commands-bsd.c',
+))
 qga_ss.add(when: 'CONFIG_WIN32', if_true: files(
   'channel-win32.c',
   'commands-win32.c',
@@ -92,7 +98,24 @@ if targetos == 'windows'
   endif
 endif
 
-qga = executable('qemu-ga', qga_ss.sources(),
+qga_objs = []
+if targetos == 'windows'
+  windmc = find_program('windmc', required: true)
+  windres = find_program('windres', required: true)
+
+  msgrc = custom_target('messages-win32.rc',
+                        input: 'messages-win32.mc',
+                        output: ['messages-win32.rc', 'MSG00409.bin', 'messages-win32.h'],
+                        command: [windmc, '-h', '@OUTDIR@', '-r', '@OUTDIR@', '@INPUT@'])
+  msgobj = custom_target('messages-win32.o',
+                         input: msgrc[0],
+                         output: 'messages-win32.o',
+                         command: [windres, '-I', '@OUTDIR@', '-o', '@OUTPUT@', '@INPUT@'])
+
+  qga_objs = [msgobj]
+endif
+
+qga = executable('qemu-ga', qga_ss.sources() + qga_objs,
                  link_args: qga_libs,
                  dependencies: [qemuutil, libudev],
                  install: true)
@@ -117,6 +140,11 @@ if targetos == 'windows'
       qemu_ga_msi_vss = ['-D', 'InstallVss']
       deps += qga_vss
     endif
+    if glib.version() < '2.73.2'
+      libpcre = 'libpcre1'
+    else
+      libpcre = 'libpcre2'
+    endif
     qga_msi = custom_target('QGA MSI',
                             input: files('installer/qemu-ga.wxs'),
                             output: 'qemu-ga-@0@.msi'.format(host_arch),
@@ -130,6 +158,7 @@ if targetos == 'windows'
                               '-D', 'QEMU_GA_VERSION=' + config_host['QEMU_GA_VERSION'],
                               '-D', 'QEMU_GA_MANUFACTURER=' + config_host['QEMU_GA_MANUFACTURER'],
                               '-D', 'QEMU_GA_DISTRO=' + config_host['QEMU_GA_DISTRO'],
+                              '-D', 'LIBPCRE=' + libpcre,
                             ])
     all_qga += [qga_msi]
     alias_target('msi', qga_msi)
@@ -138,7 +167,7 @@ else
   if get_option('guest_agent_msi').enabled()
     error('MSI guest agent package is available only for MinGW Windows cross-compilation')
   endif
-  install_subdir('run', install_dir: get_option('localstatedir'))
+  install_emptydir(get_option('localstatedir') / 'run')
 endif
 
 alias_target('qemu-ga', all_qga)

@@ -23,6 +23,7 @@
 
 #include "qemu/cutils.h"
 #include "qemu/cacheflush.h"
+#include "qemu/hbitmap.h"
 #include "qemu/madvise.h"
 
 #ifdef CONFIG_TCG
@@ -1748,6 +1749,11 @@ void qemu_ram_unset_migratable(RAMBlock *rb)
     rb->flags &= ~RAM_MIGRATABLE;
 }
 
+int qemu_ram_get_fd(RAMBlock *rb)
+{
+    return rb->fd;
+}
+
 /* Called with iothread lock held.  */
 void qemu_ram_set_idstr(RAMBlock *new_block, const char *name, DeviceState *dev)
 {
@@ -2470,7 +2476,7 @@ static MemTxResult subpage_read(void *opaque, hwaddr addr, uint64_t *data,
     MemTxResult res;
 
 #if defined(DEBUG_SUBPAGE)
-    printf("%s: subpage %p len %u addr " TARGET_FMT_plx "\n", __func__,
+    printf("%s: subpage %p len %u addr " HWADDR_FMT_plx "\n", __func__,
            subpage, len, addr);
 #endif
     res = flatview_read(subpage->fv, addr + subpage->base, attrs, buf, len);
@@ -2488,7 +2494,7 @@ static MemTxResult subpage_write(void *opaque, hwaddr addr,
     uint8_t buf[8];
 
 #if defined(DEBUG_SUBPAGE)
-    printf("%s: subpage %p len %u addr " TARGET_FMT_plx
+    printf("%s: subpage %p len %u addr " HWADDR_FMT_plx
            " value %"PRIx64"\n",
            __func__, subpage, len, addr, value);
 #endif
@@ -2502,7 +2508,7 @@ static bool subpage_accepts(void *opaque, hwaddr addr,
 {
     subpage_t *subpage = opaque;
 #if defined(DEBUG_SUBPAGE)
-    printf("%s: subpage %p %c len %u addr " TARGET_FMT_plx "\n",
+    printf("%s: subpage %p %c len %u addr " HWADDR_FMT_plx "\n",
            __func__, subpage, is_write ? 'w' : 'r', len, addr);
 #endif
 
@@ -2553,7 +2559,7 @@ static subpage_t *subpage_init(FlatView *fv, hwaddr base)
                           NULL, TARGET_PAGE_SIZE);
     mmio->iomem.subpage = true;
 #if defined(DEBUG_SUBPAGE)
-    printf("%s: %p base " TARGET_FMT_plx " len %08x\n", __func__,
+    printf("%s: %p base " HWADDR_FMT_plx " len %08x\n", __func__,
            mmio, base, TARGET_PAGE_SIZE);
 #endif
 
@@ -3231,7 +3237,6 @@ void *address_space_map(AddressSpace *as,
     hwaddr len = *plen;
     hwaddr l, xlat;
     MemoryRegion *mr;
-    void *ptr;
     FlatView *fv;
 
     if (len == 0) {
@@ -3270,9 +3275,7 @@ void *address_space_map(AddressSpace *as,
     *plen = flatview_extend_translation(fv, addr, len, mr, xlat,
                                         l, is_write, attrs);
     fuzz_dma_read_cb(addr, *plen, mr);
-    ptr = qemu_ram_ptr_length(mr->ram_block, xlat, plen, true);
-
-    return ptr;
+    return qemu_ram_ptr_length(mr->ram_block, xlat, plen, true);
 }
 
 /* Unmaps a memory region previously mapped by address_space_map().
@@ -3540,15 +3543,13 @@ bool cpu_physical_memory_is_io(hwaddr phys_addr)
 {
     MemoryRegion*mr;
     hwaddr l = 1;
-    bool res;
 
     RCU_READ_LOCK_GUARD();
     mr = address_space_translate(&address_space_memory,
                                  phys_addr, &phys_addr, &l, false,
                                  MEMTXATTRS_UNSPECIFIED);
 
-    res = !(memory_region_is_ram(mr) || memory_region_is_romd(mr));
-    return res;
+    return !(memory_region_is_ram(mr) || memory_region_is_romd(mr));
 }
 
 int qemu_ram_foreach_block(RAMBlockIterFunc func, void *opaque)
@@ -3703,11 +3704,11 @@ void mtree_print_dispatch(AddressSpaceDispatch *d, MemoryRegion *root)
         const char *names[] = { " [unassigned]", " [not dirty]",
                                 " [ROM]", " [watch]" };
 
-        qemu_printf("      #%d @" TARGET_FMT_plx ".." TARGET_FMT_plx
+        qemu_printf("      #%d @" HWADDR_FMT_plx ".." HWADDR_FMT_plx
                     " %s%s%s%s%s",
             i,
             s->offset_within_address_space,
-            s->offset_within_address_space + MR_SIZE(s->mr->size),
+            s->offset_within_address_space + MR_SIZE(s->size),
             s->mr->name ? s->mr->name : "(noname)",
             i < ARRAY_SIZE(names) ? names[i] : "",
             s->mr == root ? " [ROOT]" : "",

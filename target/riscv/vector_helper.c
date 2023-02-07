@@ -211,7 +211,7 @@ static void vext_set_elems_1s(void *base, uint32_t is_agnostic, uint32_t cnt,
         return;
     }
     if (tot - cnt == 0) {
-        return ;
+        return;
     }
     memset(base + cnt, -1, tot - cnt);
 }
@@ -2791,31 +2791,25 @@ static inline uint16_t
 vssrl16(CPURISCVState *env, int vxrm, uint16_t a, uint16_t b)
 {
     uint8_t round, shift = b & 0xf;
-    uint16_t res;
 
     round = get_round(vxrm, a, shift);
-    res   = (a >> shift)  + round;
-    return res;
+    return (a >> shift) + round;
 }
 static inline uint32_t
 vssrl32(CPURISCVState *env, int vxrm, uint32_t a, uint32_t b)
 {
     uint8_t round, shift = b & 0x1f;
-    uint32_t res;
 
     round = get_round(vxrm, a, shift);
-    res   = (a >> shift)  + round;
-    return res;
+    return (a >> shift) + round;
 }
 static inline uint64_t
 vssrl64(CPURISCVState *env, int vxrm, uint64_t a, uint64_t b)
 {
     uint8_t round, shift = b & 0x3f;
-    uint64_t res;
 
     round = get_round(vxrm, a, shift);
-    res   = (a >> shift)  + round;
-    return res;
+    return (a >> shift) + round;
 }
 RVVCALL(OPIVV2_RM, vssrl_vv_b, OP_UUU_B, H1, H1, H1, vssrl8)
 RVVCALL(OPIVV2_RM, vssrl_vv_h, OP_UUU_H, H2, H2, H2, vssrl16)
@@ -2839,41 +2833,33 @@ static inline int8_t
 vssra8(CPURISCVState *env, int vxrm, int8_t a, int8_t b)
 {
     uint8_t round, shift = b & 0x7;
-    int8_t res;
 
     round = get_round(vxrm, a, shift);
-    res   = (a >> shift)  + round;
-    return res;
+    return (a >> shift) + round;
 }
 static inline int16_t
 vssra16(CPURISCVState *env, int vxrm, int16_t a, int16_t b)
 {
     uint8_t round, shift = b & 0xf;
-    int16_t res;
 
     round = get_round(vxrm, a, shift);
-    res   = (a >> shift)  + round;
-    return res;
+    return (a >> shift) + round;
 }
 static inline int32_t
 vssra32(CPURISCVState *env, int vxrm, int32_t a, int32_t b)
 {
     uint8_t round, shift = b & 0x1f;
-    int32_t res;
 
     round = get_round(vxrm, a, shift);
-    res   = (a >> shift)  + round;
-    return res;
+    return (a >> shift) + round;
 }
 static inline int64_t
 vssra64(CPURISCVState *env, int vxrm, int64_t a, int64_t b)
 {
     uint8_t round, shift = b & 0x3f;
-    int64_t res;
 
     round = get_round(vxrm, a, shift);
-    res   = (a >> shift)  + round;
-    return res;
+    return (a >> shift) + round;
 }
 
 RVVCALL(OPIVV2_RM, vssra_vv_b, OP_SSS_B, H1, H1, H1, vssra8)
@@ -4714,9 +4700,14 @@ void HELPER(NAME)(void *vd, void *v0, void *vs1,           \
 }
 
 /* Unordered sum */
-GEN_VEXT_FRED(vfredsum_vs_h, uint16_t, uint16_t, H2, H2, float16_add)
-GEN_VEXT_FRED(vfredsum_vs_w, uint32_t, uint32_t, H4, H4, float32_add)
-GEN_VEXT_FRED(vfredsum_vs_d, uint64_t, uint64_t, H8, H8, float64_add)
+GEN_VEXT_FRED(vfredusum_vs_h, uint16_t, uint16_t, H2, H2, float16_add)
+GEN_VEXT_FRED(vfredusum_vs_w, uint32_t, uint32_t, H4, H4, float32_add)
+GEN_VEXT_FRED(vfredusum_vs_d, uint64_t, uint64_t, H8, H8, float64_add)
+
+/* Ordered sum */
+GEN_VEXT_FRED(vfredosum_vs_h, uint16_t, uint16_t, H2, H2, float16_add)
+GEN_VEXT_FRED(vfredosum_vs_w, uint32_t, uint32_t, H4, H4, float32_add)
+GEN_VEXT_FRED(vfredosum_vs_d, uint64_t, uint64_t, H8, H8, float64_add)
 
 /* Maximum value */
 GEN_VEXT_FRED(vfredmax_vs_h, uint16_t, uint16_t, H2, H2, float16_maximum_number)
@@ -4728,57 +4719,23 @@ GEN_VEXT_FRED(vfredmin_vs_h, uint16_t, uint16_t, H2, H2, float16_minimum_number)
 GEN_VEXT_FRED(vfredmin_vs_w, uint32_t, uint32_t, H4, H4, float32_minimum_number)
 GEN_VEXT_FRED(vfredmin_vs_d, uint64_t, uint64_t, H8, H8, float64_minimum_number)
 
+/* Vector Widening Floating-Point Add Instructions */
+static uint32_t fwadd16(uint32_t a, uint16_t b, float_status *s)
+{
+    return float32_add(a, float16_to_float32(b, true, s), s);
+}
+
+static uint64_t fwadd32(uint64_t a, uint32_t b, float_status *s)
+{
+    return float64_add(a, float32_to_float64(b, s), s);
+}
+
 /* Vector Widening Floating-Point Reduction Instructions */
-/* Unordered reduce 2*SEW = 2*SEW + sum(promote(SEW)) */
-void HELPER(vfwredsum_vs_h)(void *vd, void *v0, void *vs1,
-                            void *vs2, CPURISCVState *env, uint32_t desc)
-{
-    uint32_t vm = vext_vm(desc);
-    uint32_t vl = env->vl;
-    uint32_t esz = sizeof(uint32_t);
-    uint32_t vlenb = simd_maxsz(desc);
-    uint32_t vta = vext_vta(desc);
-    uint32_t i;
-    uint32_t s1 =  *((uint32_t *)vs1 + H4(0));
-
-    for (i = env->vstart; i < vl; i++) {
-        uint16_t s2 = *((uint16_t *)vs2 + H2(i));
-        if (!vm && !vext_elem_mask(v0, i)) {
-            continue;
-        }
-        s1 = float32_add(s1, float16_to_float32(s2, true, &env->fp_status),
-                         &env->fp_status);
-    }
-    *((uint32_t *)vd + H4(0)) = s1;
-    env->vstart = 0;
-    /* set tail elements to 1s */
-    vext_set_elems_1s(vd, vta, esz, vlenb);
-}
-
-void HELPER(vfwredsum_vs_w)(void *vd, void *v0, void *vs1,
-                            void *vs2, CPURISCVState *env, uint32_t desc)
-{
-    uint32_t vm = vext_vm(desc);
-    uint32_t vl = env->vl;
-    uint32_t esz = sizeof(uint64_t);
-    uint32_t vlenb = simd_maxsz(desc);
-    uint32_t vta = vext_vta(desc);
-    uint32_t i;
-    uint64_t s1 =  *((uint64_t *)vs1);
-
-    for (i = env->vstart; i < vl; i++) {
-        uint32_t s2 = *((uint32_t *)vs2 + H4(i));
-        if (!vm && !vext_elem_mask(v0, i)) {
-            continue;
-        }
-        s1 = float64_add(s1, float32_to_float64(s2, &env->fp_status),
-                         &env->fp_status);
-    }
-    *((uint64_t *)vd) = s1;
-    env->vstart = 0;
-    /* set tail elements to 1s */
-    vext_set_elems_1s(vd, vta, esz, vlenb);
-}
+/* Ordered/unordered reduce 2*SEW = 2*SEW + sum(promote(SEW)) */
+GEN_VEXT_FRED(vfwredusum_vs_h, uint32_t, uint16_t, H4, H2, fwadd16)
+GEN_VEXT_FRED(vfwredusum_vs_w, uint64_t, uint32_t, H8, H4, fwadd32)
+GEN_VEXT_FRED(vfwredosum_vs_h, uint32_t, uint16_t, H4, H2, fwadd16)
+GEN_VEXT_FRED(vfwredosum_vs_w, uint64_t, uint32_t, H8, H4, fwadd32)
 
 /*
  *** Vector Mask Operations
