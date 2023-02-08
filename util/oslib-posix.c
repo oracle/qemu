@@ -94,7 +94,7 @@ static MemsetContext context = {
 };
 struct sigaction sigbus_oldact;
 static QemuMutex sigbus_mutex;
-
+static bool prealloc_init;
 static QemuMutex page_mutex;
 static QemuCond page_cond;
 
@@ -495,6 +495,14 @@ static int wait_mem_prealloc(void)
 {
     int ret;
 
+    /*
+     * Return if parallel memory prealloc is in process, or if memory prealloc
+     * isn't in use.
+     */
+    if (!prealloc_init || !page_cond.initialized) {
+        return 0;
+    }
+
     qemu_mutex_lock(&page_mutex);
     context.all_threads_created = true;
     qemu_cond_broadcast(&page_cond);
@@ -560,21 +568,23 @@ void qemu_prealloc_mem(int fd, char *area, size_t sz, int max_threads,
         }
 
         qemu_mutex_lock(&sigbus_mutex);
-        memset(&act, 0, sizeof(act));
+        if (!sigbus_oldact.sa_handler) {
+            memset(&act, 0, sizeof(act));
 #ifdef CONFIG_LINUX
-        act.sa_sigaction = &sigbus_handler;
-        act.sa_flags = SA_SIGINFO;
+            act.sa_sigaction = &sigbus_handler;
+            act.sa_flags = SA_SIGINFO;
 #else /* CONFIG_LINUX */
-        act.sa_handler = &sigbus_handler;
-        act.sa_flags = 0;
+            act.sa_handler = &sigbus_handler;
+            act.sa_flags = 0;
 #endif /* CONFIG_LINUX */
 
-        ret = sigaction(SIGBUS, &act, &sigbus_oldact);
-        if (ret) {
-            qemu_mutex_unlock(&sigbus_mutex);
-            error_setg_errno(errp, errno,
-                "qemu_prealloc_mem: failed to install signal handler");
-            return;
+            ret = sigaction(SIGBUS, &act, &sigbus_oldact);
+            if (ret) {
+                qemu_mutex_unlock(&sigbus_mutex);
+                error_setg_errno(errp, errno,
+                                 "qemu_prealloc_mem: failed to install signal handler");
+                return;
+            }
         }
     }
 
@@ -593,6 +603,21 @@ void qemu_prealloc_mem(int fd, char *area, size_t sz, int max_threads,
                              "qemu_prealloc_mem: memory preallocation failed");
         }
         qemu_mutex_unlock(&sigbus_mutex);
+    }
+}
+
+void wait_mem_prealloc_init(void)
+{
+    /*
+     * Set prealloc_init true to make os_mem_prealloc() wait for the
+     * initialization to complete.
+     */
+    prealloc_init = true;
+
+    /* wait for any outstanding init to complete */
+    if (wait_mem_prealloc()) {
+        perror("wait_mem_prealloc_init: memory preallocation failed");
+        exit(1);
     }
 }
 

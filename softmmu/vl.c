@@ -1937,6 +1937,8 @@ static void qemu_create_late_backends(void)
 
     object_option_foreach_add(object_create_late);
 
+    wait_mem_prealloc_init();
+
     if (tpm_init() < 0) {
         exit(1);
     }

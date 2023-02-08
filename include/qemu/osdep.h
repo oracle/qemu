@@ -595,6 +595,12 @@ void qemu_prealloc_mem(int fd, char *area, size_t sz, int max_threads,
                        ThreadContext *tc, Error **errp);
 
 /**
+ * Wait for any outstanding memory prealloc initialization
+ * to complete.
+ */
+void wait_mem_prealloc_init(void);
+
+/**
  * qemu_get_pid_name:
  * @pid: pid of a process
  *

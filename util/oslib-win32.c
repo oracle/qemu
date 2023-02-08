@@ -280,6 +280,11 @@ void qemu_prealloc_mem(int fd, char *area, size_t sz, int max_threads,
     }
 }
 
+void wait_mem_prealloc_init(void)
+{
+    /* parallel init isn't supported */
+}
+
 char *qemu_get_pid_name(pid_t pid)
 {
     /* XXX Implement me */
