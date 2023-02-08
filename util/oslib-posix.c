@@ -72,7 +72,7 @@ struct MemsetThread;
 typedef struct MemsetContext {
     bool all_threads_created;
     bool any_thread_failed;
-    struct MemsetThread *threads;
+    QLIST_HEAD(, MemsetThread) memset_threads;
     int num_threads;
 } MemsetContext;
 
@@ -83,11 +83,15 @@ struct MemsetThread {
     QemuThread pgthread;
     sigjmp_buf env;
     MemsetContext *context;
+    QLIST_ENTRY(MemsetThread) entries;
 };
 typedef struct MemsetThread MemsetThread;
 
 /* used by sigbus_handler() */
 static MemsetContext *sigbus_memset_context;
+static MemsetContext context = {
+    .memset_threads = QLIST_HEAD_INITIALIZER(&MemsetThread),
+};
 struct sigaction sigbus_oldact;
 static QemuMutex sigbus_mutex;
 
@@ -300,14 +304,14 @@ static void sigbus_handler(int signal, siginfo_t *siginfo, void *ctx)
 static void sigbus_handler(int signal)
 #endif /* CONFIG_LINUX */
 {
-    int i;
-
     if (sigbus_memset_context) {
-        for (i = 0; i < sigbus_memset_context->num_threads; i++) {
-            MemsetThread *thread = &sigbus_memset_context->threads[i];
+        MemsetThread *memset_thread, *next;
 
-            if (qemu_thread_is_self(&thread->pgthread)) {
-                siglongjmp(thread->env, 1);
+        QLIST_FOREACH_SAFE(memset_thread,
+                           &sigbus_memset_context->memset_threads,
+                           entries, next) {
+            if (qemu_thread_is_self(&memset_thread->pgthread)) {
+                siglongjmp(memset_thread->env, 1);
             }
         }
     }
@@ -423,13 +427,14 @@ static int touch_all_pages(char *area, size_t hpagesize, size_t numpages,
                            bool use_madv_populate_write)
 {
     static gsize initialized = 0;
-    MemsetContext context = {
-        .num_threads = get_memset_num_threads(hpagesize, numpages, max_threads),
-    };
+    context.num_threads =
+        get_memset_num_threads(hpagesize, numpages, max_threads);
+
     size_t numpages_per_thread, leftover;
     void *(*touch_fn)(void *);
-    int ret = 0, i = 0;
+    int i = 0;
     char *addr = area;
+    MemsetThread *memset_thread;
 
     if (g_once_init_enter(&initialized)) {
         qemu_mutex_init(&page_mutex);
@@ -451,49 +456,78 @@ static int touch_all_pages(char *area, size_t hpagesize, size_t numpages,
         touch_fn = do_touch_pages;
     }
 
-    context.threads = g_new0(MemsetThread, context.num_threads);
     numpages_per_thread = numpages / context.num_threads;
     leftover = numpages % context.num_threads;
     for (i = 0; i < context.num_threads; i++) {
-        context.threads[i].addr = addr;
-        context.threads[i].numpages = numpages_per_thread + (i < leftover);
-        context.threads[i].hpagesize = hpagesize;
-        context.threads[i].context = &context;
+        memset_thread = g_malloc0(sizeof(MemsetThread));
+        if (memset_thread == NULL) {
+            perror("touch_all_pages: failed to malloc memset_thread");
+            exit(1);
+        }
+        memset_thread->addr = addr;
+        memset_thread->numpages = numpages_per_thread + (i < leftover);
+        memset_thread->hpagesize = hpagesize;
+        memset_thread->context = &context;
+
+        QLIST_INSERT_HEAD(&context.memset_threads, memset_thread, entries);
+
         if (tc) {
-            thread_context_create_thread(tc, &context.threads[i].pgthread,
+            thread_context_create_thread(tc, &memset_thread->pgthread,
                                          "touch_pages",
-                                         touch_fn, &context.threads[i],
+                                         touch_fn, memset_thread,
                                          QEMU_THREAD_JOINABLE);
         } else {
-            qemu_thread_create(&context.threads[i].pgthread, "touch_pages",
-                               touch_fn, &context.threads[i],
+            qemu_thread_create(&memset_thread->pgthread, "touch_pages",
+                               touch_fn, memset_thread,
                                QEMU_THREAD_JOINABLE);
         }
-        addr += context.threads[i].numpages * hpagesize;
+        addr += memset_thread->numpages * hpagesize;
     }
 
     if (!use_madv_populate_write) {
         sigbus_memset_context = &context;
     }
 
+    return 0;
+}
+
+static int wait_mem_prealloc(void)
+{
+    int ret;
+
     qemu_mutex_lock(&page_mutex);
     context.all_threads_created = true;
     qemu_cond_broadcast(&page_cond);
     qemu_mutex_unlock(&page_mutex);
 
-    for (i = 0; i < context.num_threads; i++) {
-        int tmp = (uintptr_t)qemu_thread_join(&context.threads[i].pgthread);
+    if (sigbus_memset_context) {
+        MemsetThread *memset_thread, *next;
 
-        if (tmp) {
-            ret = tmp;
+        QLIST_FOREACH_SAFE(memset_thread,
+                           &sigbus_memset_context->memset_threads,
+                           entries, next) {
+            int tmp = (uintptr_t) qemu_thread_join(&memset_thread->pgthread);
+
+            if (tmp) {
+                ret = tmp;
+            }
+
+            QLIST_REMOVE(memset_thread, entries);
+            g_free(memset_thread);
         }
-    }
-
-    if (!use_madv_populate_write) {
         sigbus_memset_context = NULL;
     }
-    g_free(context.threads);
 
+    if (sigbus_oldact.sa_handler) {
+        /* restore the previous sighandler */
+        ret = sigaction(SIGBUS, &sigbus_oldact, NULL);
+        if (ret) {
+            /* Terminate QEMU since it can't recover from error */
+            perror("wait_mem_prealloc: failed to reinstall signal handler");
+            exit(1);
+        }
+        memset(&sigbus_oldact, 0, sizeof(sigbus_oldact));
+    }
     return ret;
 }
 
@@ -553,11 +587,10 @@ void qemu_prealloc_mem(int fd, char *area, size_t sz, int max_threads,
     }
 
     if (!use_madv_populate_write) {
-        ret = sigaction(SIGBUS, &sigbus_oldact, NULL);
+        ret = wait_mem_prealloc();
         if (ret) {
-            /* Terminate QEMU since it can't recover from error */
-            perror("qemu_prealloc_mem: failed to reinstall signal handler");
-            exit(1);
+            error_setg_errno(errp, -ret,
+                             "qemu_prealloc_mem: memory preallocation failed");
         }
         qemu_mutex_unlock(&sigbus_mutex);
     }
