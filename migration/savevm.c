@@ -1472,13 +1472,11 @@ flush:
  * for units that can't do postcopy.
  */
 void qemu_savevm_state_pending_estimate(uint64_t *res_precopy_only,
-                                        uint64_t *res_compatible,
                                         uint64_t *res_postcopy_only)
 {
     SaveStateEntry *se;
 
     *res_precopy_only = 0;
-    *res_compatible = 0;
     *res_postcopy_only = 0;
 
     QTAILQ_FOREACH(se, &savevm_state.handlers, entry) {
@@ -1491,19 +1489,17 @@ void qemu_savevm_state_pending_estimate(uint64_t *res_precopy_only,
             }
         }
         se->ops->state_pending_estimate(se->opaque,
-                                        res_precopy_only, res_compatible,
+                                        res_precopy_only,
                                         res_postcopy_only);
     }
 }
 
 void qemu_savevm_state_pending_exact(uint64_t *res_precopy_only,
-                                     uint64_t *res_compatible,
                                      uint64_t *res_postcopy_only)
 {
     SaveStateEntry *se;
 
     *res_precopy_only = 0;
-    *res_compatible = 0;
     *res_postcopy_only = 0;
 
     QTAILQ_FOREACH(se, &savevm_state.handlers, entry) {
@@ -1516,7 +1512,7 @@ void qemu_savevm_state_pending_exact(uint64_t *res_precopy_only,
             }
         }
         se->ops->state_pending_exact(se->opaque,
-                                     res_precopy_only, res_compatible,
+                                     res_precopy_only,
                                      res_postcopy_only);
     }
 }
