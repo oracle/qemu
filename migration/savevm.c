@@ -1482,7 +1482,7 @@ void qemu_savevm_state_pending_estimate(uint64_t *res_precopy_only,
     *res_postcopy_only = 0;
 
     QTAILQ_FOREACH(se, &savevm_state.handlers, entry) {
-        if (!se->ops || !se->ops->state_pending_exact) {
+        if (!se->ops || !se->ops->state_pending_estimate) {
             continue;
         }
         if (se->ops->is_active) {
@@ -1490,9 +1490,9 @@ void qemu_savevm_state_pending_estimate(uint64_t *res_precopy_only,
                 continue;
             }
         }
-        se->ops->state_pending_exact(se->opaque,
-                                     res_precopy_only, res_compatible,
-                                     res_postcopy_only);
+        se->ops->state_pending_estimate(se->opaque,
+                                        res_precopy_only, res_compatible,
+                                        res_postcopy_only);
     }
 }
 
@@ -1507,7 +1507,7 @@ void qemu_savevm_state_pending_exact(uint64_t *res_precopy_only,
     *res_postcopy_only = 0;
 
     QTAILQ_FOREACH(se, &savevm_state.handlers, entry) {
-        if (!se->ops || !se->ops->state_pending_estimate) {
+        if (!se->ops || !se->ops->state_pending_exact) {
             continue;
         }
         if (se->ops->is_active) {
@@ -1515,9 +1515,9 @@ void qemu_savevm_state_pending_exact(uint64_t *res_precopy_only,
                 continue;
             }
         }
-        se->ops->state_pending_estimate(se->opaque,
-                                        res_precopy_only, res_compatible,
-                                        res_postcopy_only);
+        se->ops->state_pending_exact(se->opaque,
+                                     res_precopy_only, res_compatible,
+                                     res_postcopy_only);
     }
 }
 
