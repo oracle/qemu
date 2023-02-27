@@ -22,6 +22,7 @@
 #include "qemu/osdep.h"
 #include "qapi/error.h"
 #include "hw/intc/arm_gicv3_common.h"
+#include "hw/arm/virt.h"
 #include "qemu/error-report.h"
 #include "qemu/module.h"
 #include "sysemu/kvm.h"
@@ -804,6 +805,19 @@ static void kvm_arm_gicv3_realize(DeviceState *dev, Error **errp)
                    "security extensions");
         return;
     }
+
+    struct kvm_device_attr kdevattr = {
+        .group = KVM_DEV_ARM_VGIC_GRP_MAINT_IRQ,
+        .addr = (uint64_t)s->maint_irq
+    };
+
+    if (!kvm_device_ioctl(s->dev_fd, KVM_GET_DEVICE_ATTR, &kdevattr)) {
+        error_setg(errp, "VGICv3 setting maintenance IRQ is not "
+                         "supported by this host kernel");
+        return;
+    }
+
+    kvm_device_ioctl(s->dev_fd, KVM_SET_DEVICE_ATTR, &kdevattr);
 
     gicv3_init_irqs_and_mmio(s, kvm_arm_gicv3_set_irq, NULL);
 

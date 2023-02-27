@@ -770,6 +770,9 @@ static void create_gic(VirtMachineState *vms, MemoryRegion *mem)
             qdev_prop_set_uint32(vms->gic, "redist-region-count[1]",
                 MIN(smp_cpus - redist0_count, redist1_capacity));
         }
+
+       qdev_prop_set_uint32(vms->gic, "maintenance-interrupt-id",
+                            PPI(ARCH_GIC_MAINT_IRQ));
     } else {
         if (!kvm_irqchip_in_kernel()) {
             qdev_prop_set_bit(vms->gic, "has-virtualization-extensions",
