@@ -1314,9 +1314,12 @@ popd
 
 mkdir -p %{buildroot}%{_datadir}/systemtap/tapset
 
-# Move vhost-user JSON files to the standard "qemu" directory
 mkdir -p %{buildroot}%{_datadir}/qemu
+
+%if 0%{?have_vhost_user}
+# Move vhost-user JSON files to the standard "qemu" directory
 mv %{buildroot}%{_datadir}/%{name}/vhost-user %{buildroot}%{_datadir}/qemu/
+%endif
 
 install -m 0755 %{build_dir}/%{kvm_target}-softmmu/qemu-system-%{kvm_target} %{buildroot}%{_libexecdir}/qemu-kvm
 install -m 0644 %{build_dir}/qemu-kvm.stp %{buildroot}%{_datadir}/systemtap/tapset/
