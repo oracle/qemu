@@ -478,7 +478,9 @@ Summary: qemu-kvm core components
 Requires: kernel-uek
 Requires: %{name}-common = %{epoch}:%{version}-%{release}
 Requires: qemu-img = %{epoch}:%{version}-%{release}
+%if 0%{?have_seccomp}
 Requires: libseccomp >= 2.4.0
+%endif
 %ifarch x86_64
 Requires: edk2-ovmf
 %endif
