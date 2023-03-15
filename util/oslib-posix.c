@@ -493,7 +493,7 @@ static int touch_all_pages(char *area, size_t hpagesize, size_t numpages,
 
 static int wait_mem_prealloc(void)
 {
-    int ret;
+    int ret = 0;
 
     /*
      * Return if parallel memory prealloc is in process, or if memory prealloc

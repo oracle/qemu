@@ -1666,6 +1666,9 @@ getent passwd qemu >/dev/null || \
 
 
 %changelog
+* Mon Apr 10 2023 Mark Kanda <mark.kanda@oracle.com>
+- oslib-posix: fix uninitialized var in wait_mem_prealloc() (Mark Kanda)
+
 * Mon Jan 30 2023 Karl Heubaum <karl.heubaum@oracle.com> - 7.2.0-1-el8
 - vl: Add an -action option to override MCE handling (Mark Kanda)
 - hw/arm/virt: build SMBIOS 19 table (Mihai Carabas)
