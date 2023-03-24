@@ -1667,6 +1667,7 @@ getent passwd qemu >/dev/null || \
 
 %changelog
 * Mon Apr 10 2023 Mark Kanda <mark.kanda@oracle.com>
+- hw/intc/ioapic: Update KVM routes before redelivering IRQ, on RTE update (David Woodhouse)
 - oslib-posix: fix uninitialized var in wait_mem_prealloc() (Mark Kanda)
 
 * Mon Jan 30 2023 Karl Heubaum <karl.heubaum@oracle.com> - 7.2.0-1-el8
