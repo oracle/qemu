@@ -51,7 +51,7 @@
 %global have_linux_aio 1
 
 # Support for Linux io_uring
-%global have_have_io_uring 1
+%global have_linux_io_uring 1
 
 # Support Linux's vhost-net module
 %global have_vhost_net 1
@@ -461,6 +461,9 @@ BuildRequires: libcap-ng-devel
 %endif
 %if 0%{?have_slirp}
 BuildRequires: libslirp-devel
+%endif
+%if 0%{?have_linux_io_uring}
+BuildRequires: liburing-devel
 %endif
 
 Requires: qemu-kvm-core = %{epoch}:%{version}-%{release}

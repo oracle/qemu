@@ -51,7 +51,7 @@
 %global have_linux_aio 1
 
 # Support for Linux io_uring
-%global have_have_io_uring 1
+%global have_linux_io_uring 1
 
 # Support Linux's vhost-net module
 %global have_vhost_net 1
@@ -460,6 +460,9 @@ BuildRequires: libcap-ng-devel
 %endif
 %if 0%{?have_slirp}
 BuildRequires: libslirp-devel
+%endif
+%if 0%{?have_linux_io_uring}
+BuildRequires: liburing-devel
 %endif
 
 Requires: qemu-kvm-core = %{epoch}:%{version}-%{release}
@@ -1667,6 +1670,7 @@ getent passwd qemu >/dev/null || \
 
 %changelog
 * Mon Apr 10 2023 Mark Kanda <mark.kanda@oracle.com>
+- qemu-kvm.spec: fix Linux io_uring support (Mark Kanda)
 - hw/intc/ioapic: Update KVM routes before redelivering IRQ, on RTE update (David Woodhouse)
 - oslib-posix: fix uninitialized var in wait_mem_prealloc() (Mark Kanda)
 
