@@ -1476,7 +1476,7 @@ install -m 0755 %{_sourcedir}/qemu_regdump.py %{buildroot}%{python3_sitelib}/sos
 
 # We need to make the block device modules executable else
 # RPM won't pick up their dependencies.
-chmod +x %{buildroot}%{_libdir}/qemu-kvm/block-*.so
+chmod -f +x %{buildroot}%{_libdir}/qemu-kvm/block-*.so || true
 
 
 %check
@@ -1670,6 +1670,7 @@ getent passwd qemu >/dev/null || \
 
 %changelog
 * Mon Apr 10 2023 Mark Kanda <mark.kanda@oracle.com>
+- spec: allow no block device modules (Steve Sistare)
 - qemu-kvm.spec: fix Linux io_uring support (Mark Kanda)
 - hw/intc/ioapic: Update KVM routes before redelivering IRQ, on RTE update (David Woodhouse)
 - oslib-posix: fix uninitialized var in wait_mem_prealloc() (Mark Kanda)

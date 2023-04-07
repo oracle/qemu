@@ -1477,7 +1477,7 @@ install -m 0755 %{_sourcedir}/qemu_regdump.py %{buildroot}%{python3_sitelib}/sos
 
 # We need to make the block device modules executable else
 # RPM won't pick up their dependencies.
-chmod +x %{buildroot}%{_libdir}/qemu-kvm/block-*.so
+chmod -f +x %{buildroot}%{_libdir}/qemu-kvm/block-*.so || true
 
 
 %check
