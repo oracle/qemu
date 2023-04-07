@@ -480,7 +480,9 @@ hardware for a full system such as a PC and its associated peripherals.
 Summary: qemu-kvm core components
 Requires: kernel-uek
 Requires: %{name}-common = %{epoch}:%{version}-%{release}
+%if 0%{have_tools}
 Requires: qemu-img = %{epoch}:%{version}-%{release}
+%endif
 %if 0%{?have_seccomp}
 Requires: libseccomp >= 2.4.0
 %endif
@@ -505,6 +507,7 @@ emulation for the KVM hypervisor. qemu-kvm acts as a virtual
 machine monitor together with the KVM kernel modules, and emulates the
 hardware for a full system such as a PC and its associated peripherals.
 
+%if 0%{have_tools}
 
 %package -n qemu-img
 Summary: QEMU command line tool for manipulating disk images
@@ -513,6 +516,7 @@ Group: Development/Tools
 %description -n qemu-img
 This package provides a command line tool for manipulating disk images.
 
+%endif
 
 %package -n qemu-kvm-common
 Summary: QEMU common files needed by all QEMU targets
@@ -1303,6 +1307,7 @@ install -D -p -m 0644 %{_sourcedir}/vhost.conf %{buildroot}%{_sysconfdir}/modpro
     install -D -p -m 0644 %{_sourcedir}/kvm.conf %{buildroot}%{_sysconfdir}/modprobe.d/kvm.conf
 %endif
 
+mkdir -p %{buildroot}%{_libexecdir}/
 mkdir -p %{buildroot}%{_bindir}/
 mkdir -p %{buildroot}%{_udevrulesdir}/
 mkdir -p %{buildroot}%{_datadir}/%{name}
@@ -1334,7 +1339,7 @@ rm %{buildroot}%{_datadir}/systemtap/tapset/qemu-system-%{kvm_target}.stp
 rm %{buildroot}%{_datadir}/systemtap/tapset/qemu-system-%{kvm_target}-simpletrace.stp
 rm %{buildroot}%{_datadir}/systemtap/tapset/qemu-system-%{kvm_target}-log.stp
 rm %{buildroot}%{_datadir}/applications/qemu.desktop
-rm %{buildroot}%{_bindir}/elf2dmp
+rm -f %{buildroot}%{_bindir}/elf2dmp
 
 # Install simpletrace
 install -m 0755 scripts/simpletrace.py %{buildroot}%{_datadir}/%{name}/simpletrace.py
@@ -1528,7 +1533,9 @@ getent passwd qemu >/dev/null || \
 %endif
 %dir %{_datadir}/%{name}/
 %{_datadir}/%{name}/keymaps/
+%if 0%{?have_tools}
 %{_bindir}/qemu-pr-helper
+%endif
 %dir %{_sysconfdir}/%{name}
 %config(noreplace) %{_sysconfdir}/%{name}/bridge.conf
 %ifarch x86_64
@@ -1596,6 +1603,7 @@ getent passwd qemu >/dev/null || \
 %endif
 %{?qemu_kvm_files:}
 
+%if 0%{have_tools}
 
 %files -n qemu-img
 %defattr(-,root,root)
@@ -1608,6 +1616,7 @@ getent passwd qemu >/dev/null || \
 %{_mandir}/man8/qemu-nbd.8*
 %endif
 
+%endif
 
 %if 0%{?have_agent}
 %files -n qemu-guest-agent
@@ -1670,6 +1679,7 @@ getent passwd qemu >/dev/null || \
 
 %changelog
 * Mon Apr 10 2023 Mark Kanda <mark.kanda@oracle.com>
+- spec: allow have_tools 0 (Steve Sistare)
 - spec: allow no block device modules (Steve Sistare)
 - qemu-kvm.spec: fix Linux io_uring support (Mark Kanda)
 - hw/intc/ioapic: Update KVM routes before redelivering IRQ, on RTE update (David Woodhouse)
