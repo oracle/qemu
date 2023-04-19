@@ -1085,7 +1085,7 @@ uint64_t ram_pagesize_summary(void)
 uint64_t ram_get_total_transferred_pages(void)
 {
     return stat64_get(&ram_counters.normal) +
-        stat64_get(&ram_counters.duplicate) +
+        stat64_get(&ram_counters.zero_pages) +
         compression_counters.pages + xbzrle_counters.pages;
 }
 
@@ -1286,7 +1286,7 @@ static int save_zero_page(RAMState *rs, RAMBlock *block, ram_addr_t offset)
     int len = save_zero_page_to_file(rs, rs->f, block, offset);
 
     if (len) {
-        stat64_add(&ram_counters.duplicate, 1);
+        stat64_add(&ram_counters.zero_pages, 1);
         ram_transferred_add(len);
         return 1;
     }
@@ -1325,7 +1325,7 @@ static bool control_save_page(RAMState *rs, RAMBlock *block, ram_addr_t offset,
     if (bytes_xmit > 0) {
         stat64_add(&ram_counters.normal, 1);
     } else if (bytes_xmit == 0) {
-        stat64_add(&ram_counters.duplicate, 1);
+        stat64_add(&ram_counters.zero_pages, 1);
     }
 
     return true;
@@ -1449,7 +1449,7 @@ update_compress_thread_counts(const CompressParam *param, int bytes_xmit)
     ram_transferred_add(bytes_xmit);
 
     if (param->zero_page) {
-        stat64_add(&ram_counters.duplicate, 1);
+        stat64_add(&ram_counters.zero_pages, 1);
         return;
     }
 
@@ -2598,7 +2598,7 @@ void acct_update_position(QEMUFile *f, size_t size, bool zero)
     uint64_t pages = size / TARGET_PAGE_SIZE;
 
     if (zero) {
-        stat64_add(&ram_counters.duplicate, pages);
+        stat64_add(&ram_counters.zero_pages, pages);
     } else {
         stat64_add(&ram_counters.normal, pages);
         ram_transferred_add(size);
