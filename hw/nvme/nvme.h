@@ -197,6 +197,15 @@ typedef struct NvmeNamespaceParams {
     struct {
         char *ruhs;
     } fdp;
+    bool     atomic_nsabp;
+    uint16_t atomic_nawun;
+    uint16_t atomic_nawupf;
+    uint16_t atomic_nacwu;
+    uint16_t atomic_nabsn;
+    uint16_t atomic_nabo;
+    uint16_t atomic_nabspf;
+    uint16_t atomic_noiob;
+    bool     atomic_nsfeat;
 } NvmeNamespaceParams;
 
 typedef struct NvmeNamespace {
@@ -515,6 +524,17 @@ typedef struct NvmeParams {
     uint16_t sriov_vi_flexible;
     uint8_t  sriov_max_vq_per_vf;
     uint8_t  sriov_max_vi_per_vf;
+    bool     atomic_dn;
+    uint16_t  atomic_awun;
+    uint16_t  atomic_awupf;
+    uint16_t  atomic_acwu;
+    uint16_t  atomic_nawun;
+    uint16_t  atomic_nawupf;
+    uint16_t  atomic_nacwu;
+    uint16_t  atomic_nabsn;
+    uint16_t  atomic_nabo;
+    uint16_t  atomic_nabspf;
+    uint16_t  atomic_noiob;
 } NvmeParams;
 
 typedef struct NvmeCtrl {
@@ -597,6 +617,9 @@ typedef struct NvmeCtrl {
         uint16_t    vqrfap;
         uint16_t    virfap;
     } next_pri_ctrl_cap;    /* These override pri_ctrl_cap after reset */
+    uint32_t    dn; /* Disable Normal */
+    int		atomic_writes;
+    QemuMutex atomic_lock;
 } NvmeCtrl;
 
 typedef enum NvmeResetType {

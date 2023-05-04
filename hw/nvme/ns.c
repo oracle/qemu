@@ -95,6 +95,20 @@ static int nvme_ns_init(NvmeNamespace *ns, Error **errp)
 
     id_ns->mc = NVME_ID_NS_MC_EXTENDED | NVME_ID_NS_MC_SEPARATE;
 
+    /* Atomic */
+    if (ns->params.atomic_nsfeat) {
+	id_ns->nsfeat |= 0x2;
+	id_ns->nawun = ns->params.atomic_nawun;
+	id_ns->nawupf = ns->params.atomic_nawupf;
+	id_ns->nacwu = ns->params.atomic_nacwu;
+    }
+    id_ns->nabsn = ns->params.atomic_nabsn;
+    id_ns->nabo = ns->params.atomic_nabo;
+    id_ns->nabspf = ns->params.atomic_nabspf;
+    id_ns->noiob = ns->params.atomic_noiob;
+
+    printf("Atomic Paramters: NAWUN=%d NAWUPF=%d NABSN=%d NABSPF=%d NABO=%d\n", id_ns->nawun, id_ns->nawupf, id_ns->nabsn, id_ns->nabspf, id_ns->noiob);
+
     if (ms && ns->params.mset) {
         id_ns->flbas |= NVME_ID_NS_FLBAS_EXTENDED;
     }
@@ -138,7 +152,6 @@ static int nvme_ns_init(NvmeNamespace *ns, Error **errp)
     ns->nlbaf++;
 
     id_ns->flbas |= i;
-
 
 lbaf_found:
     id_ns_nvm->elbaf[i] = (ns->pif & 0x3) << 7;
@@ -707,6 +720,13 @@ static void nvme_ns_realize(DeviceState *dev, Error **errp)
         ns->endgrp = &subsys->endgrp;
     }
 
+    if (n->params.atomic_dn) {
+	n->params.atomic_awun = 0;
+        n->params.atomic_acwu = 0;
+        ns->params.atomic_nawun = 0;
+        ns->params.atomic_nacwu = 0;
+    }
+
     if (nvme_ns_setup(ns, errp)) {
         return;
     }
@@ -792,6 +812,14 @@ static Property nvme_ns_props[] = {
     DEFINE_PROP_BOOL("eui64-default", NvmeNamespace, params.eui64_default,
                      false),
     DEFINE_PROP_STRING("fdp.ruhs", NvmeNamespace, params.fdp.ruhs),
+    DEFINE_PROP_UINT16("atomic.nawun", NvmeNamespace, params.atomic_nawun, 0),
+    DEFINE_PROP_UINT16("atomic.nawupf", NvmeNamespace, params.atomic_nawupf, 0),
+    DEFINE_PROP_UINT16("atomic.nacwu", NvmeNamespace, params.atomic_nacwu, 0),
+    DEFINE_PROP_UINT16("atomic.nabsn", NvmeNamespace, params.atomic_nabsn, 0),
+    DEFINE_PROP_UINT16("atomic.nabo", NvmeNamespace, params.atomic_nabo, 0),
+    DEFINE_PROP_UINT16("atomic.nabspf", NvmeNamespace, params.atomic_nabspf, 0),
+    DEFINE_PROP_UINT16("atomic.noiob", NvmeNamespace, params.atomic_noiob, 0),
+    DEFINE_PROP_BOOL("atomic.nsfeat", NvmeNamespace, params.atomic_nsfeat, 0),
     DEFINE_PROP_END_OF_LIST(),
 };
 

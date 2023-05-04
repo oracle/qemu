@@ -247,6 +247,7 @@ static const uint32_t nvme_feature_cap[NVME_FID_MAX] = {
     [NVME_ERROR_RECOVERY]           = NVME_FEAT_CAP_CHANGE | NVME_FEAT_CAP_NS,
     [NVME_VOLATILE_WRITE_CACHE]     = NVME_FEAT_CAP_CHANGE,
     [NVME_NUMBER_OF_QUEUES]         = NVME_FEAT_CAP_CHANGE,
+    [NVME_WRITE_ATOMICITY]	    = NVME_FEAT_CAP_CHANGE,
     [NVME_ASYNCHRONOUS_EVENT_CONF]  = NVME_FEAT_CAP_CHANGE,
     [NVME_TIMESTAMP]                = NVME_FEAT_CAP_CHANGE,
     [NVME_HOST_BEHAVIOR_SUPPORT]    = NVME_FEAT_CAP_CHANGE,
@@ -302,6 +303,8 @@ static const uint32_t nvme_cse_iocs_zoned[256] = {
     [NVME_CMD_ZONE_MGMT_SEND]       = NVME_CMD_EFF_CSUPP | NVME_CMD_EFF_LBCC,
     [NVME_CMD_ZONE_MGMT_RECV]       = NVME_CMD_EFF_CSUPP,
 };
+
+#define NVME_ATOMIC_AWUN	15	/* 16 blocks (zero based) */
 
 static void nvme_process_sq(void *opaque);
 static void nvme_ctrl_reset(NvmeCtrl *n, NvmeResetType rst);
@@ -2216,6 +2219,8 @@ static void nvme_rw_cb(void *opaque, int ret)
 
 out:
     nvme_rw_complete_cb(req, ret);
+    if (req->sq->ctrl->atomic_writes)
+        qemu_mutex_unlock(&req->sq->ctrl->atomic_lock);
 }
 
 static void nvme_verify_cb(void *opaque, int ret)
@@ -3388,6 +3393,9 @@ static uint16_t nvme_read(NvmeCtrl *n, NvmeRequest *req)
     BlockBackend *blk = ns->blkconf.blk;
     uint16_t status;
 
+    if (n->atomic_writes)
+        qemu_mutex_lock(&n->atomic_lock);
+
     if (nvme_ns_ext(ns)) {
         mapped_size += nvme_m2b(ns, nlb);
 
@@ -3441,10 +3449,17 @@ static uint16_t nvme_read(NvmeCtrl *n, NvmeRequest *req)
     block_acct_start(blk_get_stats(blk), &req->acct, data_size,
                      BLOCK_ACCT_READ);
     nvme_blk_read(blk, data_offset, BDRV_SECTOR_SIZE, nvme_rw_cb, req);
+    if (n->atomic_writes) {
+        blk_drain_all();
+        qemu_mutex_unlock(&n->atomic_lock);
+    }
+
     return NVME_NO_COMPLETE;
 
 invalid:
     block_acct_invalid(blk_get_stats(blk), BLOCK_ACCT_READ);
+    if (n->atomic_writes)
+        qemu_mutex_unlock(&n->atomic_lock);
     return status | NVME_DNR;
 }
 
@@ -3499,6 +3514,19 @@ static uint16_t nvme_do_write(NvmeCtrl *n, NvmeRequest *req, bool append,
     NvmeZonedResult *res = (NvmeZonedResult *)&req->cqe;
     BlockBackend *blk = ns->blkconf.blk;
     uint16_t status;
+    NvmeIdNs *id_ns = &ns->id_ns;
+    int atomic_boundary = id_ns->nabspf;
+    int atomic_max_size = id_ns->nawupf;
+
+    if (n->atomic_writes) {
+        qemu_mutex_lock(&n->atomic_lock);
+        if (nlb > (atomic_max_size+1))
+            printf("write: ATOMIC FAIL(SIZE): slba=%lx nlb=%x data_size=%lx\n", slba, nlb, data_size);
+
+        if ((((slba & atomic_boundary) + nlb) > (atomic_boundary+1)) && atomic_boundary) {
+            printf("write: ATOMIC FAIL(BOUNDARY): slba=%lx nlb=%x data_size=%lx atomic_boundary=%x\n", slba, nlb, data_size, atomic_boundary);
+        }
+    }
 
     if (nvme_ns_ext(ns)) {
         mapped_size += nvme_m2b(ns, nlb);
@@ -3599,6 +3627,8 @@ static uint16_t nvme_do_write(NvmeCtrl *n, NvmeRequest *req, bool append,
     data_offset = nvme_l2b(ns, slba);
 
     if (NVME_ID_NS_DPS_TYPE(ns->id_ns.dps)) {
+        if (n->atomic_writes)
+            qemu_mutex_unlock(&n->atomic_lock);
         return nvme_dif_rw(n, req);
     }
 
@@ -3617,6 +3647,10 @@ static uint16_t nvme_do_write(NvmeCtrl *n, NvmeRequest *req, bool append,
                                            req);
     }
 
+    if (n->atomic_writes) {
+        blk_drain_all();
+        qemu_mutex_unlock(&n->atomic_lock);
+    }
     return NVME_NO_COMPLETE;
 
 invalid:
@@ -6019,6 +6053,9 @@ defaults:
         goto out;
 
         break;
+    case NVME_WRITE_ATOMICITY:
+	result = n->dn;
+	break;
     default:
         result = nvme_feature_default[fid];
         break;
@@ -6253,6 +6290,9 @@ static uint16_t nvme_set_feature(NvmeCtrl *n, NvmeRequest *req)
         return NVME_CMD_SEQ_ERROR | NVME_DNR;
     case NVME_FDP_EVENTS:
         return nvme_set_feature_fdp_events(n, ns, req);
+    case NVME_WRITE_ATOMICITY:
+	n->dn = 0x1 & dw11;
+	break;
     default:
         return NVME_FEAT_NOT_CHANGEABLE | NVME_DNR;
     }
@@ -7093,6 +7133,7 @@ static void nvme_ctrl_reset(NvmeCtrl *n, NvmeResetType rst)
     n->aer_mask = 0;
     n->outstanding_aers = 0;
     n->qs_created = false;
+    n->dn = n->params.atomic_dn; /* Set Disable Normal */
 
     nvme_update_msixcap_ts(pci_dev, n->conf_msix_qsize);
 
@@ -8261,6 +8302,20 @@ static void nvme_init_ctrl(NvmeCtrl *n, PCIDevice *pci_dev)
     if (pci_is_vf(pci_dev) && !sctrl->scs) {
         stl_le_p(&n->bar.csts, NVME_CSTS_FAILED);
     }
+
+    /* Atomic Write */
+    if (!n->params.atomic_dn) {
+        id->awun = n->params.atomic_awun;
+        id->acwu = n->params.atomic_acwu;
+    }
+    id->awupf = n->params.atomic_awupf;
+    printf("Atomic Paramters: AWUN=%d  AWUPF=%d\n", id->awun, id->awupf);
+
+    if (id->awun || id->awupf) {
+        n->atomic_writes = 1;
+        qemu_mutex_init(&n->atomic_lock);
+    } else
+        n->atomic_writes = 0;
 }
 
 static int nvme_init_subsys(NvmeCtrl *n, Error **errp)
@@ -8406,6 +8461,10 @@ static Property nvme_props[] = {
                       params.sriov_max_vi_per_vf, 0),
     DEFINE_PROP_UINT8("sriov_max_vq_per_vf", NvmeCtrl,
                       params.sriov_max_vq_per_vf, 0),
+    DEFINE_PROP_BOOL("atomic.dn", NvmeCtrl, params.atomic_dn, 0),
+    DEFINE_PROP_UINT16("atomic.awun", NvmeCtrl, params.atomic_awun, 0),
+    DEFINE_PROP_UINT16("atomic.awupf", NvmeCtrl, params.atomic_awupf, 0),
+    DEFINE_PROP_UINT16("atomic.acwu", NvmeCtrl, params.atomic_acwu, 0),
     DEFINE_PROP_END_OF_LIST(),
 };
 
