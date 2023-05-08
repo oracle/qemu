@@ -711,7 +711,7 @@ int qemu_get_byte(QEMUFile *f)
     return result;
 }
 
-uint64_t qemu_file_total_transferred_fast(QEMUFile *f)
+uint64_t qemu_file_transferred_fast(QEMUFile *f)
 {
     uint64_t ret = f->total_transferred;
     int i;
@@ -723,7 +723,7 @@ uint64_t qemu_file_total_transferred_fast(QEMUFile *f)
     return ret;
 }
 
-uint64_t qemu_file_total_transferred(QEMUFile *f)
+uint64_t qemu_file_transferred(QEMUFile *f)
 {
     qemu_fflush(f);
     return f->total_transferred;
