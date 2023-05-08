@@ -65,11 +65,6 @@
 
 #define MAX_THROTTLE  (128 << 20)      /* Migration transfer speed throttling */
 
-/* Amount of time to allocate to each "chunk" of bandwidth-throttled
- * data. */
-#define BUFFER_DELAY     100
-#define XFER_LIMIT_RATIO (1000 / BUFFER_DELAY)
-
 /* Time in milliseconds we are allowed to stop the source,
  * for sending the last part */
 #define DEFAULT_MIGRATE_SET_DOWNTIME 300
@@ -1806,7 +1801,7 @@ static void migrate_params_apply(MigrateSetParameters *params, Error **errp)
         s->parameters.max_bandwidth = params->max_bandwidth;
         if (s->to_dst_file && !migration_in_postcopy()) {
             qemu_file_set_rate_limit(s->to_dst_file,
-                                s->parameters.max_bandwidth / XFER_LIMIT_RATIO);
+                                s->parameters.max_bandwidth);
         }
     }
 
@@ -1838,7 +1833,7 @@ static void migrate_params_apply(MigrateSetParameters *params, Error **errp)
         s->parameters.max_postcopy_bandwidth = params->max_postcopy_bandwidth;
         if (s->to_dst_file && migration_in_postcopy()) {
             qemu_file_set_rate_limit(s->to_dst_file,
-                    s->parameters.max_postcopy_bandwidth / XFER_LIMIT_RATIO);
+                    s->parameters.max_postcopy_bandwidth);
         }
     }
     if (params->has_max_cpu_throttle) {
@@ -3245,7 +3240,7 @@ static int postcopy_start(MigrationState *ms)
      * will notice we're in POSTCOPY_ACTIVE and not actually
      * wrap their state up here
      */
-    qemu_file_set_rate_limit(ms->to_dst_file, bandwidth / XFER_LIMIT_RATIO);
+    qemu_file_set_rate_limit(ms->to_dst_file, bandwidth);
     if (migrate_postcopy_ram()) {
         /* Ping just for debugging, helps line traces up */
         qemu_savevm_send_ping(ms->to_dst_file, 2);
@@ -4349,11 +4344,10 @@ void migrate_fd_connect(MigrationState *s, Error *error_in)
 
     if (resume) {
         /* This is a resumed migration */
-        rate_limit = s->parameters.max_postcopy_bandwidth /
-            XFER_LIMIT_RATIO;
+        rate_limit = migrate_max_postcopy_bandwidth();
     } else {
         /* This is a fresh new migration */
-        rate_limit = s->parameters.max_bandwidth / XFER_LIMIT_RATIO;
+        rate_limit = s->parameters.max_bandwidth;
 
         /* Notify before starting migration thread */
         notifier_list_notify(&migration_state_notifiers, s);

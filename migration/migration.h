@@ -28,6 +28,11 @@
 
 struct PostcopyBlocktimeContext;
 
+/* Amount of time to allocate to each "chunk" of bandwidth-throttled
+ * data. */
+#define BUFFER_DELAY     100
+#define XFER_LIMIT_RATIO (1000 / BUFFER_DELAY)
+
 #define  MIGRATION_RESUME_ACK_VALUE  (1)
 
 /*
