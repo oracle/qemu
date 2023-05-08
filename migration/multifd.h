@@ -184,6 +184,8 @@ typedef struct {
     uint32_t next_packet_size;
     /* packets received through this channel */
     uint64_t packets_recved;
+    /* ramblock */
+    RAMBlock *block;
     /* ramblock host address */
     uint8_t *host;
     /* non zero pages recv through this channel */
