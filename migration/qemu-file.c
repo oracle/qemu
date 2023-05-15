@@ -745,7 +745,10 @@ int qemu_file_rate_limit(QEMUFile *f)
     if (qemu_file_get_error(f)) {
         return 1;
     }
-    if (f->rate_limit_max > 0 && f->rate_limit_used > f->rate_limit_max) {
+    if (f->rate_limit_max == RATE_LIMIT_DISABLED) {
+        return 0;
+    }
+    if (f->rate_limit_used > f->rate_limit_max) {
         return 1;
     }
     return 0;

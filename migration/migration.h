@@ -33,6 +33,8 @@ struct PostcopyBlocktimeContext;
 #define BUFFER_DELAY     100
 #define XFER_LIMIT_RATIO (1000 / BUFFER_DELAY)
 
+#define RATE_LIMIT_DISABLED 0
+
 #define  MIGRATION_RESUME_ACK_VALUE  (1)
 
 /*
