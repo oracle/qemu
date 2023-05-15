@@ -1,5 +1,6 @@
 # Files needed by unit tests
 migration_files = files(
+  'migration-stats.c',
   'page_cache.c',
   'xbzrle.c',
   'vmstate-types.c',

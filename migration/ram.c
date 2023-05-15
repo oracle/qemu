@@ -38,6 +38,7 @@
 #include "migration.h"
 #include "migration/register.h"
 #include "migration/misc.h"
+#include "migration-stats.h"
 #include "qemu-file.h"
 #include "postcopy-ram.h"
 #include "page_cache.h"
@@ -426,8 +427,6 @@ uint64_t ram_bytes_remaining(void)
     return ram_state ? (ram_state->migration_dirty_pages * TARGET_PAGE_SIZE) :
                        0;
 }
-
-RAMStats ram_counters;
 
 void ram_transferred_add(uint64_t bytes)
 {
@@ -3327,7 +3326,7 @@ static int ram_save_iterate(QEMUFile *f, void *opaque)
 
         t0 = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
         i = 0;
-        while ((ret = qemu_file_rate_limit(f)) == 0 ||
+        while ((ret = migration_rate_exceeded(f)) == 0 ||
                postcopy_has_request(rs)) {
             int pages;
 
