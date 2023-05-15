@@ -60,3 +60,8 @@ void migration_rate_account(uint64_t len)
 {
     stat64_add(&ram_counters.rate_limit_used, len);
 }
+
+uint64_t migration_transferred_bytes(QEMUFile *f)
+{
+    return qemu_file_transferred(f) + stat64_get(&ram_counters.multifd_bytes);
+}
