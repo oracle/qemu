@@ -1,3 +1,4 @@
+
 %ifarch x86_64
     %global kvm_target    x86_64
 %endif
@@ -257,7 +258,7 @@ Requires: %{name}-block-ssh = %{epoch}:%{version}-%{release}     \
 Summary: QEMU is a machine emulator and virtualizer
 Name: qemu-kvm
 Version: 7.2.0
-Release: 1%{?dist}
+Release: 3%{?dist}
 Epoch: 30
 License: GPLv2+ and LGPLv2+ and BSD
 Group: Development/Tools
@@ -1679,3 +1680,170 @@ getent passwd qemu >/dev/null || \
 
 
 %changelog
+* Thu May 18 2023  Karl Heubaum <karl.heubaum@oracle.com> - 7.2.0-3.el9
+- vfio/migration: Skip log_sync during migration SETUP state (Avihai Horon)
+- migration: fix ram_state_pending_exact() (Juan Quintela)
+
+* Mon May 8 2023  Karl Heubaum <karl.heubaum@oracle.com> - 7.2.0-2.el9
+- spec: allow have_tools 0 (Steve Sistare)
+- spec: allow no block device modules (Steve Sistare)
+- qemu-kvm.spec: fix Linux io_uring support (Mark Kanda)
+- hw/intc/ioapic: Update KVM routes before redelivering IRQ, on RTE update (David Woodhouse) [Orabug: 35219295]
+- oslib-posix: fix uninitialized var in wait_mem_prealloc() (Mark Kanda)
+- vfio/migration: Rename entry points (Alex Williamson)
+- docs/devel: Document VFIO device dirty page tracking (Avihai Horon)
+- vfio/migration: Query device dirty page tracking support (Joao Martins)
+- vfio/migration: Block migration with vIOMMU (Joao Martins)
+- vfio/common: Add device dirty page bitmap sync (Joao Martins)
+- vfio/common: Extract code from vfio_get_dirty_bitmap() to new function (Avihai Horon)
+- vfio/common: Add device dirty page tracking start/stop (Joao Martins)
+- vfio/common: Record DMA mapped IOVA ranges (Joao Martins)
+- vfio/common: Add helper to consolidate iova/end calculation (Joao Martins)
+- vfio/common: Consolidate skip/invalid section into helper (Joao Martins)
+- vfio/common: Use a single tracepoint for skipped sections (Joao Martins)
+- vfio/common: Add helper to validate iova/end against hostwin (Joao Martins)
+- vfio/common: Add VFIOBitmap and alloc function (Avihai Horon)
+- vfio/common: Abort migration if dirty log start/stop/sync fails (Avihai Horon)
+- vfio/common: Fix wrong %m usages (Avihai Horon)
+- vfio/common: Fix error reporting in vfio_get_dirty_bitmap() (Avihai Horon)
+- docs/devel: Align VFIO migration docs to v2 protocol (Avihai Horon)
+- vfio: Alphabetize migration section of VFIO trace-events file (Avihai Horon)
+- vfio/migration: Remove VFIO migration protocol v1 (Avihai Horon)
+- vfio/migration: Implement VFIO migration protocol v2 (Avihai Horon)
+- vfio/migration: Rename functions/structs related to v1 protocol (Avihai Horon)
+- vfio/migration: Move migration v1 logic to vfio_migration_init() (Avihai Horon)
+- vfio/migration: Block multiple devices migration (Avihai Horon)
+- vfio/common: Change vfio_devices_all_running_and_saving() logic to equivalent one (Avihai Horon)
+- vfio/migration: Allow migration without VFIO IOMMU dirty tracking support (Avihai Horon)
+- vfio/migration: Fix NULL pointer dereference bug (Avihai Horon)
+- linux-headers: Update to v6.2-rc8 (Avihai Horon)
+- migration/qemu-file: Add qemu_file_get_to_fd() (Avihai Horon)
+- migration: Rename res_{postcopy,precopy}_only (Juan Quintela)
+- migration: Remove unused res_compatible (Juan Quintela)
+- migration: In case of postcopy, the memory ends in res_postcopy_only (Juan Quintela)
+- migration: I messed state_pending_exact/estimate (Juan Quintela)
+- linux-headers: Update to v6.1 (Peter Xu)
+- migration: simplify migration_iteration_run() (Juan Quintela)
+- migration: Remove unused threshold_size parameter (Juan Quintela)
+- migration: Split save_live_pending() into state_pending_* (Juan Quintela)
+- migration: No save_live_pending() method uses the QEMUFile parameter (Juan Quintela)
+- Revert "virtio-scsi: Send "REPORTED LUNS CHANGED" sense data upon disk hotplug events" (Karl Heubaum) [Orabug: 35161059]
+- oslib-posix: initialize backend memory objects in parallel (Mark Kanda) [Orabug: 32555402]
+- oslib-posix: refactor memory prealloc threads (Mark Kanda) [Orabug: 32555402]
+- qemu-kvm.spec: vhost-user is conditional (Steve Sistare) 
+- qemu-kvm.spec: libseccomp is conditional (Steve Sistare) 
+
+* Mon Jan 30 2023 Karl Heubaum <karl.heubaum@oracle.com> - 7.2.0-1.el9
+- vl: Add an -action option to override MCE handling (Mark Kanda)
+- hw/arm/virt: build SMBIOS 19 table (Mihai Carabas)
+- virtio-net-pci: Don't use "efi-virtio.rom" on AArch64 (Mark Kanda)
+- migration: increase listening socket backlog (Elena Ufimtseva)
+- virtio: Set PCI subsystem vendor ID to Oracle (Karl Heubaum)
+- Update to QEMU 7.2.0 (Karl Heubaum)
+
+* Tue Sep 13 2022 Karl Heubaum <karl.heubaum@oracle.com> - 6.1.1-4.el9
+- display/qxl-render: fix race condition in qxl_cursor (CVE-2021-4207) (Mauro Matteo Cascella) [Orabug: 34591445] {CVE-2021-4207}
+- ui/cursor: fix integer overflow in cursor_alloc (CVE-2021-4206) (Mauro Matteo Cascella) [Orabug: 34591281] {CVE-2021-4206}
+- scsi/lsi53c895a: really fix use-after-free in lsi_do_msgout (CVE-2022-0216) (Mauro Matteo Cascella) [Orabug: 34590706] {CVE-2022-0216}
+- scsi/lsi53c895a: fix use-after-free in lsi_do_msgout (CVE-2022-0216) (Mauro Matteo Cascella) [Orabug: 34590706] {CVE-2022-0216}
+- tests/qtest: Add fuzz-lsi53c895a-test (Philippe Mathieu-Daude) [Orabug: 34590706] {CVE-2022-0216}
+- hw/scsi/lsi53c895a: Do not abort when DMA requested and no data queued (Philippe Mathieu-Daude) [Orabug: 34590706] {CVE-2022-0216}
+- virtio-net: fix map leaking on error during receive (Jason Wang) [Orabug: 34538375] {CVE-2022-26353}
+- vfio: defer to commit kvm irq routing when enable msi/msix (Mike Longpeng) [Orabug: 34528963]
+- Revert "vfio: Avoid disabling and enabling vectors repeatedly in VFIO migration" (Mike Longpeng) [Orabug: 34528963]
+- vfio: simplify the failure path in vfio_msi_enable (Mike Longpeng) [Orabug: 34528963]
+- vfio: move re-enabling INTX out of the common helper (Mike Longpeng) [Orabug: 34528963]
+- vfio: simplify the conditional statements in vfio_msi_enable (Mike Longpeng) [Orabug: 34528963]
+- kvm/msi: do explicit commit when adding msi routes (Mike Longpeng) [Orabug: 34528963]
+- kvm-irqchip: introduce new API to support route change (Mike Longpeng) [Orabug: 34528963]
+- event_notifier: handle initialization failure better (Maxim Levitsky) [Orabug: 34528963]
+- virtio-net: don't handle mq request in userspace handler for vhost-vdpa (Si-Wei Liu)
+- vhost-vdpa: change name and polarity for vhost_vdpa_one_time_request() (Si-Wei Liu)
+- vhost-vdpa: backend feature should set only once (Si-Wei Liu)
+- vhost-net: fix improper cleanup in vhost_net_start (Si-Wei Liu)
+- vhost-vdpa: fix improper cleanup in net_init_vhost_vdpa (Si-Wei Liu)
+- virtio-net: align ctrl_vq index for non-mq guest for vhost_vdpa (Si-Wei Liu)
+- virtio-net: setup vhost_dev and notifiers for cvq only when feature is negotiated (Si-Wei Liu)
+- virtio: fix the condition for iommu_platform not supported (Halil Pasic)
+- vdpa: Make ncs autofree (Eugenio Perez)
+- vhost-vdpa: make notifiers _init()/_uninit() symmetric (Laurent Vivier)
+- hw/virtio: vdpa: Fix leak of host-notifier memory-region (Laurent Vivier)
+- vhost-vdpa: stick to -errno error return convention (Roman Kagan)
+- vdpa: Add dummy receive callback (Eugenio Perez)
+- vdpa: Check for existence of opts.vhostdev (Eugenio Perez)
+- vdpa: Replace qemu_open_old by qemu_open at (Eugenio Perez)
+- vhost: Fix last vq queue index of devices with no cvq (Eugenio Perez)
+- vhost: Rename last_index to vq_index_end (Eugenio Perez)
+- net/vhost-vdpa: fix memory leak in vhost_vdpa_get_max_queue_pairs() (Stefano Garzarella)
+- vhost-vdpa: Set discarding of RAM broken when initializing the backend (David Hildenbrand)
+- vhost-vdpa: multiqueue support (Jason Wang)
+- virtio-net: vhost control virtqueue support (Jason Wang)
+- vhost: record the last virtqueue index for the virtio device (Jason Wang)
+- virtio-net: use "queue_pairs" instead of "queues" when possible (Jason Wang)
+- vhost-net: control virtqueue support (Jason Wang)
+- net: introduce control client (Jason Wang)
+- vhost-vdpa: let net_vhost_vdpa_init() returns NetClientState * (Jason Wang)
+- vhost-vdpa: prepare for the multiqueue support (Jason Wang)
+- vhost-vdpa: classify one time request (Jason Wang)
+- vhost-vdpa: open device fd in net_init_vhost_vdpa() (Jason Wang)
+- vdpa: Check for iova range at mappings changes (Eugenio Perez)
+- vdpa: Add vhost_vdpa_section_end (Eugenio Perez)
+- net/vhost-vdpa: Fix device compatibility check (Kevin Wolf)
+- net/vhost-user: Fix device compatibility check (Kevin Wolf)
+- net: Introduce NetClientInfo.check_peer_type() (Kevin Wolf)
+- memory: Name all the memory listeners (Peter Xu)
+- vhost-vdpa: remove the unncessary queue_index assignment (Jason Wang)
+- vhost-vdpa: fix the wrong assertion in vhost_vdpa_init() (Jason Wang)
+- vhost-vdpa: tweak the error label in vhost_vdpa_add() (Jason Wang)
+- vhost-vdpa: fix leaking of vhost_net in vhost_vdpa_add() (Jason Wang)
+- vhost-vdpa: don't cleanup twice in vhost_vdpa_add() (Jason Wang)
+- vhost-vdpa: remove the unnecessary check in vhost_vdpa_add() (Jason Wang)
+- vhost_net: do not assume nvqs is always 2 (Jason Wang)
+- vhost: use unsigned int for nvqs (Jason Wang)
+- vhost_net: remove the meaningless assignment in vhost_net_start_one() (Jason Wang)
+- vhost-vdpa: correctly return err in vhost_vdpa_set_backend_cap() (Jason Wang)
+- vhost-vdpa: remove unused variable "acked_features" (Jason Wang)
+- vhost: correctly detect the enabling IOMMU (Jason Wang)
+- virtio-pci: implement iommu_enabled() (Jason Wang)
+- virtio-bus: introduce iommu_enabled() (Jason Wang)
+- hw/virtio: Fix leak of host-notifier memory-region (Yajun Wu)
+- vhost-vdpa: Do not send empty IOTLB update batches (Eugenio Perez)
+- target/i386/kvm: Fix disabling MPX on "-cpu host" with MPX-capable host (Maciej S. Szmigiero) [Orabug: 33528615]
+
+* Fri Apr 8 2022 Karl Heubaum <karl.heubaum@oracle.com> - 6.1.1-3.el9
+- acpi: pcihp: pcie: set power on cap on parent slot (Igor Mammedov) [Orabug: 33984018] [Orabug: 33995665]
+- pcie: expire pending delete (Gerd Hoffmann) [Orabug: 33984018] [Orabug: 33995665]
+- pcie: fast unplug when slot power is off (Gerd Hoffmann) [Orabug: 33984018] [Orabug: 33995665]
+- pcie: factor out pcie_cap_slot_unplug() (Gerd Hoffmann) [Orabug: 33984018] [Orabug: 33995665]
+- pcie: add power indicator blink check (Gerd Hoffmann) [Orabug: 33984018] [Orabug: 33995665]
+- pcie: implement slot power control for pcie root ports (Gerd Hoffmann) [Orabug: 33984018] [Orabug: 33995665]
+- pci: implement power state (Gerd Hoffmann) [Orabug: 33984018] [Orabug: 33995665]
+- tests: bios-tables-test update expected blobs (Igor Mammedov) [Orabug: 33984018] [Orabug: 33995665]
+- hw/i386/acpi-build: Deny control on PCIe Native Hot-plug in _OSC (Julia Suvorova) [Orabug: 33984018] [Orabug: 33995665]
+- bios-tables-test: Allow changes in DSDT ACPI tables (Julia Suvorova) [Orabug: 33984018] [Orabug: 33995665]
+- hw/acpi/ich9: Add compat prop to keep HPC bit set for 6.1 machine type (Julia Suvorova) [Orabug: 33984018] [Orabug: 33995665]
+
+* Wed Mar 9 2022 Karl Heubaum <karl.heubaum@oracle.com> - 6.1.1-2.el9
+- vhost-vsock: detach the virqueue element in case of error (Stefano Garzarella) [Orabug: 33941752] {CVE-2022-26354}
+- qemu_regdump.py/qmp-regdump: Switch to Python 3 (Karl Heubaum)
+- block/mirror: fix NULL pointer dereference in mirror_wait_on_conflicts() (Stefano Garzarella) [Orabug: 33916572] {CVE-2021-4145}
+
+* Fri Feb 25 2022 Karl Heubaum <karl.heubaum@oracle.com> - 6.1.1-1.el9
+- ACPI ERST: step 6 of bios-tables-test.c (Eric DeVolder)
+- ACPI ERST: bios-tables-test testcase (Eric DeVolder)
+- ACPI ERST: qtest for ERST (Eric DeVolder)
+- ACPI ERST: create ACPI ERST table for pc/x86 machines (Eric DeVolder)
+- ACPI ERST: build the ACPI ERST table (Eric DeVolder)
+- ACPI ERST: support for ACPI ERST feature (Eric DeVolder)
+- ACPI ERST: header file for ERST (Eric DeVolder)
+- ACPI ERST: PCI device_id for ERST (Eric DeVolder)
+- hw/nvme: fix CVE-2021-3929 (Klaus Jensen) [Orabug: 33866395] {CVE-2021-3929}
+- oslib-posix: initialize backend memory objects in parallel (Mark Kanda) [Orabug: 32555402]
+- oslib-posix: refactor memory prealloc threads (Mark Kanda) [Orabug: 32555402]
+- tests/plugin/syscall.c: fix compiler warnings (Juro Bystricky)
+- virtio-net-pci: Don't use "efi-virtio.rom" on AArch64 (Mark Kanda)
+- migration: increase listening socket backlog (Elena Ufimtseva)
+- virtio: Set PCI subsystem vendor ID to Oracle (Karl Heubaum)
+- virtiofsd: Drop membership of all supplementary groups (CVE-2022-0358) (Vivek Goyal) [Orabug: 33816690] {CVE-2022-0358}
+- acpi: validate hotplug selector on access (Michael S. Tsirkin) [Orabug: 33816625] {CVE-2021-4158}
+- Update to QEMU 6.1.1 (Karl Heubaum)
