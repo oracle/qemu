@@ -3712,6 +3712,7 @@ static void vfio_user_instance_finalize(Object *obj)
 
     if (group != NULL) {
         vfio_disconnect_proxy(group);
+        QLIST_REMOVE(group, next);
         g_free(group);
         vbasedev->group = NULL;
     }
