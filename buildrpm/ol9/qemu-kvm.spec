@@ -1681,8 +1681,8 @@ getent passwd qemu >/dev/null || \
 
 %changelog
 * Thu May 18 2023  Karl Heubaum <karl.heubaum@oracle.com> - 7.2.0-3.el9
-- vfio/migration: Skip log_sync during migration SETUP state (Avihai Horon)
-- migration: fix ram_state_pending_exact() (Juan Quintela)
+- vfio/migration: Skip log_sync during migration SETUP state (Avihai Horon) [Orabug: 35384144]
+- migration: fix ram_state_pending_exact() (Juan Quintela) [Orabug: 35384144]
 
 * Mon May 8 2023  Karl Heubaum <karl.heubaum@oracle.com> - 7.2.0-2.el9
 - spec: allow have_tools 0 (Steve Sistare)
