@@ -2261,6 +2261,7 @@ static void pci_qdev_realize(DeviceState *qdev, Error **errp)
         return;
     }
 
+    pci_dev->set_power = true;
     pci_set_power(pci_dev, true);
 
     pci_dev->msi_trigger = pci_msi_trigger;

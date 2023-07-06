@@ -288,6 +288,7 @@ struct PCIDevice {
     DeviceState qdev;
     bool partially_hotplugged;
     bool has_power;
+    bool set_power;
 
     /* PCI config space */
     uint8_t *config;

@@ -28,6 +28,7 @@
 #include "hw/pci/pcie_regs.h"
 #include "hw/pci/pcie_port.h"
 #include "qemu/range.h"
+#include "sysemu/runstate.h"
 
 //#define DEBUG_PCIE
 #ifdef DEBUG_PCIE
@@ -397,8 +398,20 @@ static void pcie_cap_update_power(PCIDevice *hotplug_dev)
         power = (sltctl & PCI_EXP_SLTCTL_PCC) == PCI_EXP_SLTCTL_PWR_ON;
     }
 
-    pci_for_each_device(sec_bus, pci_bus_num(sec_bus),
-                        pcie_set_power_device, &power);
+    /*
+     * For devices hot-plugged in RUN_STATE_PRELAUNCH state, set_power is
+     * set to false to avoid unnecessary power state changes before the device
+     * is powered on. After the device is powered on, set_power has to be
+     * set back to true to allow general power state changes.
+     */
+    if (!hotplug_dev->set_power && power) {
+        hotplug_dev->set_power = true;
+    }
+
+    if (hotplug_dev->set_power) {
+        pci_for_each_device(sec_bus, pci_bus_num(sec_bus),
+                            pcie_set_power_device, &power);
+    }
 }
 
 /*
@@ -492,6 +505,18 @@ void pcie_cap_slot_plug_cb(HotplugHandler *hotplug_dev, DeviceState *dev,
         }
         pcie_cap_slot_event(hotplug_pdev,
                             PCI_EXP_HP_EV_PDC | PCI_EXP_HP_EV_ABP);
+
+        /*
+         * After the system disk device is hot-plugged during
+         * RUN_STATE_PRELAUNCH state, its power state will be set to OFF
+         * before the device is actually powered on. The device is invisible
+         * during this period. Hence the firmware won't find the system
+         * disk to boot. The set_power is set to false to avoid setting the
+         * power state to OFF.
+         */
+        if (runstate_check(RUN_STATE_PRELAUNCH)) {
+            hotplug_pdev->set_power = false;
+        }
         pcie_cap_update_power(hotplug_pdev);
     }
 }
