@@ -399,10 +399,11 @@ static void pcie_cap_update_power(PCIDevice *hotplug_dev)
     }
 
     /*
-     * For devices hot-plugged in RUN_STATE_PRELAUNCH state, set_power is
-     * set to false to avoid unnecessary power state changes before the device
-     * is powered on. After the device is powered on, set_power has to be
-     * set back to true to allow general power state changes.
+     * For devices hot-plugged in RUN_STATE_PRELAUNCH or RUN_STATE_INMIGRATE
+     * state, set_power is set to false to avoid unnecessary power state
+     * changes before the device is powered on. After the device is powered
+     * on, set_power has to be set back to true to allow the general power
+     * state changes.
      */
     if (!hotplug_dev->set_power && power) {
         hotplug_dev->set_power = true;
@@ -507,14 +508,16 @@ void pcie_cap_slot_plug_cb(HotplugHandler *hotplug_dev, DeviceState *dev,
                             PCI_EXP_HP_EV_PDC | PCI_EXP_HP_EV_ABP);
 
         /*
-         * After the system disk device is hot-plugged during
-         * RUN_STATE_PRELAUNCH state, its power state will be set to OFF
-         * before the device is actually powered on. The device is invisible
-         * during this period. Hence the firmware won't find the system
-         * disk to boot. The set_power is set to false to avoid setting the
-         * power state to OFF.
+         * After the system disk device is hot-plugged in RUN_STATE_PRELAUNCH
+         * or RUN_STATE_INMIGRATE state, its power state will be set to OFF
+         * before the device is powered on. The device is invisible during
+         * this period. Hence the firmware won't find the system disk to boot
+         * or the VM hangs after the migration if the guest(for example,
+         * Windows) doesn't set the slot control power bit to ON. The
+         * set_power is set to false to avoid setting the power state to OFF.
          */
-        if (runstate_check(RUN_STATE_PRELAUNCH)) {
+        if (runstate_check(RUN_STATE_PRELAUNCH) ||
+            runstate_check(RUN_STATE_INMIGRATE)) {
             hotplug_pdev->set_power = false;
         }
         pcie_cap_update_power(hotplug_pdev);
