@@ -1369,10 +1369,6 @@ static bool migrate_caps_check(bool *cap_list,
                              "'return-path'");
             return false;
         }
-
-        /* Disable this capability until it's implemented */
-        error_setg(errp, "'switchover-ack' is not implemented yet");
-        return false;
     }
 
     return true;
