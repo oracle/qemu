@@ -231,6 +231,8 @@ bool vfio_devices_all_iommu_passthrough(void);
 bool vfio_viommu_preset(VFIODevice *vbasedev);
 int64_t vfio_mig_bytes_transferred(void);
 void vfio_reset_bytes_transferred(void);
+bool vfio_device_state_is_precopy(VFIODevice *vbasedev);
+bool vfio_device_state_is_running(VFIODevice *vbasedev);
 
 #ifdef CONFIG_LINUX
 int vfio_get_region_info(VFIODevice *vbasedev, int index,
