@@ -258,7 +258,7 @@ Requires: %{name}-block-ssh = %{epoch}:%{version}-%{release}     \
 Summary: QEMU is a machine emulator and virtualizer
 Name: qemu-kvm
 Version: 7.2.0
-Release: 3%{?dist}
+Release: 4%{?dist}
 Epoch: 30
 License: GPLv2+ and LGPLv2+ and BSD
 Group: Development/Tools
@@ -1680,11 +1680,52 @@ getent passwd qemu >/dev/null || \
 
 
 %changelog
-* Thu May 18 2023  Karl Heubaum <karl.heubaum@oracle.com> - 7.2.0-3.el9
+* Thu Jul 13 2023 Karl Heubaum <karl.heubaum@oracle.com> - 7.2.0-4.el9
+- vfio/migration: Allow migration of multiple P2P supporting devices (Avihai Horon)
+- vfio/migration: Add P2P support for VFIO migration (Avihai Horon)
+- sysemu: Add pre VM state change callback (Avihai Horon)
+- vfio/migration: Refactor PRE_COPY and RUNNING state checks (Joao Martins)
+- vfio/common: Add an option to relax vIOMMU usage (Joao Martins)
+- virtio-rng-pci: fix transitional migration compat for vectors (David Alan Gilbert) [Orabug: 35595177]
+- virtio-rng-pci: fix migration compat for vectors (David Alan Gilbert) [Orabug: 35595177]
+- vfio: Fix null pointer dereference bug in vfio_bars_finalize() (Avihai Horon)
+- vfio/migration: Return bool type for vfio_migration_realize() (Zhenzhong Duan)
+- vfio/migration: Remove print of "Migration disabled" (Zhenzhong Duan)
+- vfio/migration: Free resources when vfio_migration_realize fails (Zhenzhong Duan)
+- vfio/migration: Change vIOMMU blocker from global to per device (Zhenzhong Duan)
+- vfio/pci: Disable INTx in vfio_realize error path (Zhenzhong Duan)
+- vfio/pci: Free leaked timer in vfio_realize error path (Zhenzhong Duan)
+- vfio/pci: Fix a segfault in vfio_realize (Zhenzhong Duan)
+- vfio/migration: Make VFIO migration non-experimental (Avihai Horon)
+- vfio/migration: Reset bytes_transferred properly (Avihai Horon)
+- vfio/pci: Call vfio_prepare_kvm_msi_virq_batch() in MSI retry path (Shameer Kolothum)
+- vfio/migration: Add support for switchover ack capability (Avihai Horon)
+- vfio/migration: Add VFIO migration pre-copy support (Avihai Horon)
+- vfio/migration: Store VFIO migration flags in VFIOMigration (Avihai Horon)
+- vfio/migration: Refactor vfio_save_block() to return saved data size (Avihai Horon)
+- tests: Add migration switchover ack capability test (Avihai Horon)
+- migration: Enable switchover ack capability (Avihai Horon)
+- migration: Implement switchover ack logic (Avihai Horon)
+- migration: Add switchover ack capability (Avihai Horon)
+- target/i386: Add EPYC-Genoa model to support Zen 4 processor series (Babu Moger) [Orabug: 35555649]
+- target/i386: Add VNMI and automatic IBRS feature bits (Babu Moger) [Orabug: 35555649]
+- target/i386: Add missing feature bits in EPYC-Milan model (Babu Moger) [Orabug: 35555649]
+- target/i386: Add feature bits for CPUID_Fn80000021_EAX (Babu Moger) [Orabug: 35555649]
+- target/i386: Add a couple of feature bits in 8000_0008_EBX (Babu Moger) [Orabug: 35555649]
+- target/i386: Add new EPYC CPU versions with updated cache_info (Michael Roth) [Orabug: 35555649]
+- target/i386: allow versioned CPUs to specify new cache_info (Michael Roth) [Orabug: 35555649]
+- target/i386/kvm: get and put AMD pmu registers (Dongli Zhang) [Orabug: 35562155]
+- Makefile: qemu-bundle is a directory (Juan Quintela)
+- 9pfs: prevent opening special files (CVE-2023-2861) (Christian Schoenebeck) [Orabug: 35570017] {CVE-2023-2861}
+- pcie: Do not update hotplugged device power in RUN_STATE_INMIGRATE state (Annie Li) [Orabug: 33642532]
+- pcie: Do not set power state for some hot-plugged devices (Annie Li) [Orabug: 33642532]
+- pc: q35: Bump max_cpus to 1024 (Suravee Suthikulpanit) [Orabug: 35425619]
+
+* Thu May 18 2023 Karl Heubaum <karl.heubaum@oracle.com> - 7.2.0-3.el9
 - vfio/migration: Skip log_sync during migration SETUP state (Avihai Horon) [Orabug: 35384144]
 - migration: fix ram_state_pending_exact() (Juan Quintela) [Orabug: 35384144]
 
-* Mon May 8 2023  Karl Heubaum <karl.heubaum@oracle.com> - 7.2.0-2.el9
+* Mon May 8 2023 Karl Heubaum <karl.heubaum@oracle.com> - 7.2.0-2.el9
 - spec: allow have_tools 0 (Steve Sistare)
 - spec: allow no block device modules (Steve Sistare)
 - qemu-kvm.spec: fix Linux io_uring support (Mark Kanda)
