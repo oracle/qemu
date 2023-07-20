@@ -14,7 +14,7 @@
 # Dependencies for the TUI addon (Required for successful linting)
 urwid==2.1.2
 urwid-readline==0.13
-Pygments==2.9.0
+Pygments==2.15.0
 
 # Dependencies for mkvenv
 distlib==0.3.6
