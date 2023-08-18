@@ -258,7 +258,7 @@ Requires: %{name}-block-ssh = %{epoch}:%{version}-%{release}     \
 Summary: QEMU is a machine emulator and virtualizer
 Name: qemu-kvm
 Version: 7.2.0
-Release: 4%{?dist}
+Release: 5%{?dist}
 Epoch: 30
 License: GPLv2+ and LGPLv2+ and BSD
 Group: Development/Tools
@@ -1680,6 +1680,14 @@ getent passwd qemu >/dev/null || \
 
 
 %changelog
+* Fri Aug 18 2023 Karl Heubaum <karl.heubaum@oracle.com> - 7.2.0-5.el9
+- virtio-crypto: verify src&dst buffer length for sym request (zhenwei pi) [Orabug: 35683774] {CVE-2023-3180}
+- io: remove io watch if TLS channel is closed during handshake (Daniel P. Berrangé) [Orabug: 35683826] {CVE-2023-3354}
+- ui/vnc-clipboard: fix infinite loop in inflate_buffer (CVE-2023-3255) (Mauro Matteo Cascella) [Orabug: 35683770] {CVE-2023-3255}
+- hw/scsi/lsi53c895a: Fix reentrancy issues in the LSI controller (CVE-2023-0330) (Thomas Huth) [Orabug: 35683817] {CVE-2023-0330}
+- vhost-vdpa: do not cleanup the vdpa/vhost-net structures if peer nic is present (Ani Sinha) [Orabug: 35649138] {CVE-2023-3301}
+- qmp-regdump: use QMP command 'query-cpus-fast' (Mark Kanda)
+
 * Thu Jul 13 2023 Karl Heubaum <karl.heubaum@oracle.com> - 7.2.0-4.el9
 - vfio/migration: Allow migration of multiple P2P supporting devices (Avihai Horon)
 - vfio/migration: Add P2P support for VFIO migration (Avihai Horon)
