@@ -106,6 +106,8 @@ option('avx512f', type: 'feature', value: 'disabled',
        description: 'AVX512F optimizations')
 option('keyring', type: 'feature', value: 'auto',
        description: 'Linux keyring support')
+option('libkeyutils', type: 'feature', value: 'auto',
+       description: 'Linux keyutils support')
 
 option('attr', type : 'feature', value : 'auto',
        description: 'attr/xattr support')
