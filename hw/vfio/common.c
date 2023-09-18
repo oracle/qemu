@@ -363,30 +363,21 @@ bool vfio_mig_active(void)
 
 static Error *multiple_devices_migration_blocker;
 
-/*
- * Multiple devices migration is currently allowed only if all devices support P2P.
- * Single device migration is allowed regardless of P2P support.
- */
-static unsigned int vfio_should_block_non_p2p_migration(void)
+static unsigned int vfio_migratable_device_num(void)
 {
     VFIOGroup *group;
     VFIODevice *vbasedev;
     unsigned int device_num = 0;
-    bool have_non_p2p_device = false;
 
     QLIST_FOREACH(group, &vfio_group_list, next) {
         QLIST_FOREACH(vbasedev, &group->device_list, next) {
             if (vbasedev->migration) {
                 device_num++;
-
-                if (!(vbasedev->migration->mig_flags & VFIO_MIGRATION_P2P)) {
-                    have_non_p2p_device = true;
-                }
             }
         }
     }
 
-    return have_non_p2p_device && device_num > 1;
+    return device_num;
 }
 
 int vfio_block_multiple_devices_migration(VFIODevice *vbasedev, Error **errp)
@@ -394,19 +385,19 @@ int vfio_block_multiple_devices_migration(VFIODevice *vbasedev, Error **errp)
     int ret;
 
     if (multiple_devices_migration_blocker ||
-        !vfio_should_block_non_p2p_migration()) {
+        vfio_migratable_device_num() <= 1) {
         return 0;
     }
 
     if (vbasedev->enable_migration == ON_OFF_AUTO_ON) {
-        error_setg(errp, "Migration is currently only supported with multiple "
-                         "VFIO devices when all of them support P2P");
+        error_setg(errp, "Migration is currently not supported with multiple "
+                         "VFIO devices");
         return -EINVAL;
     }
 
     error_setg(&multiple_devices_migration_blocker,
-               "Migration is currently only supported with multiple "
-               "VFIO devices when all of them support P2P");
+               "Migration is currently not supported with multiple "
+               "VFIO devices");
     ret = migrate_add_blocker(multiple_devices_migration_blocker, errp);
     if (ret < 0) {
         error_free(multiple_devices_migration_blocker);
@@ -419,7 +410,7 @@ int vfio_block_multiple_devices_migration(VFIODevice *vbasedev, Error **errp)
 void vfio_unblock_multiple_devices_migration(void)
 {
     if (!multiple_devices_migration_blocker ||
-        !vfio_should_block_non_p2p_migration()) {
+        vfio_migratable_device_num() > 1) {
         return;
     }
 
@@ -462,22 +453,6 @@ static void vfio_set_migration_error(int err)
     }
 }
 
-bool vfio_device_state_is_running(VFIODevice *vbasedev)
-{
-    VFIOMigration *migration = vbasedev->migration;
-
-    return migration->device_state == VFIO_DEVICE_STATE_RUNNING ||
-           migration->device_state == VFIO_DEVICE_STATE_RUNNING_P2P;
-}
-
-bool vfio_device_state_is_precopy(VFIODevice *vbasedev)
-{
-    VFIOMigration *migration = vbasedev->migration;
-
-    return migration->device_state == VFIO_DEVICE_STATE_PRE_COPY ||
-           migration->device_state == VFIO_DEVICE_STATE_PRE_COPY_P2P;
-}
-
 static bool vfio_devices_all_dirty_tracking(VFIOContainer *container)
 {
     VFIOGroup *group;
@@ -498,8 +473,8 @@ static bool vfio_devices_all_dirty_tracking(VFIOContainer *container)
             }
 
             if (vbasedev->pre_copy_dirty_page_tracking == ON_OFF_AUTO_OFF &&
-                (vfio_device_state_is_running(vbasedev) ||
-                 vfio_device_state_is_precopy(vbasedev))) {
+                (migration->device_state == VFIO_DEVICE_STATE_RUNNING ||
+                 migration->device_state == VFIO_DEVICE_STATE_PRE_COPY)) {
                 return false;
             }
         }
@@ -544,8 +519,8 @@ static bool vfio_devices_all_running_and_mig_active(VFIOContainer *container)
                 return false;
             }
 
-            if (vfio_device_state_is_running(vbasedev) ||
-                vfio_device_state_is_precopy(vbasedev)) {
+            if (migration->device_state == VFIO_DEVICE_STATE_RUNNING ||
+                migration->device_state == VFIO_DEVICE_STATE_PRE_COPY) {
                 continue;
             } else {
                 return false;
