@@ -937,12 +937,14 @@ static void vmstate_save_old_style(QEMUFile *f, SaveStateEntry *se,
 static int vmstate_save(QEMUFile *f, SaveStateEntry *se,
                         JSONWriter *vmdesc)
 {
+    Error *local_err = NULL;
+
     trace_vmstate_save(se->idstr, se->vmsd ? se->vmsd->name : "(old)");
     if (!se->vmsd) {
         vmstate_save_old_style(f, se, vmdesc);
         return 0;
     }
-    return vmstate_save_state(f, se->vmsd, se->opaque, vmdesc);
+    return vmstate_save_state_with_err(f, se->vmsd, se->opaque, vmdesc, &local_err);
 }
 
 /*
