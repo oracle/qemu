@@ -434,6 +434,7 @@ bool  migration_has_all_channels(void);
 uint64_t migrate_max_downtime(void);
 
 void migrate_set_error(MigrationState *s, const Error *error);
+bool migrate_has_error(MigrationState *s);
 
 void migrate_incoming_set_error(MigrationIncomingState *s, const Error *error);
 void migrate_incoming_free_error(MigrationIncomingState *s);
