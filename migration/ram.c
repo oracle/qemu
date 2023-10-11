@@ -1285,12 +1285,24 @@ static int save_zero_page(RAMState *rs, RAMBlock *block, ram_addr_t offset)
 {
     int len = save_zero_page_to_file(rs, rs->f, block, offset);
 
-    if (len) {
-        stat64_add(&ram_counters.zero_pages, 1);
-        ram_transferred_add(len);
-        return 1;
+    if (!len) {
+        return -1;
     }
-    return -1;
+
+    stat64_add(&ram_counters.zero_pages, 1);
+    ram_transferred_add(len);
+
+    /*
+     * Must let xbzrle know, otherwise a previous (now 0'd) cached
+     * page would be stale.
+     */
+    if (rs->xbzrle_enabled) {
+        XBZRLE_cache_lock();
+        xbzrle_cache_zero_page(rs, block->offset + offset);
+        XBZRLE_cache_unlock();
+    }
+
+    return 1;
 }
 
 /*
@@ -2309,14 +2321,6 @@ static int ram_save_target_page(RAMState *rs, PageSearchStatus *pss)
 
     res = save_zero_page(rs, block, offset);
     if (res > 0) {
-        /* Must let xbzrle know, otherwise a previous (now 0'd) cached
-         * page would be stale
-         */
-        if (!save_page_use_compression(rs)) {
-            XBZRLE_cache_lock();
-            xbzrle_cache_zero_page(rs, block->offset + offset);
-            XBZRLE_cache_unlock();
-        }
         return res;
     }
 
