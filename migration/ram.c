@@ -1246,31 +1246,7 @@ void ram_release_page(const char *rbname, uint64_t offset)
     ram_discard_range(rbname, offset, TARGET_PAGE_SIZE);
 }
 
-/**
- * save_zero_page_to_file: send the zero page to the file
- *
- * Returns the size of data written to the file, 0 means the page is not
- * a zero page
- *
- * @rs: current RAM state
- * @file: the file where the data is saved
- * @block: block that contains the page we want to send
- * @offset: offset inside the block for the page
- */
-static int save_zero_page_to_file(RAMState *rs, QEMUFile *file,
-                                  RAMBlock *block, ram_addr_t offset)
-{
-    uint8_t *p = block->host + offset;
-    int len = 0;
-
-    if (buffer_is_zero(p, TARGET_PAGE_SIZE)) {
-        len += save_page_header(rs, file, block, offset | RAM_SAVE_FLAG_ZERO);
-        qemu_put_byte(file, 0);
-        len += 1;
-        ram_release_page(block->idstr, offset);
-    }
-    return len;
-}
+static bool save_page_use_compression(RAMState *rs);
 
 /**
  * save_zero_page: send the zero page to the stream
@@ -1283,11 +1259,18 @@ static int save_zero_page_to_file(RAMState *rs, QEMUFile *file,
  */
 static int save_zero_page(RAMState *rs, RAMBlock *block, ram_addr_t offset)
 {
-    int len = save_zero_page_to_file(rs, rs->f, block, offset);
+    uint8_t *p = block->host + offset;
+    QEMUFile *file = rs->f;
+    int len = 0;
 
-    if (!len) {
-        return -1;
+    if (!buffer_is_zero(p, TARGET_PAGE_SIZE)) {
+        return 0;
     }
+
+    len += save_page_header(rs, rs->f, block, offset | RAM_SAVE_FLAG_ZERO);
+    qemu_put_byte(file, 0);
+    len += 1;
+    ram_release_page(block->idstr, offset);
 
     stat64_add(&ram_counters.zero_pages, 1);
     ram_transferred_add(len);
@@ -1302,7 +1285,7 @@ static int save_zero_page(RAMState *rs, RAMBlock *block, ram_addr_t offset)
         XBZRLE_cache_unlock();
     }
 
-    return 1;
+    return len;
 }
 
 /*
@@ -1435,7 +1418,7 @@ static bool do_compress_ram_page(QEMUFile *f, z_stream *stream, RAMBlock *block,
     uint8_t *p = block->host + offset;
     int ret;
 
-    if (save_zero_page_to_file(rs, f, block, offset)) {
+    if (save_zero_page(rs, block, offset)) {
         return true;
     }
 
@@ -1470,7 +1453,6 @@ update_compress_thread_counts(const CompressParam *param, int bytes_xmit)
     compression_counters.pages++;
 }
 
-static bool save_page_use_compression(RAMState *rs);
 
 static void flush_compressed_data(RAMState *rs)
 {
@@ -2319,9 +2301,8 @@ static int ram_save_target_page(RAMState *rs, PageSearchStatus *pss)
         return 1;
     }
 
-    res = save_zero_page(rs, block, offset);
-    if (res > 0) {
-        return res;
+    if (save_zero_page(rs, block, offset)) {
+        return 1;
     }
 
     /*
