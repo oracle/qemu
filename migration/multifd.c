@@ -727,6 +727,7 @@ static void *multifd_send_thread(void *opaque)
                        p->next_packet_size + p->packet_len);
             stat64_add(&ram_counters.transferred,
                        p->next_packet_size + p->packet_len);
+            p->next_packet_size = 0;
             qemu_mutex_lock(&p->mutex);
             p->pending_job--;
             qemu_mutex_unlock(&p->mutex);
