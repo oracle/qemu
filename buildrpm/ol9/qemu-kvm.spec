@@ -258,7 +258,7 @@ Requires: %{name}-block-ssh = %{epoch}:%{version}-%{release}     \
 Summary: QEMU is a machine emulator and virtualizer
 Name: qemu-kvm
 Version: 7.2.0
-Release: 5%{?dist}
+Release: 6%{?dist}
 Epoch: 30
 License: GPLv2+ and LGPLv2+ and BSD
 Group: Development/Tools
@@ -1680,6 +1680,46 @@ getent passwd qemu >/dev/null || \
 
 
 %changelog
+* Wed Oct 18 2023 Karl Heubaum <karl.heubaum@oracle.com> - 7.2.0-6.el9
+- hw/smbios: Fix core count in type4 (Zhao Liu) [Orabug: 35869694]
+- hw/smbios: Fix thread count in type4 (Zhao Liu) [Orabug: 35869694]
+- hw/smbios: Fix smbios_smp_sockets caculation (Zhao Liu) [Orabug: 35869694]
+- machine: Add helpers to get cores/threads per socket (Zhao Liu) [Orabug: 35869694]
+- migration/multifd: Move load_cleanup inside incoming_state_destroy (Leonardo Bras) [Orabug: 35829153]
+- migration/multifd: Join all multifd threads in order to avoid leaks (Leonardo Bras) [Orabug: 35829153]
+- migration/multifd: Remove unnecessary assignment on multifd_load_cleanup() (Leonardo Bras) [Orabug: 35829153]
+- migration/multifd: Change multifd_load_cleanup() signature and usage (Leonardo Bras) [Orabug: 35829153]
+- vfio/migration: Block VFIO migration with background snapshot (Avihai Horon)
+- vfio/migration: Block VFIO migration with postcopy migration (Avihai Horon)
+- migration: Add .save_prepare() handler to struct SaveVMHandlers (Avihai Horon)
+- migration: Move more initializations to migrate_init() (Avihai Horon)
+- vfio/migration: Fail adding device with enable-migration=on and existing blocker (Avihai Horon)
+- migration: Add migration prefix to functions in target.c (Avihai Horon)
+- vfio/migration: Allow migration of multiple P2P supporting devices (Avihai Horon)
+- vfio/migration: Add P2P support for VFIO migration (Avihai Horon)
+- vfio/migration: Refactor PRE_COPY and RUNNING state checks (Joao Martins)
+- qdev: Add qdev_add_vm_change_state_handler_full() (Avihai Horon)
+- sysemu: Add prepare callback to struct VMChangeStateEntry (Avihai Horon)
+- vfio/migration: Move from STOP_COPY to STOP in vfio_save_cleanup() (Avihai Horon)
+- hw/vfio: Add number of dirty pages to vfio_get_dirty_bitmap tracepoint (Joao Martins)
+- exec/ram_addr: Return number of dirty pages in cpu_physical_memory_set_dirty_lebitmap() (Joao Martins)
+- migration: fix populate_vfio_info (Steve Sistare)
+- vfio/migration: Revert out of tree P2P support (Joao Martins)
+- async: clarify usage of barriers in the polling case (Paolo Bonzini) [Orabug: 35871058]
+- async: update documentation of the memory barriers (Paolo Bonzini) [Orabug: 35871058]
+- physmem: add missing memory barrier (Paolo Bonzini) [Orabug: 35871058]
+- qemu-coroutine-lock: add smp_mb__after_rmw() (Paolo Bonzini) [Orabug: 35871058]
+- aio-wait: switch to smp_mb__after_rmw() (Paolo Bonzini) [Orabug: 35871058]
+- edu: add smp_mb__after_rmw() (Paolo Bonzini) [Orabug: 35871058]
+- qemu-thread-win32: cleanup, fix, document QemuEvent (Paolo Bonzini) [Orabug: 35871058]
+- qemu-thread-posix: cleanup, fix, document QemuEvent (Paolo Bonzini) [Orabug: 35871058]
+- qatomic: add smp_mb__before/after_rmw() (Paolo Bonzini) [Orabug: 35871058]
+- dump: kdump-zlib data pages not dumped with pvtime/aarch64 (Dongli Zhang) [Orabug: 35777876]
+- hw/smbios: fix field corruption in type 4 table (Julia Suvorova) [Orabug: 35756216]
+- kvm: Atomic memslot updates (David Hildenbrand) [Orabug: 35728782]
+- KVM: keep track of running ioctls (Emanuele Giuseppe Esposito) [Orabug: 35728782]
+- accel: introduce accelerator blocker API (Emanuele Giuseppe Esposito) [Orabug: 35728782]
+
 * Fri Aug 18 2023 Karl Heubaum <karl.heubaum@oracle.com> - 7.2.0-5.el9
 - virtio-crypto: verify src&dst buffer length for sym request (zhenwei pi) [Orabug: 35683774] {CVE-2023-3180}
 - io: remove io watch if TLS channel is closed during handshake (Daniel P. Berrangé) [Orabug: 35683826] {CVE-2023-3354}
