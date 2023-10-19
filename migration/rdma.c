@@ -3586,7 +3586,11 @@ static int qemu_rdma_registration_handle(QEMUFile *f, void *opaque)
 
             host_addr = block->local_host_addr +
                             (comp->offset - block->offset);
-
+            if (comp->value) {
+                error_report("rdma: Zero page with non-zero (%d) value",
+                             comp->value);
+                goto out;
+            }
             ram_handle_compressed(host_addr, comp->value, comp->length);
             break;
 
