@@ -61,7 +61,7 @@ void migration_rate_reset(QEMUFile *f)
 uint64_t migration_transferred_bytes(QEMUFile *f)
 {
     uint64_t multifd = stat64_get(&ram_counters.multifd_bytes);
-    uint64_t qemu_file = qemu_file_transferred(f);
+    uint64_t qemu_file = stat64_get(&ram_counters.qemu_file_transferred);
 
     trace_migration_transferred_bytes(qemu_file, multifd);
     return qemu_file + multifd;
