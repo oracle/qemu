@@ -3871,9 +3871,7 @@ static int qemu_rdma_registration_start(QEMUFile *f,
 
     trace_qemu_rdma_registration_start(flags);
     qemu_put_be64(f, RAM_SAVE_FLAG_HOOK);
-    qemu_fflush(f);
-
-    return 0;
+    return qemu_fflush(f);
 }
 
 /*
