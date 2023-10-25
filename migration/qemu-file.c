@@ -296,6 +296,7 @@ void qemu_fflush(QEMUFile *f)
         } else {
             uint64_t size = iov_size(f->iov, f->iovcnt);
             f->total_transferred += size;
+            stat64_add(&ram_counters.qemu_file_transferred, size);
         }
 
         qemu_iovec_release_ram(f);
@@ -709,7 +710,7 @@ int qemu_get_byte(QEMUFile *f)
 
 uint64_t qemu_file_transferred_fast(QEMUFile *f)
 {
-    uint64_t ret = f->total_transferred;
+    uint64_t ret = stat64_get(&ram_counters.qemu_file_transferred);
     int i;
 
     for (i = 0; i < f->iovcnt; i++) {
@@ -722,7 +723,7 @@ uint64_t qemu_file_transferred_fast(QEMUFile *f)
 uint64_t qemu_file_transferred(QEMUFile *f)
 {
     qemu_fflush(f);
-    return f->total_transferred;
+    return stat64_get(&ram_counters.qemu_file_transferred);
 }
 
 void qemu_put_be16(QEMUFile *f, unsigned int v)
