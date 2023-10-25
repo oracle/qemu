@@ -97,10 +97,6 @@ typedef struct {
      * Maximum amount of data we can send in a cycle.
      */
     Stat64 rate_limit_max;
-    /*
-     * Total number of bytes transferred.
-     */
-    Stat64 transferred;
 } RAMStats;
 
 extern RAMStats ram_counters;
