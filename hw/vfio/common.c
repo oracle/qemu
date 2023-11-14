@@ -2493,6 +2493,9 @@ vfio_get_iommu_info_cap(struct vfio_iommu_type1_info *info, uint16_t id)
     return NULL;
 }
 
+/* UEK only: Advertise that type1 has hardware IOMMU dirty tracking */
+#define CAP_MIGRATION_HW_DIRTY_TRACKING (1 << 16)
+
 static void vfio_get_iommu_info_migration(VFIOContainer *container,
                                          struct vfio_iommu_type1_info *info)
 {
@@ -2510,9 +2513,14 @@ static void vfio_get_iommu_info_migration(VFIOContainer *container,
     /*
      * cpu_physical_memory_set_dirty_lebitmap() supports pages in bitmap of
      * qemu_real_host_page_size to mark those dirty.
+     *
+     * (UEK only) CAP_MIGRATION_HW_DIRTY_TRACKING designates that type1 has
+     * real hardware dirty page tracking instead of perpectual dirty tracking.
      */
     if (cap_mig->pgsize_bitmap & qemu_real_host_page_size()) {
         container->dirty_pages_supported = true;
+        container->dirty_pages_hw_supported =
+            cap_mig->flags & CAP_MIGRATION_HW_DIRTY_TRACKING;
         container->max_dirty_bitmap_size = cap_mig->max_dirty_bitmap_size;
         container->dirty_pgsizes = cap_mig->pgsize_bitmap;
     }
@@ -2598,6 +2606,7 @@ static int vfio_connect_container(VFIOGroup *group, AddressSpace *as,
     container->fd = fd;
     container->error = NULL;
     container->dirty_pages_supported = false;
+    container->dirty_pages_hw_supported = false;
     container->dma_max_mappings = 0;
     QLIST_INIT(&container->giommu_list);
     QLIST_INIT(&container->hostwin_list);
