@@ -518,6 +518,9 @@ static bool vfio_devices_all_device_dirty_tracking(VFIOContainer *container)
 
     QLIST_FOREACH(group, &container->group_list, container_next) {
         QLIST_FOREACH(vbasedev, &group->device_list, next) {
+            if (vbasedev->device_dirty_page_tracking == ON_OFF_AUTO_OFF) {
+                return false;
+            }
             if (!vbasedev->dirty_pages_supported) {
                 return false;
             }
