@@ -162,7 +162,7 @@ out:
     return ret;
 }
 
-bool ramblock_is_ignored(RAMBlock *block)
+bool migrate_ram_is_ignored(RAMBlock *block)
 {
     return !qemu_ram_is_migratable(block) ||
            (migrate_ignore_shared() && qemu_ram_is_shared(block));
@@ -864,7 +864,7 @@ unsigned long migration_bitmap_find_dirty(RAMState *rs, RAMBlock *rb,
     unsigned long size = rb->used_length >> TARGET_PAGE_BITS;
     unsigned long *bitmap = rb->bmap;
 
-    if (ramblock_is_ignored(rb)) {
+    if (migrate_ram_is_ignored(rb)) {
         return size;
     }
 
@@ -937,7 +937,7 @@ unsigned long colo_bitmap_find_dirty(RAMState *rs, RAMBlock *rb,
 
     *num = 0;
 
-    if (ramblock_is_ignored(rb)) {
+    if (migrate_ram_is_ignored(rb)) {
         return size;
     }
 
@@ -2466,7 +2466,7 @@ static int ram_save_host_page(RAMState *rs, PageSearchStatus *pss)
     unsigned long start_page = pss->page;
     int res;
 
-    if (ramblock_is_ignored(pss->block)) {
+    if (migrate_ram_is_ignored(pss->block)) {
         error_report("block %s should not be migrated !", pss->block->idstr);
         return 0;
     }
@@ -3555,7 +3555,7 @@ static inline RAMBlock *ram_block_from_stream(MigrationIncomingState *mis,
         return NULL;
     }
 
-    if (ramblock_is_ignored(block)) {
+    if (migrate_ram_is_ignored(block)) {
         error_report("block %s should not be migrated !", id);
         return NULL;
     }
@@ -4346,7 +4346,7 @@ static int ram_load_precopy(QEMUFile *f)
                     }
                     if (migrate_ignore_shared()) {
                         hwaddr addr = qemu_get_be64(f);
-                        if (ramblock_is_ignored(block) &&
+                        if (migrate_ram_is_ignored(block) &&
                             block->mr->addr != addr) {
                             error_report("Mismatched GPAs for block %s "
                                          "%" PRId64 "!= %" PRId64,
@@ -4639,7 +4639,7 @@ static void ram_mig_ram_block_resized(RAMBlockNotifier *n, void *host,
     RAMBlock *rb = qemu_ram_block_from_host(host, false, &offset);
     Error *err = NULL;
 
-    if (ramblock_is_ignored(rb)) {
+    if (migrate_ram_is_ignored(rb)) {
         return;
     }
 
