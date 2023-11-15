@@ -30,6 +30,7 @@
 #include "hw/char/parallel.h"
 #include "hw/i386/apic.h"
 #include "hw/i386/topology.h"
+#include "hw/hyperv/hv-balloon.h"
 #include "hw/i386/fw_cfg.h"
 #include "hw/i386/vmport.h"
 #include "sysemu/cpus.h"
@@ -1511,6 +1512,21 @@ static void pc_virtio_md_pci_unplug(HotplugHandler *hotplug_dev,
     /* We don't support hot unplug of virtio based memory devices */
 }
 
+static void pc_hv_balloon_pre_plug(HotplugHandler *hotplug_dev,
+                                   DeviceState *dev, Error **errp)
+{
+    /* The vmbus handler has no hotplug handler; we should never end up here. */
+    g_assert(!dev->hotplugged);
+    memory_device_pre_plug(MEMORY_DEVICE(dev), MACHINE(hotplug_dev), NULL,
+                           errp);
+}
+
+static void pc_hv_balloon_plug(HotplugHandler *hotplug_dev,
+                               DeviceState *dev, Error **errp)
+{
+    memory_device_plug(MEMORY_DEVICE(dev), MACHINE(hotplug_dev));
+}
+
 static void pc_machine_device_pre_plug_cb(HotplugHandler *hotplug_dev,
                                           DeviceState *dev, Error **errp)
 {
@@ -1542,6 +1558,8 @@ static void pc_machine_device_pre_plug_cb(HotplugHandler *hotplug_dev,
             return;
         }
         pcms->iommu = dev;
+    } else if (object_dynamic_cast(OBJECT(dev), TYPE_HV_BALLOON)) {
+        pc_hv_balloon_pre_plug(hotplug_dev, dev, errp);
     }
 }
 
@@ -1555,6 +1573,8 @@ static void pc_machine_device_plug_cb(HotplugHandler *hotplug_dev,
     } else if (object_dynamic_cast(OBJECT(dev), TYPE_VIRTIO_PMEM_PCI) ||
                object_dynamic_cast(OBJECT(dev), TYPE_VIRTIO_MEM_PCI)) {
         pc_virtio_md_pci_plug(hotplug_dev, dev, errp);
+    } else if (object_dynamic_cast(OBJECT(dev), TYPE_HV_BALLOON)) {
+        pc_hv_balloon_plug(hotplug_dev, dev, errp);
     }
 }
 
@@ -1598,6 +1618,7 @@ static HotplugHandler *pc_get_hotplug_handler(MachineState *machine,
         object_dynamic_cast(OBJECT(dev), TYPE_VIRTIO_PMEM_PCI) ||
         object_dynamic_cast(OBJECT(dev), TYPE_VIRTIO_MEM_PCI) ||
         object_dynamic_cast(OBJECT(dev), TYPE_VIRTIO_IOMMU_PCI) ||
+        object_dynamic_cast(OBJECT(dev), TYPE_HV_BALLOON) ||
         object_dynamic_cast(OBJECT(dev), TYPE_X86_IOMMU_DEVICE)) {
         return HOTPLUG_HANDLER(machine);
     }
