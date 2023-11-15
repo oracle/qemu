@@ -1256,12 +1256,36 @@
 }
 
 ##
+# @HvBalloonDeviceInfo:
+#
+# hv-balloon provided memory state information
+#
+# @id: device's ID
+#
+# @memaddr: physical address in memory, where device is mapped
+#
+# @max-size: the maximum size of memory that the device can provide
+#
+# @memdev: memory backend linked with device
+#
+# Since: 8.2
+##
+{ 'struct': 'HvBalloonDeviceInfo',
+  'data': { '*id': 'str',
+            '*memaddr': 'size',
+            'max-size': 'size',
+            '*memdev': 'str'
+          }
+}
+
+##
 # @MemoryDeviceInfoKind:
 #
 # Since: 2.1
 ##
 { 'enum': 'MemoryDeviceInfoKind',
-  'data': [ 'dimm', 'nvdimm', 'virtio-pmem', 'virtio-mem', 'sgx-epc' ] }
+  'data': [ 'dimm', 'nvdimm', 'virtio-pmem', 'virtio-mem', 'sgx-epc',
+            'hv-balloon' ] }
 
 ##
 # @PCDIMMDeviceInfoWrapper:
@@ -1296,12 +1320,21 @@
   'data': { 'data': 'SgxEPCDeviceInfo' } }
 
 ##
+# @HvBalloonDeviceInfoWrapper:
+#
+# Since: 8.2
+##
+{ 'struct': 'HvBalloonDeviceInfoWrapper',
+  'data': { 'data': 'HvBalloonDeviceInfo' } }
+
+##
 # @MemoryDeviceInfo:
 #
 # Union containing information about a memory device
 #
 # nvdimm is included since 2.12. virtio-pmem is included since 4.1.
 # virtio-mem is included since 5.1. sgx-epc is included since 6.2.
+# hv-balloon is included since 8.2.
 #
 # Since: 2.1
 ##
@@ -1312,7 +1345,8 @@
             'nvdimm': 'PCDIMMDeviceInfoWrapper',
             'virtio-pmem': 'VirtioPMEMDeviceInfoWrapper',
             'virtio-mem': 'VirtioMEMDeviceInfoWrapper',
-            'sgx-epc': 'SgxEPCDeviceInfoWrapper'
+            'sgx-epc': 'SgxEPCDeviceInfoWrapper',
+            'hv-balloon': 'HvBalloonDeviceInfoWrapper'
           }
 }
 
