@@ -1072,7 +1072,6 @@ if get_option('hv_balloon').allowed() and have_system
         GTree *tree;
 
         tree = g_tree_new((GCompareFunc)strcmp);
-        (void)g_tree_node_first(tree);
         g_tree_destroy(tree);
         return 0;
     }

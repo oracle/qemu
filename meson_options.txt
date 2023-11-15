@@ -130,7 +130,7 @@ option('gio', type : 'feature', value : 'auto',
 option('glusterfs', type : 'feature', value : 'auto',
        description: 'Glusterfs block device driver')
 option('hv_balloon', type : 'feature', value : 'auto',
-       description: 'hv-balloon driver (requires Glib 2.68+ GTree API)')
+       description: 'hv-balloon driver')
 option('libiscsi', type : 'feature', value : 'auto',
        description: 'libiscsi userspace initiator')
 option('libnfs', type : 'feature', value : 'auto',
