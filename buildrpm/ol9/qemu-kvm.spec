@@ -258,7 +258,7 @@ Requires: %{name}-block-ssh = %{epoch}:%{version}-%{release}     \
 Summary: QEMU is a machine emulator and virtualizer
 Name: qemu-kvm
 Version: 7.2.0
-Release: 6%{?dist}
+Release: 7%{?dist}
 Epoch: 30
 License: GPLv2+ and LGPLv2+ and BSD
 Group: Development/Tools
@@ -1680,6 +1680,10 @@ getent passwd qemu >/dev/null || \
 
 
 %changelog
+* Thu Dec 7 2023 Karl Heubaum <karl.heubaum@oracle.com> - 7.2.0-7.el9
+- vfio/common: Probe type1 iommu dirty tracking support (Joao Martins) [Orabug: 36024839]
+- vfio/common: Allow disabling device dirty page tracking (Joao Martins) [Orabug: 36024839]
+
 * Wed Oct 18 2023 Karl Heubaum <karl.heubaum@oracle.com> - 7.2.0-6.el9
 - hw/smbios: Fix core count in type4 (Zhao Liu) [Orabug: 35869694]
 - hw/smbios: Fix thread count in type4 (Zhao Liu) [Orabug: 35869694]
