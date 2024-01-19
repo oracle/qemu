@@ -259,8 +259,39 @@ void migration_object_init(void)
     dirty_bitmap_mig_init();
 }
 
-static void migration_bh_schedule(MigrationState *s, QEMUBH *bh)
+typedef struct {
+    QEMUBH *bh;
+    QEMUBHFunc *cb;
+    void *opaque;
+} MigrationBH;
+
+static void migration_bh_dispatch_bh(void *opaque)
 {
+    MigrationState *s = migrate_get_current();
+    MigrationBH *migbh = opaque;
+
+    /* cleanup this BH */
+    qemu_bh_delete(migbh->bh);
+    migbh->bh = NULL;
+
+    /* dispatch the other one */
+    migbh->cb(migbh->opaque);
+    object_unref(OBJECT(s));
+
+    g_free(migbh);
+}
+
+void migration_bh_schedule(QEMUBHFunc *cb, void *opaque)
+{
+    MigrationState *s = migrate_get_current();
+    MigrationBH *migbh = g_new0(MigrationBH, 1);
+    QEMUBH *bh = qemu_bh_new(migration_bh_dispatch_bh, migbh);
+
+    /* Store these to dispatch when the BH runs */
+    migbh->bh = bh;
+    migbh->cb = cb;
+    migbh->opaque = opaque;
+
     /*
      * Ref the state for bh, because it may be called when
      * there're already no other refs
@@ -609,9 +640,7 @@ static void process_incoming_migration_bh(void *opaque)
      */
     migrate_set_state(&mis->state, MIGRATION_STATUS_ACTIVE,
                       MIGRATION_STATUS_COMPLETED);
-    qemu_bh_delete(mis->bh);
     migration_incoming_state_destroy();
-    object_unref(OBJECT(migrate_get_current()));
 }
 
 static void coroutine_fn
@@ -679,8 +708,7 @@ process_incoming_migration_co(void *opaque)
         error_report("load of migration failed: %s", strerror(-ret));
         goto fail;
     }
-    mis->bh = qemu_bh_new(process_incoming_migration_bh, mis);
-    migration_bh_schedule(migrate_get_current(), mis->bh);
+    migration_bh_schedule(process_incoming_migration_bh, mis);
     return;
 fail:
     local_err = NULL;
@@ -1971,9 +1999,6 @@ static void block_cleanup_parameters(MigrationState *s)
 
 static void migrate_fd_cleanup(MigrationState *s)
 {
-    qemu_bh_delete(s->cleanup_bh);
-    s->cleanup_bh = NULL;
-
     g_free(s->hostname);
     s->hostname = NULL;
 
@@ -2027,9 +2052,7 @@ static void migrate_fd_cleanup(MigrationState *s)
 
 static void migrate_fd_cleanup_bh(void *opaque)
 {
-    MigrationState *s = opaque;
-    migrate_fd_cleanup(s);
-    object_unref(OBJECT(s));
+    migrate_fd_cleanup(opaque);
 }
 
 void migrate_set_error(MigrationState *s, const Error *error)
@@ -2215,8 +2238,6 @@ int migrate_init(MigrationState *s, Error **errp)
      * parameters/capabilities that the user set, and
      * locks.
      */
-    s->cleanup_bh = 0;
-    s->vm_start_bh = 0;
     s->to_dst_file = NULL;
     s->state = MIGRATION_STATUS_NONE;
     s->rp_state.from_dst_file = NULL;
@@ -3916,7 +3937,7 @@ static void migration_iteration_finish(MigrationState *s)
         error_report("%s: Unknown ending state %d", __func__, s->state);
         break;
     }
-    migration_bh_schedule(s, s->cleanup_bh);
+    migration_bh_schedule(migrate_fd_cleanup_bh, s);
     qemu_mutex_unlock_iothread();
 }
 
@@ -3940,7 +3961,7 @@ static void bg_migration_iteration_finish(MigrationState *s)
         break;
     }
 
-    migration_bh_schedule(s, s->cleanup_bh);
+    migration_bh_schedule(migrate_fd_cleanup_bh, s);
     qemu_mutex_unlock_iothread();
 }
 
@@ -4138,9 +4159,6 @@ static void bg_migration_vm_start_bh(void *opaque)
 {
     MigrationState *s = opaque;
 
-    qemu_bh_delete(s->vm_start_bh);
-    s->vm_start_bh = NULL;
-
     vm_start();
     migration_downtime_end(s);
 }
@@ -4251,8 +4269,7 @@ static void *bg_migration_thread(void *opaque)
      * calling VM state change notifiers from vm_start() would initiate
      * writes to virtio VQs memory which is in write-protected region.
      */
-    s->vm_start_bh = qemu_bh_new(bg_migration_vm_start_bh, s);
-    migration_bh_schedule(s, s->vm_start_bh);
+    migration_bh_schedule(bg_migration_vm_start_bh, s);
     qemu_mutex_unlock_iothread();
 
     while (migration_is_active(s)) {
@@ -4308,12 +4325,6 @@ void migrate_fd_connect(MigrationState *s, Error *error_in)
     migrate_error_free(s);
 
     s->expected_downtime = s->parameters.downtime_limit;
-    if (resume) {
-        assert(s->cleanup_bh);
-    } else {
-        assert(!s->cleanup_bh);
-        s->cleanup_bh = qemu_bh_new(migrate_fd_cleanup_bh, s);
-    }
     if (error_in) {
         migrate_fd_error(s, error_in);
         if (resume) {
