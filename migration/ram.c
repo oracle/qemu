@@ -4419,17 +4419,25 @@ static int ram_load_precopy(QEMUFile *f)
     return ret;
 }
 
+static uint64_t ram_load_seq_iteration_bump(void)
+{
+    static uint64_t seq_iter;
+
+    return ++seq_iter;
+}
+
 static int ram_load(QEMUFile *f, void *opaque, int version_id)
 {
     int ret = 0;
-    static uint64_t seq_iter;
+    uint64_t counter;
+
     /*
      * If system is running in postcopy mode, page inserts to host memory must
      * be atomic
      */
     bool postcopy_running = postcopy_is_running();
 
-    seq_iter++;
+    counter = ram_load_seq_iteration_bump();
 
     if (version_id != 4) {
         return -EINVAL;
@@ -4453,7 +4461,7 @@ static int ram_load(QEMUFile *f, void *opaque, int version_id)
             ret = ram_load_precopy(f);
         }
     }
-    trace_ram_load_complete(ret, seq_iter);
+    trace_ram_load_complete(ret, counter);
 
     return ret;
 }
