@@ -184,6 +184,7 @@ static void migrate_fd_cancel(MigrationState *s);
 
 static void migration_downtime_start(MigrationState *s)
 {
+    trace_vmstate_downtime_checkpoint("src-downtime-start");
     s->downtime_start = qemu_clock_get_ms(QEMU_CLOCK_REALTIME);
 }
 
@@ -198,6 +199,8 @@ static void migration_downtime_end(MigrationState *s)
     if (!s->downtime) {
         s->downtime = now - s->downtime_start;
     }
+
+    trace_vmstate_downtime_checkpoint("src-downtime-end");
 }
 
 static bool migrate_allow_multi_channels = true;
@@ -221,7 +224,11 @@ static gint page_request_addr_cmp(gconstpointer ap, gconstpointer bp)
 
 int migration_stop_vm(RunState state)
 {
-    return vm_stop_force_state(state);
+    int ret = vm_stop_force_state(state);
+
+    trace_vmstate_downtime_checkpoint("src-vm-stopped");
+
+    return ret;
 }
 
 void migration_object_init(void)
@@ -541,6 +548,8 @@ static void process_incoming_migration_bh(void *opaque)
     Error *local_err = NULL;
     MigrationIncomingState *mis = opaque;
 
+    trace_vmstate_downtime_checkpoint("dst-precopy-bh-enter");
+
     /* If capability late_block_activate is set:
      * Only fire up the block code now if we're going to restart the
      * VM, else 'cont' will do it.
@@ -566,6 +575,8 @@ static void process_incoming_migration_bh(void *opaque)
      */
     qemu_announce_self(&mis->announce_timer, migrate_announce_params());
 
+    trace_vmstate_downtime_checkpoint("dst-precopy-bh-announced");
+
     multifd_load_shutdown();
 
     dirty_bitmap_mig_before_vm_start();
@@ -583,6 +594,7 @@ static void process_incoming_migration_bh(void *opaque)
     } else {
         runstate_set(global_state_get_runstate());
     }
+    trace_vmstate_downtime_checkpoint("dst-precopy-bh-vm-started");
     /*
      * This must happen after any state changes since as soon as an external
      * observer sees this event they might start to prod at the VM assuming
@@ -609,6 +621,8 @@ process_incoming_migration_co(void *opaque)
     migrate_set_state(&mis->state, MIGRATION_STATUS_NONE,
                       MIGRATION_STATUS_ACTIVE);
     ret = qemu_loadvm_state(mis->from_src_file);
+
+    trace_vmstate_downtime_checkpoint("dst-precopy-loadvm-completed");
 
     ps = postcopy_state_get();
     trace_process_incoming_migration_co_end(ret, ps);

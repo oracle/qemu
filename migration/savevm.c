@@ -1387,6 +1387,8 @@ int qemu_savevm_state_complete_precopy_iterable(QEMUFile *f, bool in_postcopy)
                                     end_ts_each - start_ts_each);
     }
 
+    trace_vmstate_downtime_checkpoint("src-iterable-saved");
+
     return 0;
 }
 
@@ -1464,6 +1466,8 @@ int qemu_savevm_state_complete_precopy_non_iterable(QEMUFile *f,
         qemu_put_be32(f, vmdesc_len);
         qemu_put_buffer(f, (uint8_t *)json_writer_get(vmdesc), vmdesc_len);
     }
+
+    trace_vmstate_downtime_checkpoint("src-non-iterable-saved");
 
     return 0;
 }
@@ -2019,18 +2023,18 @@ static void loadvm_postcopy_handle_run_bh(void *opaque)
     Error *local_err = NULL;
     MigrationIncomingState *mis = opaque;
 
-    trace_loadvm_postcopy_handle_run_bh("enter");
+    trace_vmstate_downtime_checkpoint("dst-postcopy-bh-enter");
 
     /* TODO we should move all of this lot into postcopy_ram.c or a shared code
      * in migration.c
      */
     cpu_synchronize_all_post_init();
 
-    trace_loadvm_postcopy_handle_run_bh("after cpu sync");
+    trace_vmstate_downtime_checkpoint("dst-postcopy-bh-cpu-synced");
 
     qemu_announce_self(&mis->announce_timer, migrate_announce_params());
 
-    trace_loadvm_postcopy_handle_run_bh("after announce");
+    trace_vmstate_downtime_checkpoint("dst-postcopy-bh-announced");
 
     /* Make sure all file formats throw away their mutable metadata.
      * If we get an error here, just don't restart the VM yet. */
@@ -2041,7 +2045,7 @@ static void loadvm_postcopy_handle_run_bh(void *opaque)
         autostart = false;
     }
 
-    trace_loadvm_postcopy_handle_run_bh("after invalidate cache");
+    trace_vmstate_downtime_checkpoint("dst-postcopy-bh-cache-invalidated");
 
     dirty_bitmap_mig_before_vm_start();
 
@@ -2055,7 +2059,7 @@ static void loadvm_postcopy_handle_run_bh(void *opaque)
 
     qemu_bh_delete(mis->bh);
 
-    trace_loadvm_postcopy_handle_run_bh("return");
+    trace_vmstate_downtime_checkpoint("dst-postcopy-bh-vm-started");
 }
 
 /* After all discards we can start running and asking for pages */
