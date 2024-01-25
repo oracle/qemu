@@ -219,6 +219,11 @@ static gint page_request_addr_cmp(gconstpointer ap, gconstpointer bp)
     return (a > b) - (a < b);
 }
 
+int migration_stop_vm(RunState state)
+{
+    return vm_stop_force_state(state);
+}
+
 void migration_object_init(void)
 {
     /* This can only be called once. */
@@ -3161,7 +3166,7 @@ static int postcopy_start(MigrationState *ms)
 
     qemu_system_wakeup_request(QEMU_WAKEUP_REASON_OTHER, NULL);
     global_state_store();
-    ret = vm_stop_force_state(RUN_STATE_FINISH_MIGRATE);
+    ret = migration_stop_vm(RUN_STATE_FINISH_MIGRATE);
     if (ret < 0) {
         goto fail;
     }
@@ -3376,7 +3381,7 @@ static void migration_completion(MigrationState *s)
 
         if (!ret) {
             bool inactivate = !migrate_colo_enabled();
-            ret = vm_stop_force_state(RUN_STATE_FINISH_MIGRATE);
+            ret = migration_stop_vm(RUN_STATE_FINISH_MIGRATE);
             trace_migration_completion_vm_stop(ret);
             if (ret >= 0) {
                 ret = migration_maybe_pause(s, &current_active_state,
@@ -4194,7 +4199,7 @@ static void *bg_migration_thread(void *opaque)
         goto fail;
     }
     /* Forcibly stop VM before saving state of vCPUs and devices */
-    if (vm_stop_force_state(RUN_STATE_PAUSED)) {
+    if (migration_stop_vm(RUN_STATE_PAUSED)) {
         goto fail;
     }
     /*
