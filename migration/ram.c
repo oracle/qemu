@@ -1403,7 +1403,7 @@ static int ram_save_page(RAMState *rs, PageSearchStatus *pss)
 static int ram_save_multifd_page(RAMState *rs, RAMBlock *block,
                                  ram_addr_t offset)
 {
-    if (multifd_queue_page(rs->f, block, offset) < 0) {
+    if (!multifd_queue_page(rs->f, block, offset)) {
         return -1;
     }
     stat64_add(&ram_counters.normal_pages, 1);
