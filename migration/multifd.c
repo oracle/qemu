@@ -290,6 +290,9 @@ static void multifd_send_fill_packet(MultiFDSendParams *p)
 
     p->packets_sent++;
     p->total_normal_pages += pages->num;
+
+    trace_multifd_send(p->id, p->packet_num, pages->num, p->flags,
+                       p->next_packet_size);
 }
 
 static int multifd_recv_unfill_packet(MultiFDRecvParams *p, Error **errp)
@@ -340,6 +343,9 @@ static int multifd_recv_unfill_packet(MultiFDRecvParams *p, Error **errp)
     p->packet_num = be64_to_cpu(packet->packet_num);
     p->packets_recved++;
     p->total_normal_pages += p->normal_num;
+
+    trace_multifd_recv(p->id, p->packet_num, p->normal_num, p->flags,
+                       p->next_packet_size);
 
     if (p->normal_num == 0) {
         return 0;
@@ -707,7 +713,6 @@ static void *multifd_send_thread(void *opaque)
         qemu_mutex_lock(&p->mutex);
 
         if (qatomic_read(&p->pending_job)) {
-            uint64_t packet_num = p->packet_num;
             MultiFDPages_t *pages = p->pages;
 
             if (use_zero_copy_send) {
@@ -725,8 +730,6 @@ static void *multifd_send_thread(void *opaque)
             }
 
             multifd_send_fill_packet(p);
-            trace_multifd_send(p->id, packet_num, pages->num, p->flags,
-                               p->next_packet_size);
 
             if (use_zero_copy_send) {
                 /* Send header first, without zerocopy */
@@ -1132,8 +1135,6 @@ static void *multifd_recv_thread(void *opaque)
         flags = p->flags;
         /* recv methods don't know how to handle the SYNC flag */
         p->flags &= ~MULTIFD_FLAG_SYNC;
-        trace_multifd_recv(p->id, p->packet_num, p->normal_num, flags,
-                           p->next_packet_size);
         qemu_mutex_unlock(&p->mutex);
 
         if (p->normal_num) {
