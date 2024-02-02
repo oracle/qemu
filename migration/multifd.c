@@ -593,6 +593,11 @@ static void multifd_send_terminate_threads(void)
      * always set it.
      */
     qatomic_set(&multifd_send_state->exiting, 1);
+
+    /*
+     * Firstly, kick all threads out; no matter whether they are just idle,
+     * or blocked in an IO system call.
+     */
     for (i = 0; i < migrate_multifd_channels(); i++) {
         MultiFDSendParams *p = &multifd_send_state->params[i];
 
@@ -601,6 +606,56 @@ static void multifd_send_terminate_threads(void)
             qio_channel_shutdown(p->c, QIO_CHANNEL_SHUTDOWN_BOTH, NULL);
         }
     }
+
+    /*
+     * Finally recycle all the threads.
+     *
+     * TODO: p->running is still buggy, e.g. we can reach here without the
+     * corresponding multifd_new_send_channel_async() get invoked yet,
+     * then a new thread can even be created after this function returns.
+     */
+    for (i = 0; i < migrate_multifd_channels(); i++) {
+        MultiFDSendParams *p = &multifd_send_state->params[i];
+
+        if (p->running) {
+            qemu_thread_join(&p->thread);
+        }
+    }
+}
+
+static bool multifd_send_cleanup_channel(MultiFDSendParams *p, Error **errp)
+{
+    if (p->registered_yank) {
+        migration_ioc_unregister_yank(p->c);
+    }
+    socket_send_channel_destroy(p->c);
+    p->c = NULL;
+    qemu_mutex_destroy(&p->mutex);
+    qemu_sem_destroy(&p->sem);
+    qemu_sem_destroy(&p->sem_sync);
+    g_free(p->name);
+    p->name = NULL;
+    multifd_pages_clear(p->pages);
+    p->pages = NULL;
+    p->packet_len = 0;
+    g_free(p->packet);
+    p->packet = NULL;
+    g_free(p->iov);
+    p->iov = NULL;
+    multifd_send_state->ops->send_cleanup(p, errp);
+
+    return *errp == NULL;
+}
+
+static void multifd_send_cleanup_state(void)
+{
+    qemu_sem_destroy(&multifd_send_state->channels_ready);
+    g_free(multifd_send_state->params);
+    multifd_send_state->params = NULL;
+    multifd_pages_clear(multifd_send_state->pages);
+    multifd_send_state->pages = NULL;
+    g_free(multifd_send_state);
+    multifd_send_state = NULL;
 }
 
 void multifd_save_cleanup(void)
@@ -610,48 +665,20 @@ void multifd_save_cleanup(void)
     if (!migrate_use_multifd() || !migrate_multi_channels_is_allowed()) {
         return;
     }
-    multifd_send_terminate_threads();
-    for (i = 0; i < migrate_multifd_channels(); i++) {
-        MultiFDSendParams *p = &multifd_send_state->params[i];
 
-        if (p->running) {
-            qemu_thread_join(&p->thread);
-        }
-    }
+    multifd_send_terminate_threads();
+
     for (i = 0; i < migrate_multifd_channels(); i++) {
         MultiFDSendParams *p = &multifd_send_state->params[i];
         Error *local_err = NULL;
 
-        if (p->registered_yank) {
-            migration_ioc_unregister_yank(p->c);
-        }
-        socket_send_channel_destroy(p->c);
-        p->c = NULL;
-        qemu_mutex_destroy(&p->mutex);
-        qemu_sem_destroy(&p->sem);
-        qemu_sem_destroy(&p->sem_sync);
-        g_free(p->name);
-        p->name = NULL;
-        multifd_pages_clear(p->pages);
-        p->pages = NULL;
-        p->packet_len = 0;
-        g_free(p->packet);
-        p->packet = NULL;
-        g_free(p->iov);
-        p->iov = NULL;
-        multifd_send_state->ops->send_cleanup(p, &local_err);
-        if (local_err) {
+        if (!multifd_send_cleanup_channel(p, &local_err)) {
             migrate_set_error(migrate_get_current(), local_err);
             error_free(local_err);
         }
     }
-    qemu_sem_destroy(&multifd_send_state->channels_ready);
-    g_free(multifd_send_state->params);
-    multifd_send_state->params = NULL;
-    multifd_pages_clear(multifd_send_state->pages);
-    multifd_send_state->pages = NULL;
-    g_free(multifd_send_state);
-    multifd_send_state = NULL;
+
+    multifd_send_cleanup_state();
 }
 
 static int multifd_zero_copy_flush(QIOChannel *c)
