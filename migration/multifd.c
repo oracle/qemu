@@ -449,9 +449,10 @@ static void multifd_send_kick_main(MultiFDSendParams *p)
  * thread is using the channel mutex when changing it, and the channel
  * have to had finish with its own, otherwise pending_job can't be
  * false.
+ *
+ * Returns true if succeed, false otherwise.
  */
-
-static int multifd_send_pages(QEMUFile *f)
+static bool multifd_send_pages(QEMUFile *f)
 {
     int i;
     static int next_channel;
@@ -459,7 +460,7 @@ static int multifd_send_pages(QEMUFile *f)
     MultiFDPages_t *pages = multifd_send_state->pages;
 
     if (multifd_send_should_exit()) {
-        return -1;
+        return false;
     }
 
     /* We wait here, until at least one channel is ready */
@@ -473,7 +474,7 @@ static int multifd_send_pages(QEMUFile *f)
     next_channel %= migrate_multifd_channels();
     for (i = next_channel;; i = (i + 1) % migrate_multifd_channels()) {
         if (multifd_send_should_exit()) {
-            return -1;
+            return false;
         }
         p = &multifd_send_state->params[i];
         /*
@@ -502,7 +503,7 @@ static int multifd_send_pages(QEMUFile *f)
     qemu_mutex_unlock(&p->mutex);
     qemu_sem_post(&p->sem);
 
-    return 1;
+    return true;
 }
 
 /* Returns true if enqueue successful, false otherwise */
@@ -526,7 +527,7 @@ bool multifd_queue_page(QEMUFile *f, RAMBlock *block, ram_addr_t offset)
         changed = true;
     }
 
-    if (multifd_send_pages(f) < 0) {
+    if (!multifd_send_pages(f)) {
         return false;
     }
 
@@ -661,7 +662,7 @@ int multifd_send_sync_main(QEMUFile *f)
         return 0;
     }
     if (multifd_send_state->pages->num) {
-        if (multifd_send_pages(f) < 0) {
+        if (!multifd_send_pages(f)) {
             error_report("%s: multifd_send_pages fail", __func__);
             return -1;
         }
