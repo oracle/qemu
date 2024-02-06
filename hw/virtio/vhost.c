@@ -45,6 +45,9 @@
 
 static struct vhost_log *vhost_log[VHOST_BACKEND_TYPE_MAX];
 static struct vhost_log *vhost_log_shm[VHOST_BACKEND_TYPE_MAX];
+static struct vhost_dev *vhost_mem_logger[VHOST_BACKEND_TYPE_MAX];
+static QLIST_HEAD(, vhost_dev) vhost_mlog_devices =
+    QLIST_HEAD_INITIALIZER(vhost_mlog_devices);
 
 /* Memslots used by backends that support private memslots (without an fd). */
 static unsigned int used_memslots;
@@ -131,6 +134,53 @@ static void vhost_dev_sync_region(struct vhost_dev *dev,
     }
 }
 
+static bool vhost_log_dev_enabled(struct vhost_dev *dev)
+{
+    assert(dev->vhost_ops);
+    assert(dev->vhost_ops->backend_type > VHOST_BACKEND_TYPE_NONE);
+    assert(dev->vhost_ops->backend_type < VHOST_BACKEND_TYPE_MAX);
+
+    return dev == vhost_mem_logger[dev->vhost_ops->backend_type];
+}
+
+static void vhost_mlog_set_dev(struct vhost_dev *hdev, bool enable)
+{
+    struct vhost_dev *logdev = NULL;
+    VhostBackendType backend_type;
+    bool reelect = false;
+
+    assert(hdev->vhost_ops);
+    assert(hdev->vhost_ops->backend_type > VHOST_BACKEND_TYPE_NONE);
+    assert(hdev->vhost_ops->backend_type < VHOST_BACKEND_TYPE_MAX);
+
+    backend_type = hdev->vhost_ops->backend_type;
+
+    if (enable && !QLIST_IS_INSERTED(hdev, logdev_entry)) {
+        reelect = !vhost_mem_logger[backend_type];
+        QLIST_INSERT_HEAD(&vhost_mlog_devices, hdev, logdev_entry);
+    } else if (!enable && QLIST_IS_INSERTED(hdev, logdev_entry)) {
+        reelect = vhost_mem_logger[backend_type] == hdev;
+        QLIST_REMOVE(hdev, logdev_entry);
+    }
+
+    if (!reelect)
+        return;
+
+    QLIST_FOREACH(hdev, &vhost_mlog_devices, logdev_entry) {
+        if (!hdev->vhost_ops ||
+            hdev->vhost_ops->backend_type == VHOST_BACKEND_TYPE_NONE ||
+            hdev->vhost_ops->backend_type >= VHOST_BACKEND_TYPE_MAX)
+            continue;
+
+        if (hdev->vhost_ops->backend_type == backend_type) {
+            logdev = hdev;
+            break;
+        }
+    }
+
+    vhost_mem_logger[backend_type] = logdev;
+}
+
 static int vhost_sync_dirty_bitmap(struct vhost_dev *dev,
                                    MemoryRegionSection *section,
                                    hwaddr first,
@@ -148,12 +198,14 @@ static int vhost_sync_dirty_bitmap(struct vhost_dev *dev,
     start_addr = MAX(first, start_addr);
     end_addr = MIN(last, end_addr);
 
-    for (i = 0; i < dev->mem->nregions; ++i) {
-        struct vhost_memory_region *reg = dev->mem->regions + i;
-        vhost_dev_sync_region(dev, section, start_addr, end_addr,
-                              reg->guest_phys_addr,
-                              range_get_last(reg->guest_phys_addr,
-                                             reg->memory_size));
+    if (vhost_log_dev_enabled(dev)) {
+        for (i = 0; i < dev->mem->nregions; ++i) {
+            struct vhost_memory_region *reg = dev->mem->regions + i;
+            vhost_dev_sync_region(dev, section, start_addr, end_addr,
+                                  reg->guest_phys_addr,
+                                  range_get_last(reg->guest_phys_addr,
+                                                 reg->memory_size));
+        }
     }
     for (i = 0; i < dev->nvqs; ++i) {
         struct vhost_virtqueue *vq = dev->vqs + i;
@@ -321,6 +373,7 @@ static void vhost_log_put(struct vhost_dev *dev, bool sync)
         g_free(log);
     }
 
+    vhost_mlog_set_dev(dev, false);
     dev->log = NULL;
     dev->log_size = 0;
 }
@@ -940,6 +993,15 @@ static int vhost_dev_set_log(struct vhost_dev *dev, bool enable_log)
             goto err_vq;
         }
     }
+
+    /*
+     * At log start we select our vhost_device logger that will scan the
+     * memory sections and skip for the others. This is possible because
+     * the log is shared amongst all vhost devices for a given type of
+     * backend.
+     */
+    vhost_mlog_set_dev(dev, enable_log);
+
     return 0;
 err_vq:
     for (; i >= 0; --i) {
@@ -1942,6 +2004,7 @@ int vhost_dev_start(struct vhost_dev *hdev, VirtIODevice *vdev, bool vrings)
             VHOST_OPS_DEBUG(r, "vhost_set_log_base failed");
             goto fail_log;
         }
+        vhost_mlog_set_dev(hdev, true);
     }
     if (vrings) {
         r = vhost_dev_set_vring_enable(hdev, true);
