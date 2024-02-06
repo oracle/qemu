@@ -984,18 +984,19 @@ cleanup:
     error_free(local_err);
 }
 
-int multifd_send_setup(Error **errp)
+bool multifd_send_setup(void)
 {
-    int thread_count;
+    MigrationState *s = migrate_get_current();
+    Error *local_err = NULL;
+    int thread_count, ret = 0;
     uint32_t page_count = MULTIFD_PACKET_SIZE / qemu_target_page_size();
     uint8_t i;
 
     if (!migrate_use_multifd()) {
-        return 0;
+        return true;
     }
     if (!migrate_multi_channels_is_allowed()) {
-        error_setg(errp, "multifd is not supported by current protocol");
-        return -1;
+        return true;
     }
 
     thread_count = migrate_multifd_channels();
@@ -1030,16 +1031,22 @@ int multifd_send_setup(Error **errp)
 
     for (i = 0; i < thread_count; i++) {
         MultiFDSendParams *p = &multifd_send_state->params[i];
-        Error *local_err = NULL;
-        int ret;
 
         ret = multifd_send_state->ops->send_setup(p, &local_err);
         if (ret) {
-            error_propagate(errp, local_err);
-            return ret;
+            break;
         }
     }
-    return 0;
+
+    if (ret) {
+        migrate_set_error(s, local_err);
+        error_report_err(local_err);
+        migrate_set_state(&s->state, MIGRATION_STATUS_SETUP,
+                          MIGRATION_STATUS_FAILED);
+        return false;
+    }
+
+    return true;
 }
 
 struct {
