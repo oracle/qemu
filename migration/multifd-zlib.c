@@ -236,7 +236,7 @@ static void zlib_recv_cleanup(MultiFDRecvParams *p)
 }
 
 /**
- * zlib_recv_pages: read the data from the channel into actual pages
+ * zlib_recv: read the data from the channel into actual pages
  *
  * Read the compressed buffer, and uncompress it into the actual
  * pages.
@@ -246,7 +246,7 @@ static void zlib_recv_cleanup(MultiFDRecvParams *p)
  * @p: Params for the channel that we are using
  * @errp: pointer to an error
  */
-static int zlib_recv_pages(MultiFDRecvParams *p, Error **errp)
+static int zlib_recv(MultiFDRecvParams *p, Error **errp)
 {
     struct zlib_data *z = p->compress_data;
     z_stream *zs = &z->zs;
@@ -331,7 +331,7 @@ static MultiFDMethods multifd_zlib_ops = {
     .send_prepare = zlib_send_prepare,
     .recv_setup = zlib_recv_setup,
     .recv_cleanup = zlib_recv_cleanup,
-    .recv_pages = zlib_recv_pages
+    .recv = zlib_recv
 };
 
 static void multifd_zlib_register(void)
