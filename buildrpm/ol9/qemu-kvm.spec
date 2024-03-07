@@ -258,7 +258,7 @@ Requires: %{name}-block-ssh = %{epoch}:%{version}-%{release}     \
 Summary: QEMU is a machine emulator and virtualizer
 Name: qemu-kvm
 Version: 7.2.0
-Release: 7%{?dist}
+Release: 11%{?dist}
 Epoch: 30
 License: GPLv2+ and LGPLv2+ and BSD
 Group: Development/Tools
@@ -1680,6 +1680,78 @@ getent passwd qemu >/dev/null || \
 
 
 %changelog
+* Thu Mar 7 2024 Karl Heubaum <karl.heubaum@oracle.com> - 7.2.0-11.el9
+- vfio/migration: Add a note about migration rate limiting (Avihai Horon) [Orabug: 36329758]
+- vfio/migration: Refactor vfio_save_state() return value (Avihai Horon) [Orabug: 36329758]
+- migration: Don't serialize devices in qemu_savevm_state_iterate() (Avihai Horon) [Orabug: 36329758]
+- ui/clipboard: add asserts for update and request (Fiona Ebner) [Orabug: 36323175] {CVE-2023-6683}
+- ui/clipboard: mark type as not available when there is no data (Fiona Ebner) [Orabug: 36323175] {CVE-2023-6683}
+- virtio-net: correctly copy vnet header when flushing TX (Jason Wang) [Orabug: 36154459] {CVE-2023-6693}
+- esp: restrict non-DMA transfer length to that of available data (Mark Cave-Ayland) [Orabug: 36322141] {CVE-2024-24474}
+- vhost: Perform memory section dirty scans once per iteration (Si-Wei Liu)
+- vhost: dirty log should be per backend type (Si-Wei Liu)
+- net: Update MemReentrancyGuard for NIC (Akihiko Odaki) [Orabug: 35644197] {CVE-2023-3019}
+- net: Provide MemReentrancyGuard * to qemu_new_nic() (Akihiko Odaki) [Orabug: 35644197] {CVE-2023-3019}
+- lsi53c895a: disable reentrancy detection for MMIO region, too (Thomas Huth) [Orabug: 33774027] {CVE-2021-3750}
+- memory: stricter checks prior to unsetting engaged_in_io (Alexander Bulekov) [Orabug: 33774027] {CVE-2021-3750}
+- async: avoid use-after-free on re-entrancy guard (Alexander Bulekov) [Orabug: 33774027] {CVE-2021-3750}
+- apic: disable reentrancy detection for apic-msi (Alexander Bulekov) [Orabug: 33774027] {CVE-2021-3750}
+- raven: disable reentrancy detection for iomem (Alexander Bulekov) [Orabug: 33774027] {CVE-2021-3750}
+- bcm2835_property: disable reentrancy detection for iomem (Alexander Bulekov) [Orabug: 33774027] {CVE-2021-3750}
+- lsi53c895a: disable reentrancy detection for script RAM (Alexander Bulekov) [Orabug: 33774027] {CVE-2021-3750}
+- hw: replace most qemu_bh_new calls with qemu_bh_new_guarded (Alexander Bulekov) [Orabug: 33774027] {CVE-2021-3750}
+- checkpatch: add qemu_bh_new/aio_bh_new checks (Alexander Bulekov) [Orabug: 33774027] {CVE-2021-3750}
+- async: Add an optional reentrancy guard to the BH API (Alexander Bulekov) [Orabug: 33774027] {CVE-2021-3750}
+- memory: prevent dma-reentracy issues (Alexander Bulekov) [Orabug: 33774027] {CVE-2021-3750}
+- hw/acpi: propagate vcpu hotplug after switch to modern interface (Aaron Young)
+- migration: Fix use-after-free of migration state object (Fabiano Rosas) [Orabug: 36242218]
+- kvm: Fix crash due to access uninitialized kvm_state (Gavin Shan) [Orabug: 36269244]
+- migration: Avoid usage of static variable inside tracepoint (Joao Martins)
+- migration: Add tracepoints for downtime checkpoints (Peter Xu)
+- migration: migration_stop_vm() helper (Peter Xu)
+- migration: Add per vmstate downtime tracepoints (Peter Xu)
+- migration: Add migration_downtime_start|end() helpers (Peter Xu)
+- migration: Set downtime_start even for postcopy (Peter Xu)
+- hv-balloon: implement pre-Glib 2.68 compatibility (Maciej S. Szmigiero)
+- hw/i386/pc: Support hv-balloon (Maciej S. Szmigiero)
+- qapi: Add HV_BALLOON_STATUS_REPORT event and its QMP query command (Maciej S. Szmigiero)
+- qapi: Add query-memory-devices support to hv-balloon (Maciej S. Szmigiero)
+- Add Hyper-V Dynamic Memory Protocol driver (hv-balloon) hot-add support (Maciej S. Szmigiero)
+- Add Hyper-V Dynamic Memory Protocol driver (hv-balloon) base (Maciej S. Szmigiero)
+- Add Hyper-V Dynamic Memory Protocol definitions (Maciej S. Szmigiero)
+- memory-device: Drop size alignment check (David Hildenbrand)
+- memory-device: Support empty memory devices (David Hildenbrand)
+- memory,vhost: Allow for marking memory device memory regions unmergeable (David Hildenbrand)
+- memory: Clarify mapping requirements for RamDiscardManager (David Hildenbrand)
+- memory-device,vhost: Support automatic decision on the number of memslots (David Hildenbrand)
+- vhost: Add vhost_get_max_memslots() (David Hildenbrand)
+- kvm: Add stub for kvm_get_max_memslots() (David Hildenbrand)
+- memory-device,vhost: Support memory devices that dynamically consume memslots (David Hildenbrand)
+- memory-device: Track required and actually used memslots in DeviceMemoryState (David Hildenbrand)
+- stubs: Rename qmp_memory_device.c to memory_device.c (David Hildenbrand)
+- memory-device: Support memory devices with multiple memslots (David Hildenbrand)
+- vhost: Return number of free memslots (David Hildenbrand)
+- kvm: Return number of free memslots (David Hildenbrand)
+- vhost: Remove vhost_backend_can_merge() callback (David Hildenbrand)
+- vhost: Rework memslot filtering and fix "used_memslot" tracking (David Hildenbrand)
+- virtio-md-pci: New parent type for virtio-mem-pci and virtio-pmem-pci (David Hildenbrand)
+- migration/ram: Expose ramblock_is_ignored() as migrate_ram_is_ignored() (David Hildenbrand)
+- virtio-mem: Skip most of virtio_mem_unplug_all() without plugged memory (David Hildenbrand)
+- softmmu/physmem: Warn with ram_block_discard_range() on MAP_PRIVATE file mapping (David Hildenbrand)
+- memory-device: Track used region size in DeviceMemoryState (David Hildenbrand)
+- memory-device: Refactor memory_device_pre_plug() (David Hildenbrand)
+- hw/i386/pc: Remove PC_MACHINE_DEVMEM_REGION_SIZE (David Hildenbrand)
+- hw/i386/acpi-build: Rely on machine->device_memory when building SRAT (David Hildenbrand)
+- hw/i386/pc: Use machine_memory_devices_init() (David Hildenbrand)
+- hw/loongarch/virt: Use machine_memory_devices_init() (David Hildenbrand)
+- hw/ppc/spapr: Use machine_memory_devices_init() (David Hildenbrand)
+- hw/arm/virt: Use machine_memory_devices_init() (David Hildenbrand)
+- memory-device: Introduce machine_memory_devices_init() (David Hildenbrand)
+- memory-device: Unify enabled vs. supported error messages (David Hildenbrand)
+- hw/scsi/scsi-disk: Disallow block sizes smaller than 512 [CVE-2023-42467] (Thomas Huth) [Orabug: 35808564] {CVE-2023-42467}
+- tests/qtest: ahci-test: add test exposing reset issue with pending callback (Fiona Ebner) [Orabug: 35977245] {CVE-2023-5088}
+- hw/ide: reset: cancel async DMA operation before resetting state (Fiona Ebner) [Orabug: 35977245] {CVE-2023-5088}
+
 * Thu Dec 7 2023 Karl Heubaum <karl.heubaum@oracle.com> - 7.2.0-7.el9
 - vfio/common: Probe type1 iommu dirty tracking support (Joao Martins) [Orabug: 36024839]
 - vfio/common: Allow disabling device dirty page tracking (Joao Martins) [Orabug: 36024839]
