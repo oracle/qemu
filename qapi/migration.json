@@ -578,6 +578,18 @@
             { 'name': 'zstd', 'if': 'CONFIG_ZSTD' } ] }
 
 ##
+# @ZeroPageDetection:
+#
+# @none: Do not perform zero page checking.
+#
+# @legacy: Perform zero page checking in main migration thread.
+#
+# Since: 7.2
+##
+{ 'enum': 'ZeroPageDetection',
+  'data': [ 'none', 'legacy' ] }
+
+##
 # @BitmapMigrationBitmapAliasTransform:
 #
 # @persistent: If present, the bitmap will be made persistent
@@ -786,6 +798,10 @@
 #                        block device name if there is one, and to their node name
 #                        otherwise. (Since 5.2)
 #
+# @zero-page-detection: Whether and how to detect zero pages.
+#                       See description in @ZeroPageDetection.  Default is 'legacy'.
+#                       (since 7.2)
+#
 # Features:
 # @unstable: Member @x-checkpoint-delay is experimental.
 #
@@ -806,7 +822,8 @@
            'xbzrle-cache-size', 'max-postcopy-bandwidth',
            'max-cpu-throttle', 'multifd-compression',
            'multifd-zlib-level' ,'multifd-zstd-level',
-           'block-bitmap-mapping' ] }
+           'block-bitmap-mapping',
+           'zero-page-detection'] }
 
 ##
 # @MigrateSetParameters:
@@ -951,6 +968,10 @@
 #                        block device name if there is one, and to their node name
 #                        otherwise. (Since 5.2)
 #
+# @zero-page-detection: Whether and how to detect zero pages.
+#                       See description in @ZeroPageDetection.  Default is 'legacy'.
+#                       (since 7.2)
+#
 # Features:
 # @unstable: Member @x-checkpoint-delay is experimental.
 #
@@ -986,7 +1007,8 @@
             '*multifd-compression': 'MultiFDCompression',
             '*multifd-zlib-level': 'uint8',
             '*multifd-zstd-level': 'uint8',
-            '*block-bitmap-mapping': [ 'BitmapMigrationNodeAlias' ] } }
+            '*block-bitmap-mapping': [ 'BitmapMigrationNodeAlias' ],
+            '*zero-page-detection': 'ZeroPageDetection'} }
 
 ##
 # @migrate-set-parameters:
@@ -1151,6 +1173,10 @@
 #                        block device name if there is one, and to their node name
 #                        otherwise. (Since 5.2)
 #
+# @zero-page-detection: Whether and how to detect zero pages.
+#                       See description in @ZeroPageDetection.  Default is 'legacy'.
+#                       (since 7.2)
+#
 # Features:
 # @unstable: Member @x-checkpoint-delay is experimental.
 #
@@ -1184,7 +1210,8 @@
             '*multifd-compression': 'MultiFDCompression',
             '*multifd-zlib-level': 'uint8',
             '*multifd-zstd-level': 'uint8',
-            '*block-bitmap-mapping': [ 'BitmapMigrationNodeAlias' ] } }
+            '*block-bitmap-mapping': [ 'BitmapMigrationNodeAlias' ],
+            '*zero-page-detection': 'ZeroPageDetection'} }
 
 ##
 # @query-migrate-parameters:

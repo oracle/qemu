@@ -507,5 +507,6 @@ bool migrate_multi_channels_is_allowed(void);
 void migrate_protocol_allow_multi_channels(bool allow);
 
 int migration_stop_vm(RunState state);
+ZeroPageDetection migrate_zero_page_detection(void);
 
 #endif
