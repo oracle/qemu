@@ -1417,7 +1417,6 @@ static int ram_save_multifd_page(RAMState *rs, RAMBlock *block,
     if (!multifd_queue_page(rs->f, block, offset)) {
         return -1;
     }
-    stat64_add(&ram_counters.normal_pages, 1);
 
     return 1;
 }

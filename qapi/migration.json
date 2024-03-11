@@ -584,10 +584,15 @@
 #
 # @legacy: Perform zero page checking in main migration thread.
 #
+# @multifd: Perform zero page checking in multifd sender thread if
+#           multifd migration is enabled, else in the main migration
+#           thread as for @legacy.
+#
 # Since: 7.2
+#
 ##
 { 'enum': 'ZeroPageDetection',
-  'data': [ 'none', 'legacy' ] }
+  'data': [ 'none', 'legacy', 'multifd' ] }
 
 ##
 # @BitmapMigrationBitmapAliasTransform:
