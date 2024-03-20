@@ -934,17 +934,16 @@ static void vmstate_save_old_style(QEMUFile *f, SaveStateEntry *se,
     }
 }
 
-static int vmstate_save(QEMUFile *f, SaveStateEntry *se,
-                        JSONWriter *vmdesc)
-{
-    Error *local_err = NULL;
 
+static int vmstate_save(QEMUFile *f, SaveStateEntry *se, JSONWriter *vmdesc,
+                        Error **errp)
+{
     trace_vmstate_save(se->idstr, se->vmsd ? se->vmsd->name : "(old)");
     if (!se->vmsd) {
         vmstate_save_old_style(f, se, vmdesc);
         return 0;
     }
-    return vmstate_save_state_with_err(f, se->vmsd, se->opaque, vmdesc, &local_err);
+    return vmstate_save_state_with_err(f, se->vmsd, se->opaque, vmdesc, errp);
 }
 
 /*
@@ -1501,9 +1500,11 @@ int qemu_savevm_state_complete_precopy_non_iterable(QEMUFile *f,
                                                     bool inactivate_disks)
 {
     g_autoptr(JSONWriter) vmdesc = NULL;
+    MigrationState *ms = migrate_get_current();
     int64_t start_ts_each, end_ts_each;
     int vmdesc_len;
     SaveStateEntry *se;
+    Error *local_err = NULL;
     int ret;
 
     vmdesc = json_writer_new(false);
@@ -1529,8 +1530,10 @@ int qemu_savevm_state_complete_precopy_non_iterable(QEMUFile *f,
 
         save_section_header(f, se, QEMU_VM_SECTION_FULL);
 
-        ret = vmstate_save(f, se, vmdesc);
+        ret = vmstate_save(f, se, vmdesc, &local_err);
         if (ret) {
+            migrate_set_error(ms, local_err);
+            error_report_err(local_err);
             qemu_file_set_error(f, ret);
             return ret;
         }
@@ -1558,8 +1561,10 @@ int qemu_savevm_state_complete_precopy_non_iterable(QEMUFile *f,
          * bdrv_activate_all() on the other end won't fail. */
         ret = bdrv_inactivate_all();
         if (ret) {
-            error_report("%s: bdrv_inactivate_all() failed (%d)",
-                         __func__, ret);
+            error_setg(&local_err, "%s: bdrv_inactivate_all() failed (%d)",
+                       __func__, ret);
+            migrate_set_error(ms, local_err);
+            error_report_err(local_err);
             qemu_file_set_error(f, ret);
             return ret;
         }
@@ -1768,6 +1773,8 @@ void qemu_savevm_live_state(QEMUFile *f)
 
 int qemu_save_device_state(QEMUFile *f)
 {
+    MigrationState *ms = migrate_get_current();
+    Error *local_err = NULL;
     SaveStateEntry *se;
 
     if (!migration_in_colo_state()) {
@@ -1791,8 +1798,10 @@ int qemu_save_device_state(QEMUFile *f)
 
         save_section_header(f, se, QEMU_VM_SECTION_FULL);
 
-        ret = vmstate_save(f, se, NULL);
+        ret = vmstate_save(f, se, NULL, &local_err);
         if (ret) {
+            migrate_set_error(ms, local_err);
+            error_report_err(local_err);
             return ret;
         }
 
