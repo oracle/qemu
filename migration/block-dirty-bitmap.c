@@ -1209,7 +1209,7 @@ fail:
     return ret;
 }
 
-static int dirty_bitmap_save_setup(QEMUFile *f, void *opaque)
+static int dirty_bitmap_save_setup(QEMUFile *f, void *opaque, Error **errp)
 {
     DBMSaveState *s = &((DBMState *)opaque)->save;
     SaveBitmapState *dbms = NULL;
@@ -1217,6 +1217,8 @@ static int dirty_bitmap_save_setup(QEMUFile *f, void *opaque)
     qemu_mutex_lock_iothread();
     if (init_dirty_bitmap_migration(s) < 0) {
         qemu_mutex_unlock_iothread();
+        error_setg(errp,
+                   "Failed to initialize dirty tracking bitmap for blocks");
         return -1;
     }
 

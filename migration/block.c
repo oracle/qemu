@@ -724,7 +724,7 @@ static void block_migration_cleanup(void *opaque)
     blk_mig_unlock();
 }
 
-static int block_save_setup(QEMUFile *f, void *opaque)
+static int block_save_setup(QEMUFile *f, void *opaque, Error **errp)
 {
     int ret;
 
@@ -734,6 +734,7 @@ static int block_save_setup(QEMUFile *f, void *opaque)
     qemu_mutex_lock_iothread();
     ret = init_blk_migration(f);
     if (ret < 0) {
+        error_setg_errno(errp, -ret, "Failed to init block migration");
         qemu_mutex_unlock_iothread();
         return ret;
     }
@@ -744,10 +745,15 @@ static int block_save_setup(QEMUFile *f, void *opaque)
     qemu_mutex_unlock_iothread();
 
     if (ret) {
+        error_setg_errno(errp, -ret, "Failed to start block dirty tracking");
         return ret;
     }
 
     ret = flush_blks(f);
+    if (ret) {
+        error_setg_errno(errp, -ret, "Flushing block failed");
+        return ret;
+    }
     blk_mig_reset_dirty_cursor();
     qemu_put_be64(f, BLK_MIG_FLAG_EOS);
 

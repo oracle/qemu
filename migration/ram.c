@@ -3470,22 +3470,23 @@ void qemu_guest_free_page_hint(void *addr, size_t len)
  *
  * @f: QEMUFile where to send the data
  * @opaque: RAMState pointer
+ * @errp: pointer to Error*, to store an error if it happens.
  */
-static int ram_save_setup(QEMUFile *f, void *opaque)
+static int ram_save_setup(QEMUFile *f, void *opaque, Error **errp)
 {
     RAMState **rsp = opaque;
     RAMBlock *block;
-    int ret;
+    int ret = 0;
 
     if (compress_threads_save_setup()) {
-        error_report("%s: failed to start compress threads", __func__);
+        error_setg(errp, "%s: failed to start compress threads", __func__);
         return -1;
     }
 
     /* migration has already setup the bitmap, reuse it. */
     if (!migration_in_colo_state()) {
         if (ram_init_all(rsp) != 0) {
-            error_report("%s: failed to setup RAM for migration", __func__);
+            error_setg(errp, "%s: failed to setup RAM for migration", __func__);
             compress_threads_save_cleanup();
             return -1;
         }
@@ -3523,7 +3524,7 @@ static int ram_save_setup(QEMUFile *f, void *opaque)
 
     ret = multifd_send_sync_main(f);
     if (ret < 0) {
-        error_report("%s: multifd synchronization failed", __func__);
+        error_setg(errp, "%s: multifd synchronization failed", __func__);
         return ret;
     }
 

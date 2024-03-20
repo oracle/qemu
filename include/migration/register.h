@@ -25,6 +25,21 @@ typedef struct SaveVMHandlers {
      * used to perform early checks.
      */
     int (*save_prepare)(void *opaque, Error **errp);
+
+    /**
+     * @save_setup
+     *
+     * Initializes the data structures on the source and transmits
+     * first section containing information on the device
+     *
+     * @f: QEMUFile where to send the data
+     * @opaque: data pointer passed to register_savevm_live()
+     * @errp: pointer to Error*, to store an error if it happens.
+     *
+     * Returns zero to indicate success and negative for error
+     */
+    int (*save_setup)(QEMUFile *f, void *opaque, Error **errp);
+
     void (*save_cleanup)(void *opaque);
     int (*save_live_complete_postcopy)(QEMUFile *f, void *opaque);
     int (*save_live_complete_precopy)(QEMUFile *f, void *opaque);
@@ -68,8 +83,6 @@ typedef struct SaveVMHandlers {
      */
     int (*save_live_iterate)(QEMUFile *f, void *opaque);
 
-    /* This runs outside the iothread lock!  */
-    int (*save_setup)(QEMUFile *f, void *opaque);
     /* Note for save_live_pending:
      * must_precopy:
      * - must be migrated in precopy or in stopped state
