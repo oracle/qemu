@@ -3180,13 +3180,13 @@ err_out:
     return -ENOMEM;
 }
 
-static int ram_state_init(RAMState **rsp)
+static bool ram_state_init(RAMState **rsp, Error **errp)
 {
     *rsp = g_try_new0(RAMState, 1);
 
     if (!*rsp) {
-        error_report("%s: Init ramstate fail", __func__);
-        return -1;
+        error_setg(errp, "%s: Init ramstate fail", __func__);
+        return false;
     }
 
     qemu_mutex_init(&(*rsp)->bitmap_mutex);
@@ -3202,7 +3202,7 @@ static int ram_state_init(RAMState **rsp)
     (*rsp)->migration_dirty_pages = (*rsp)->ram_bytes_total >> TARGET_PAGE_BITS;
     ram_state_reset(*rsp);
 
-    return 0;
+    return true;
 }
 
 static void ram_list_init_bitmaps(void)
@@ -3361,7 +3361,10 @@ bool hash_cache_init(Error **err)
 
 static int ram_init_all(RAMState **rsp)
 {
-    if (ram_state_init(rsp)) {
+    Error *local_err = NULL;
+
+    if (!ram_state_init(rsp, &local_err)) {
+        error_report_err(local_err);
         return -1;
     }
 
@@ -4159,7 +4162,11 @@ static void decompress_data_with_multi_threads(QEMUFile *f,
 
 static void colo_init_ram_state(void)
 {
-    ram_state_init(&ram_state);
+    Error *local_err = NULL;
+
+    if (!ram_state_init(&ram_state, &local_err)) {
+        error_report_err(local_err);
+    }
 }
 
 /*
