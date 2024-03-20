@@ -120,7 +120,18 @@ typedef struct SaveVMHandlers {
     bool (*load_state_buffer)(void *opaque, char *buf, size_t len,
                               Error **errp);
 
-    int (*load_setup)(QEMUFile *f, void *opaque);
+    /**
+     * @load_setup
+     *
+     * Initializes the data structures on the destination.
+     *
+     * @f: QEMUFile where to receive the data
+     * @opaque: data pointer passed to register_savevm_live()
+     * @errp: pointer to Error*, to store an error if it happens.
+     *
+     * Returns zero to indicate success and negative for error
+     */
+    int (*load_setup)(QEMUFile *f, void *opaque, Error **errp);
     int (*load_cleanup)(void *opaque);
     /* Called when postcopy migration wants to resume from failure */
     int (*resume_prepare)(MigrationState *s, void *opaque);
