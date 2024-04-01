@@ -19,6 +19,7 @@
 #include "migration.h"
 #include "trace.h"
 #include "multifd.h"
+#include "ram.h"
 
 struct zstd_data {
     /* stream for compression */
@@ -277,6 +278,7 @@ static int zstd_recv_pages(MultiFDRecvParams *p, Error **errp)
     z->in.pos = 0;
 
     for (i = 0; i < p->normal_num; i++) {
+        ramblock_recv_bitmap_set_offset(p->block, p->normal[i]);
         z->out.dst = p->host + p->normal[i];
         z->out.size = p->page_size;
         z->out.pos = 0;
