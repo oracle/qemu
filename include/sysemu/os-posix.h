@@ -48,6 +48,7 @@ void os_setup_early_signal_handling(void);
 void os_set_proc_name(const char *s);
 void os_setup_signal_handling(void);
 void os_daemonize(void);
+void os_setup_limits(void);
 void os_setup_post(void);
 int os_mlock(void);
 
