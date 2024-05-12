@@ -2832,6 +2832,7 @@ static void bdrv_replace_child_noperm(BdrvChild *child,
     BlockDriverState *old_bs = child->bs;
     int new_bs_quiesce_counter;
     int drain_saldo;
+    AioContext *ctx = bdrv_child_get_parent_aio_context(child);
 
     assert(!child->frozen);
     assert(old_bs != new_bs);
@@ -2843,6 +2844,10 @@ static void bdrv_replace_child_noperm(BdrvChild *child,
 
     new_bs_quiesce_counter = (new_bs ? new_bs->quiesce_counter : 0);
     drain_saldo = new_bs_quiesce_counter - child->parent_quiesce_counter;
+
+    if (ctx != qemu_get_aio_context()) {
+        aio_context_acquire(ctx);
+    }
 
     /*
      * If the new child node is drained but the old one was not, flush
@@ -2894,6 +2899,10 @@ static void bdrv_replace_child_noperm(BdrvChild *child,
     while (drain_saldo < 0 && child->klass->drained_end) {
         bdrv_parent_drained_end_single(child);
         drain_saldo++;
+    }
+
+    if (ctx != qemu_get_aio_context()) {
+        aio_context_release(ctx);
     }
 }
 
