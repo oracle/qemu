@@ -1680,7 +1680,11 @@ getent passwd qemu >/dev/null || \
 
 
 %changelog
-* Thu Jun 13 2024 Karl Heubaum <karl.heubaum@oracle.com> - 7.2.0-13.el9
+* Mon Jun 17 2024 Karl Heubaum <karl.heubaum@oracle.com> - 7.2.0-13.el9
+- vfio/migration: Enhance VFIO migration state tracing (Avihai Horon)
+- vfio/migration: Don't emit STOP_COPY VFIO migration QAPI event twice (Avihai Horon)
+- vfio/migration: Emit VFIO migration QAPI event (Avihai Horon)
+- qapi/vfio: Add VFIO migration QAPI event (Avihai Horon)
 - migration/multifd: solve zero page causing multiple page faults (Yuan Liu) [Orabug: 36727051]
 - multifd: Add the ramblock to MultiFDRecvParams (Lukas Straub) [Orabug: 36727051]
 - migration: Fix qmp_query_migrate mbps value (Fabiano Rosas) [Orabug: 36727104]
