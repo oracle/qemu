@@ -63,6 +63,7 @@
 #include "yank_functions.h"
 #include "sysemu/qtest.h"
 #include "migration-stats.h"
+#include "sysemu/kvm.h"
 
 #define MAX_THROTTLE  (128 << 20)      /* Migration transfer speed throttling */
 
@@ -2490,6 +2491,12 @@ static bool migrate_prepare(MigrationState *s, bool blk, bool blk_inc,
     if (runstate_check(RUN_STATE_POSTMIGRATE)) {
         error_setg(errp, "Can't migrate the vm that was paused due to "
                    "previous migration");
+        return false;
+    }
+
+    if (kvm_hwpoisoned_mem()) {
+        error_setg(errp, "Can't migrate this vm with hardware poisoned memory, "
+                   "please reboot the vm and try again");
         return false;
     }
 
