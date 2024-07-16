@@ -5263,6 +5263,7 @@ uint64_t x86_cpu_get_supported_feature_word(X86CPU *cpu, FeatureWord w)
 {
     FeatureWordInfo *wi = &feature_word_info[w];
     uint64_t r = 0;
+    uint32_t unavail = 0;
 
     if (kvm_enabled()) {
         switch (wi->type) {
@@ -5288,11 +5289,26 @@ uint64_t x86_cpu_get_supported_feature_word(X86CPU *cpu, FeatureWord w)
     } else {
         return ~0;
     }
+
+    switch (w) {
 #ifndef TARGET_X86_64
-    if (w == FEAT_8000_0001_EDX) {
-        r &= ~CPUID_EXT2_LM;
-    }
+    case FEAT_8000_0001_EDX:
+        unavail = CPUID_EXT2_LM;
+        break;
 #endif
+
+    case FEAT_8000_0007_EBX:
+        if (cpu && !IS_AMD_CPU(&cpu->env)) {
+            /* Disable AMD machine check architecture for Intel CPU.  */
+            unavail = ~0;
+        }
+        break;
+
+    default:
+        break;
+    }
+
+    r &= ~unavail;
     if (cpu && cpu->migratable) {
         r &= x86_cpu_get_migratable_flags(w);
     }
