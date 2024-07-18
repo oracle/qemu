@@ -192,6 +192,9 @@ struct MigrationIncomingState {
      * is needed as this field is updated serially.
      */
     unsigned int switchover_ack_pending_num;
+
+    QemuCond load_finish_ready_cond;
+    QemuMutex load_finish_ready_mutex;
 };
 
 MigrationIncomingState *migration_incoming_get_current(void);

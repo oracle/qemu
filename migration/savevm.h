@@ -73,4 +73,8 @@ int qemu_savevm_state_complete_precopy_non_iterable(QEMUFile *f,
 int qemu_loadvm_load_state_buffer(const char *idstr, uint32_t instance_id,
                                   char *buf, size_t len, Error **errp);
 
+void qemu_loadvm_load_finish_ready_lock(void);
+void qemu_loadvm_load_finish_ready_unlock(void);
+void qemu_loadvm_load_finish_ready_broadcast(void);
+
 #endif
