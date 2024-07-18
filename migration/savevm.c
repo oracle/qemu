@@ -1353,6 +1353,27 @@ int qemu_savevm_state_complete_precopy_iterable(QEMUFile *f, bool in_postcopy)
     int ret;
 
     QTAILQ_FOREACH(se, &savevm_state.handlers, entry) {
+        if (!se->ops || (in_postcopy && se->ops->has_postcopy &&
+             se->ops->has_postcopy(se->opaque)) ||
+            !se->ops->save_live_complete_precopy_begin) {
+            continue;
+        }
+
+        save_section_header(f, se, QEMU_VM_SECTION_END);
+
+        ret = se->ops->save_live_complete_precopy_begin(f,
+                                                        se->idstr, se->instance_id,
+                                                        se->opaque);
+
+        save_section_footer(f, se);
+
+        if (ret < 0) {
+            qemu_file_set_error(f, ret);
+            return -1;
+        }
+    }
+
+    QTAILQ_FOREACH(se, &savevm_state.handlers, entry) {
         if (!se->ops ||
             (in_postcopy && se->ops->has_postcopy &&
              se->ops->has_postcopy(se->opaque)) ||
@@ -1381,6 +1402,20 @@ int qemu_savevm_state_complete_precopy_iterable(QEMUFile *f, bool in_postcopy)
         end_ts_each = qemu_clock_get_us(QEMU_CLOCK_REALTIME);
         trace_vmstate_downtime_save("iterable", se->idstr, se->instance_id,
                                     end_ts_each - start_ts_each);
+    }
+
+    QTAILQ_FOREACH(se, &savevm_state.handlers, entry) {
+        if (!se->ops || (in_postcopy && se->ops->has_postcopy &&
+             se->ops->has_postcopy(se->opaque)) ||
+            !se->ops->save_live_complete_precopy_end) {
+            continue;
+        }
+
+        ret = se->ops->save_live_complete_precopy_end(f, se->opaque);
+        if (ret < 0) {
+            qemu_file_set_error(f, ret);
+            return -1;
+        }
     }
 
     trace_vmstate_downtime_checkpoint("src-iterable-saved");
