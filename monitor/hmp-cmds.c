@@ -496,6 +496,10 @@ void hmp_info_migrate_parameters(Monitor *mon, const QDict *qdict)
         monitor_printf(mon, "%s: '%s'\n",
             MigrationParameter_str(MIGRATION_PARAMETER_TLS_AUTHZ),
             params->tls_authz);
+        assert(params->has_switchover_limit);
+        monitor_printf(mon, "%s: %" PRIu64 "\n",
+            MigrationParameter_str(MIGRATION_PARAMETER_SWITCHOVER_LIMIT),
+            params->switchover_limit);
 
         if (params->has_block_bitmap_mapping) {
             const BitmapMigrationNodeAliasList *bmnal;
@@ -1354,6 +1358,10 @@ void hmp_migrate_set_parameter(Monitor *mon, const QDict *qdict)
     case MIGRATION_PARAMETER_BLOCK_BITMAP_MAPPING:
         error_setg(&err, "The block-bitmap-mapping parameter can only be set "
                    "through QMP");
+        break;
+    case MIGRATION_PARAMETER_SWITCHOVER_LIMIT:
+        p->has_switchover_limit = true;
+        visit_type_size(v, param, &p->switchover_limit, &err);
         break;
     default:
         assert(0);

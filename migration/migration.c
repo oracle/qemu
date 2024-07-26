@@ -114,6 +114,13 @@
 #define DEFAULT_MIGRATE_ANNOUNCE_ROUNDS    5
 #define DEFAULT_MIGRATE_ANNOUNCE_STEP    100
 
+/*
++ * Time in milliseconds that downtime can exceed downtime limit
++ * on source or destination before migration aborts if capability
++ * switchover_abort is enabled
++ */
+#define DEFAULT_MIGRATE_SET_SWITCHOVER_LIMIT 0
+
 static NotifierList migration_state_notifiers =
     NOTIFIER_LIST_INITIALIZER(migration_state_notifiers);
 
@@ -185,6 +192,7 @@ static void migration_downtime_start(MigrationState *s)
 {
     trace_vmstate_downtime_checkpoint("src-downtime-start");
     s->downtime_start = qemu_clock_get_ms(QEMU_CLOCK_REALTIME);
+    s->downtime_now = s->downtime_start;
 }
 
 static void migration_downtime_end(MigrationState *s)
@@ -226,6 +234,13 @@ int migration_stop_vm(RunState state)
     int ret = vm_stop_force_state(state);
 
     trace_vmstate_downtime_checkpoint("src-vm-stopped");
+
+    if (migration_downtime_exceeded()) {
+        MigrationState *s = migrate_get_current();
+
+        migration_set_downtime_exceeded_error(s, s->to_dst_file);
+        ret = -1;
+    }
 
     return ret;
 }
@@ -1073,6 +1088,8 @@ MigrationParameters *qmp_query_migrate_parameters(Error **errp)
     }
     params->has_zero_page_detection = true;
     params->zero_page_detection = s->parameters.zero_page_detection;
+    params->has_switchover_limit = true;
+    params->switchover_limit = s->parameters.switchover_limit;
 
     return params;
 }
@@ -1712,6 +1729,15 @@ static bool migrate_params_check(MigrationParameters *params, Error **errp)
     }
 #endif
 
+    if (params->has_switchover_limit &&
+        ((params->has_downtime_limit && params->switchover_limit > params->downtime_limit) ||
+        params->switchover_limit > MAX_MIGRATE_DOWNTIME)) {
+        error_setg(errp, QERR_INVALID_PARAMETER_VALUE,
+                   "switchover-limit",
+                   "an integer in the range of 0 to downtime-limit");
+        return false;
+    }
+
     return true;
 }
 
@@ -1818,6 +1844,10 @@ static void migrate_params_test_apply(MigrateSetParameters *params,
 
     if (params->has_zero_page_detection) {
         dest->zero_page_detection = params->zero_page_detection;
+    }
+
+    if (params->has_switchover_limit) {
+        dest->switchover_limit = params->switchover_limit;
     }
 
 }
@@ -1946,6 +1976,10 @@ static void migrate_params_apply(MigrateSetParameters *params, Error **errp)
     }
     if (params->has_zero_page_detection) {
         s->parameters.zero_page_detection = params->zero_page_detection;
+    }
+
+    if (params->has_switchover_limit) {
+        s->parameters.switchover_limit = params->switchover_limit;
     }
 
 }
@@ -2323,6 +2357,7 @@ int migrate_init(MigrationState *s, Error **errp)
     s->mbps = 0.0;
     s->pages_per_second = 0.0;
     s->downtime = 0;
+    s->downtime_now = 0;
     s->expected_downtime = 0;
     s->setup_time = 0;
     s->start_postcopy = false;
@@ -2946,6 +2981,47 @@ bool migrate_multifd_flush_after_each_section(void)
      * the property is enabled.
      */
     return s->multifd_flush_after_each_section;
+}
+
+int64_t migration_get_current_downtime(MigrationState *s)
+{
+    s->downtime_now = qemu_clock_get_ms(QEMU_CLOCK_REALTIME);
+
+    return s->downtime_now - s->downtime_start;
+}
+
+bool migrate_switchover_abort(void)
+{
+    MigrationState *s = migrate_get_current();
+
+    return s->enabled_capabilities[MIGRATION_CAPABILITY_SWITCHOVER_ABORT];
+}
+
+bool migration_downtime_exceeded(void)
+{
+    MigrationState *s = migrate_get_current();
+
+    if (!migrate_switchover_abort()) {
+        return 0;
+    }
+
+    return migration_get_current_downtime(s) >= s->parameters.downtime_limit +
+                                                s->parameters.switchover_limit;
+}
+
+void migration_set_downtime_exceeded_error(MigrationState *s, QEMUFile *f)
+{
+    int64_t limit = s->parameters.downtime_limit;
+    int64_t downtime = s->downtime_now - s->downtime_start;
+    Error *errp = NULL;
+
+    error_setg(&errp, "Reached downtime limit of %" PRIi64
+                      ", switchover limit %"PRIi64" ms"
+                      "current downtime %"PRIi64" ms", limit,
+                      s->parameters.switchover_limit, downtime);
+
+    migration_cancel(errp);
+    error_free(errp);
 }
 
 /* migration thread support */
@@ -4626,6 +4702,9 @@ static Property migration_properties[] = {
     DEFINE_PROP_ZERO_PAGE_DETECTION("zero-page-detection", MigrationState,
                        parameters.zero_page_detection,
                        ZERO_PAGE_DETECTION_MULTIFD),
+    DEFINE_PROP_UINT64("x-orcl-switchover-limit", MigrationState,
+                       parameters.switchover_limit,
+                       DEFAULT_MIGRATE_SET_SWITCHOVER_LIMIT),
 
     /* Migration capabilities */
     DEFINE_PROP_MIG_CAP("x-xbzrle", MIGRATION_CAPABILITY_XBZRLE),
@@ -4651,6 +4730,8 @@ static Property migration_properties[] = {
     DEFINE_PROP_MIG_CAP("x-switchover-ack",
                         MIGRATION_CAPABILITY_SWITCHOVER_ACK),
 
+    DEFINE_PROP_MIG_CAP("x-orcl-switchover-abort",
+                        MIGRATION_CAPABILITY_SWITCHOVER_ABORT),
     DEFINE_PROP_END_OF_LIST(),
 };
 
@@ -4720,6 +4801,7 @@ static void migration_instance_init(Object *obj)
     params->has_tls_hostname = true;
     params->has_tls_authz = true;
     params->has_zero_page_detection = true;
+    params->has_switchover_limit = true;
 
 
     qemu_sem_init(&ms->postcopy_pause_sem, 0);

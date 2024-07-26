@@ -301,6 +301,8 @@ struct MigrationState {
     /* Timestamp when VM is down (ms) to migrate the last stuff */
     int64_t downtime_start;
     int64_t downtime;
+    /* Current measured downtime on source */
+    int64_t downtime_now;
     int64_t expected_downtime;
     bool enabled_capabilities[MIGRATION_CAPABILITY__MAX];
     int64_t setup_time;
@@ -446,6 +448,7 @@ bool migrate_dirty_bitmaps(void);
 bool migrate_ignore_shared(void);
 bool migrate_switchover_ack(void);
 bool migrate_validate_uuid(void);
+bool migrate_switchover_abort(void);
 
 bool migrate_auto_converge(void);
 bool migrate_use_multifd(void);
@@ -516,6 +519,9 @@ void migration_consume_urgent_request(void);
 bool migration_rate_limit(void);
 void migration_bh_schedule(QEMUBHFunc *cb, void *opaque);
 void migration_cancel(const Error *error);
+int64_t migration_get_current_downtime(MigrationState *s);
+void migration_set_downtime_exceeded_error(MigrationState *s, QEMUFile *f);
+bool migration_downtime_exceeded(void);
 
 void migration_populate_vfio_info(MigrationInfo *info);
 void migration_reset_vfio_bytes_transferred(void);

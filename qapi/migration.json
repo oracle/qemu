@@ -488,6 +488,10 @@
 #                  are present.  'return-path' capability must be enabled to use
 #                  it.  (since 8.1)
 #
+# @switchover-abort: abort migration if downtime exceeds the downtime
+#                         limit configured by the specified value by switchover-limit
+#                         migration parameter (since 7.2).
+#
 # Features:
 # @unstable: Members @x-colo and @x-ignore-shared are experimental.
 #
@@ -502,7 +506,8 @@
            'dirty-bitmaps', 'postcopy-blocktime', 'late-block-activate',
            { 'name': 'x-ignore-shared', 'features': [ 'unstable' ] },
            'validate-uuid', 'background-snapshot',
-           'zero-copy-send', 'postcopy-preempt', 'switchover-ack'] }
+           'zero-copy-send', 'postcopy-preempt', 'switchover-ack',
+           'switchover-abort'] }
 
 ##
 # @MigrationCapabilityStatus:
@@ -817,6 +822,10 @@
 #                       See description in @ZeroPageDetection.  Default is 'multifd'.
 #                       (since 7.2)
 #
+# @switchover-limit: Switchover limit (ms) that would be used to
+#                         intiate abort of live migration if the total switchover time
+#                         exceeded downtime_limit + switchover_limit (Since 7.2)
+#
 # Features:
 # @unstable: Member @x-checkpoint-delay is experimental.
 #
@@ -838,7 +847,8 @@
            'max-cpu-throttle', 'multifd-compression',
            'multifd-zlib-level' ,'multifd-zstd-level',
            'block-bitmap-mapping',
-           'zero-page-detection'] }
+           'zero-page-detection',
+           'switchover-limit'] }
 
 ##
 # @MigrateSetParameters:
@@ -997,6 +1007,10 @@
 #                       See description in @ZeroPageDetection.  Default is 'multifd'.
 #                       (since 7.2)
 #
+# @switchover-limit: Switchover limit (ms) that would be used to
+#                         intiate abort of live migration if the total switchover time
+#                         exceeded downtime_limit + switchover_limit (Since 7.2)
+#
 # Features:
 # @unstable: Member @x-checkpoint-delay is experimental.
 #
@@ -1034,7 +1048,9 @@
             '*multifd-zlib-level': 'uint8',
             '*multifd-zstd-level': 'uint8',
             '*block-bitmap-mapping': [ 'BitmapMigrationNodeAlias' ],
-            '*zero-page-detection': 'ZeroPageDetection'} }
+            '*zero-page-detection': 'ZeroPageDetection',
+            '*switchover-limit': 'uint64'} }
+
 
 ##
 # @migrate-set-parameters:
@@ -1213,6 +1229,10 @@
 #                       See description in @ZeroPageDetection.  Default is 'multifd'.
 #                       (since 7.2)
 #
+# @switchover-limit: Switchover limit (ms) that would be used to
+#                         intiate abort of live migration if the total switchover time
+#                         exceeded downtime_limit + switchover_limit (Since 7.2)
+#
 # Features:
 # @unstable: Member @x-checkpoint-delay is experimental.
 #
@@ -1248,7 +1268,8 @@
             '*multifd-zlib-level': 'uint8',
             '*multifd-zstd-level': 'uint8',
             '*block-bitmap-mapping': [ 'BitmapMigrationNodeAlias' ],
-            '*zero-page-detection': 'ZeroPageDetection'} }
+            '*zero-page-detection': 'ZeroPageDetection',
+            '*switchover-limit': 'uint64'} }
 
 ##
 # @query-migrate-parameters:
