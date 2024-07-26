@@ -195,6 +195,15 @@ struct MigrationIncomingState {
 
     QemuCond load_finish_ready_cond;
     QemuMutex load_finish_ready_mutex;
+    /*
+     * The first error that has occurred.
+     * We used the mutex to be able to return the 1st error message.
+     * Must be used with migrate_incoming_set_error()
+     * and migrate_incoming_free_error() and migration_incoming_report_error().
+     */
+    Error *error;
+    /* mutex to protect error */
+    QemuMutex error_mutex;
 };
 
 MigrationIncomingState *migration_incoming_get_current(void);
@@ -410,6 +419,11 @@ bool  migration_has_all_channels(void);
 uint64_t migrate_max_downtime(void);
 
 void migrate_set_error(MigrationState *s, const Error *error);
+
+void migrate_incoming_set_error(MigrationIncomingState *s, const Error *error);
+void migrate_incoming_free_error(MigrationIncomingState *s);
+void migrate_incoming_report_error(MigrationIncomingState *s);
+
 void migrate_fd_error(MigrationState *s, const Error *error);
 
 void migrate_fd_connect(MigrationState *s, Error *error_in);

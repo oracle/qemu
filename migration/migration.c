@@ -256,6 +256,8 @@ void migration_object_init(void)
 
     qemu_mutex_init(&current_incoming->load_finish_ready_mutex);
     qemu_cond_init(&current_incoming->load_finish_ready_cond);
+    qemu_mutex_init(&current_incoming->error_mutex);
+    current_incoming->error = NULL;
 
     migration_object_check(current_migration, &error_fatal);
 
@@ -716,12 +718,15 @@ process_incoming_migration_co(void *opaque)
 
     if (ret < 0) {
         error_report("load of migration failed: %s", strerror(-ret));
+        migrate_incoming_report_error(mis);
         goto fail;
     }
     migration_bh_schedule(process_incoming_migration_bh, mis);
     return;
 fail:
     local_err = NULL;
+    migrate_incoming_free_error(mis);
+    qemu_mutex_destroy(&mis->error_mutex);
     migrate_set_state(&mis->state, MIGRATION_STATUS_ACTIVE,
                       MIGRATION_STATUS_FAILED);
     qemu_fclose(mis->from_src_file);
@@ -2111,6 +2116,32 @@ void migrate_set_error(MigrationState *s, const Error *error)
 }
 
 static void migrate_error_free(MigrationState *s)
+{
+    QEMU_LOCK_GUARD(&s->error_mutex);
+    if (s->error) {
+        error_free(s->error);
+        s->error = NULL;
+    }
+}
+
+void migrate_incoming_set_error(MigrationIncomingState *s, const Error *error)
+{
+    QEMU_LOCK_GUARD(&s->error_mutex);
+    if (!s->error) {
+        s->error = error_copy(error);
+    }
+}
+
+void migrate_incoming_report_error(MigrationIncomingState *s)
+{
+    QEMU_LOCK_GUARD(&s->error_mutex);
+    if (s->error) {
+        error_report_err(s->error);
+        s->error = NULL;
+    }
+}
+
+void migrate_incoming_free_error(MigrationIncomingState *s)
 {
     QEMU_LOCK_GUARD(&s->error_mutex);
     if (s->error) {
