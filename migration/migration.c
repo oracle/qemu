@@ -273,6 +273,8 @@ void migration_object_init(void)
     qemu_cond_init(&current_incoming->load_finish_ready_cond);
     qemu_mutex_init(&current_incoming->error_mutex);
     current_incoming->error = NULL;
+    /* Downtime will start when source sends its current downtime. */
+    current_incoming->downtime_start = 0;
 
     migration_object_check(current_migration, &error_fatal);
 
