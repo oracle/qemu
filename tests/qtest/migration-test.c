@@ -459,21 +459,6 @@ static void migrate_cancel(QTestState *who)
     qobject_unref(rsp);
 }
 
-static void migrate_set_capability(QTestState *who, const char *capability,
-                                   bool value)
-{
-    QDict *rsp;
-
-    rsp = qtest_qmp(who,
-                    "{ 'execute': 'migrate-set-capabilities',"
-                    "'arguments': { "
-                    "'capabilities': [ { "
-                    "'capability': %s, 'state': %i } ] } }",
-                    capability, value);
-    g_assert(qdict_haskey(rsp, "return"));
-    qobject_unref(rsp);
-}
-
 static void migrate_postcopy_start(QTestState *from, QTestState *to)
 {
     QDict *rsp;

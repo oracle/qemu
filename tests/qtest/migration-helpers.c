@@ -130,6 +130,21 @@ void migrate_qmp(QTestState *who, const char *uri, const char *fmt, ...)
     qobject_unref(rsp);
 }
 
+void migrate_set_capability(QTestState *who, const char *capability,
+                            bool value)
+{
+    QDict *rsp;
+
+    rsp = qtest_qmp(who,
+                    "{ 'execute': 'migrate-set-capabilities',"
+                    "'arguments': { "
+                    "'capabilities': [ { "
+                    "'capability': %s, 'state': %i } ] } }",
+                    capability, value);
+    g_assert(qdict_haskey(rsp, "return"));
+    qobject_unref(rsp);
+}
+
 /*
  * Note: caller is responsible to free the returned object via
  * qobject_unref() after use
