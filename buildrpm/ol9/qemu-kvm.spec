@@ -258,7 +258,7 @@ Requires: %{name}-block-ssh = %{epoch}:%{version}-%{release}     \
 Summary: QEMU is a machine emulator and virtualizer
 Name: qemu-kvm
 Version: 7.2.0
-Release: 13%{?dist}
+Release: 15%{?dist}
 Epoch: 30
 License: GPLv2+ and LGPLv2+ and BSD
 Group: Development/Tools
@@ -1680,6 +1680,42 @@ getent passwd qemu >/dev/null || \
 
 
 %changelog
+* Wed Jul 31 2024 Karl Heubaum <karl.heubaum@oracle.com> - 7.2.0-15.el9
+- migration: abort on destination if switchover limit exceeded (Elena Ufimtseva)
+- migration: introduce strict switchover SLA (Elena Ufimtseva)
+- migration: add error to MigrationIncomingState (Elena Ufimtseva)
+- migration: Set migration status early in incoming side (Fabiano Rosas)
+- tests/qtest: migration: Use migrate_incoming_qmp where appropriate (Fabiano Rosas)
+- tests/qtest: migration: Add migrate_incoming_qmp helper (Fabiano Rosas)
+- tests/qtest: migration: Expose migrate_set_capability (Fabiano Rosas)
+- vfio/migration: Multifd device state transfer support - send side (Maciej S. Szmigiero)
+- vfio/migration: Add x-orcl-migration-multifd-transfer VFIO property (Maciej S. Szmigiero)
+- vfio/migration: Multifd device state transfer support - receive side (Maciej S. Szmigiero)
+- migration/multifd: Add migration_has_device_state_support() (Maciej S. Szmigiero)
+- migration/multifd: Device state transfer support - send side (Maciej S. Szmigiero)
+- migration/multifd: Convert multifd_send_pages::next_channel to atomic (Maciej S. Szmigiero)
+- migration/multifd: Device state transfer support - receive side (Maciej S. Szmigiero)
+- migration: Add load_finish handler and associated functions (Maciej S. Szmigiero)
+- migration: Add qemu_loadvm_load_state_buffer() and its handler (Maciej S. Szmigiero)
+- migration: Add save_live_complete_precopy_{begin,end} handlers (Maciej S. Szmigiero)
+- migration/multifd: Zero p->flags before starting filling a packet (Maciej S. Szmigiero)
+- migration/ram: Add load start trace event (Maciej S. Szmigiero)
+- vfio/migration: Add save_{iterate,complete_precopy}_started trace events (Maciej S. Szmigiero)
+- hw/virtio/virtio-crypto: Protect from DMA re-entrancy bugs (Philippe Mathieu-Daudé) [Orabug: 36869694] {CVE-2024-3446}
+- hw/char/virtio-serial-bus: Protect from DMA re-entrancy bugs (Philippe Mathieu-Daudé) [Orabug: 36869694] {CVE-2024-3446}
+- hw/display/virtio-gpu: Protect from DMA re-entrancy bugs (Philippe Mathieu-Daudé) [Orabug: 36869694] {CVE-2024-3446}
+- hw/virtio: Introduce virtio_bh_new_guarded() helper (Philippe Mathieu-Daudé) [Orabug: 36869694] {CVE-2024-3446}
+- pcie_sriov: Validate NumVFs (Akihiko Odaki) [Orabug: 36314082] {CVE-2024-26327}
+- hw/nvme: Use pcie_sriov_num_vfs() (Akihiko Odaki) [Orabug: 36314111] {CVE-2024-26328}
+- pcie: Introduce pcie_sriov_num_vfs (Akihiko Odaki) [Orabug: 36314111] {CVE-2024-26328}
+- qcow2: Don't open data_file with BDRV_O_NO_IO (Kevin Wolf) [Orabug: 36801853] {CVE-2024-4467}
+- target/i386: drop AMD machine check bits from Intel CPUID (Paolo Bonzini) [Orabug: 36785079]
+- target/i386: pass X86CPU to x86_cpu_get_supported_feature_word (Paolo Bonzini) [Orabug: 36785079]
+- migration: prevent migration when VM has poisoned memory (William Roche) [Orabug: 35533097]
+- i386: Add support for overflow recovery (John Allen) [Orabug: 34691766]
+- i386: Add support for SUCCOR feature (John Allen) [Orabug: 34691766]
+- i386: Fix MCE support for AMD hosts (John Allen) [Orabug: 34691766]
+
 * Mon Jun 17 2024 Karl Heubaum <karl.heubaum@oracle.com> - 7.2.0-13.el9
 - vfio/migration: Enhance VFIO migration state tracing (Avihai Horon)
 - vfio/migration: Don't emit STOP_COPY VFIO migration QAPI event twice (Avihai Horon)
