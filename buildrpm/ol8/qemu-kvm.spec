@@ -1174,6 +1174,7 @@ pushd %{build_dir}
     --disable-bsd-user \
     --disable-libnfs \
     --disable-brlapi \
+    --disable-libkeyutils \
     --audio-drv-list="" \
     %{spiceflag} \
     %{iscsiflag} \
