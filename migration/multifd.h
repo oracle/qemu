@@ -250,4 +250,7 @@ static inline uint32_t multifd_ram_page_count(void)
 {
     return MULTIFD_PACKET_SIZE / qemu_target_page_size();
 }
+
+void multifd_ram_save_setup(void);
+void multifd_ram_save_cleanup(void);
 #endif
