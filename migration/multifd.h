@@ -70,9 +70,9 @@ typedef struct {
     uint32_t num;
     /* number of normal pages */
     uint32_t normal_num;
-    /* offset of each page */
-    ram_addr_t *offset;
     RAMBlock *block;
+    /* offset of each page */
+    ram_addr_t offset[];
 } MultiFDPages_t;
 
 typedef enum {
