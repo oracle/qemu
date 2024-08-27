@@ -883,8 +883,6 @@ static void *multifd_send_thread(void *opaque)
 
             stat64_add(&ram_counters.multifd_bytes,
                        p->next_packet_size + p->packet_len);
-            stat64_add(&ram_counters.normal_pages, pages->normal_num);
-            stat64_add(&ram_counters.zero_pages, pages->num - pages->normal_num);
 
             multifd_pages_reset(pages);
             p->next_packet_size = 0;
