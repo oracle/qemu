@@ -15,6 +15,8 @@
 
 #include "exec/target_page.h"
 
+typedef struct MultiFDSendData MultiFDSendData;
+
 bool multifd_send_setup(void);
 void multifd_send_shutdown(void);
 int multifd_recv_setup(Error **errp);
@@ -72,6 +74,31 @@ typedef struct {
     ram_addr_t *offset;
     RAMBlock *block;
 } MultiFDPages_t;
+
+typedef enum {
+    MULTIFD_PAYLOAD_NONE,
+    MULTIFD_PAYLOAD_RAM,
+} MultiFDPayloadType;
+
+typedef union MultiFDPayload {
+    MultiFDPages_t ram;
+} MultiFDPayload;
+
+struct MultiFDSendData {
+    MultiFDPayloadType type;
+    MultiFDPayload u;
+};
+
+static inline bool multifd_payload_empty(MultiFDSendData *data)
+{
+    return data->type == MULTIFD_PAYLOAD_NONE;
+}
+
+static inline void multifd_set_payload_type(MultiFDSendData *data,
+                                            MultiFDPayloadType type)
+{
+    data->type = type;
+}
 
 typedef struct {
     /* Fields are only written at creating/deletion time */
