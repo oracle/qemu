@@ -3015,15 +3015,13 @@ void migration_set_downtime_exceeded_error(MigrationState *s, QEMUFile *f)
 {
     int64_t limit = s->parameters.downtime_limit;
     int64_t downtime = s->downtime_now - s->downtime_start;
-    Error *errp = NULL;
+    Error *local_err = NULL;
 
-    error_setg(&errp, "Reached downtime limit of %" PRIi64
-                      ", switchover limit %"PRIi64" ms"
-                      "current downtime %"PRIi64" ms", limit,
-                      s->parameters.switchover_limit, downtime);
+    error_setg(&local_err, "Reached switchover abort limit of %" PRIi64
+                " ms, current downtime %"PRIi64" ms, configured downtime %" PRIi64
+                " ms", s->parameters.switchover_limit, downtime, limit);
+    qemu_file_set_error_obj(f, -ETIMEDOUT, local_err);
 
-    migration_cancel(errp);
-    error_free(errp);
 }
 
 /* migration thread support */
@@ -3686,6 +3684,13 @@ fail_invalidate:
     }
 
 fail:
+    if (s->rp_state.rp_thread_created) {
+        int rp_error;
+        trace_migration_return_path_end_before();
+        rp_error = await_return_path_close_on_source(s);
+        trace_migration_return_path_end_after(rp_error);
+    }
+
     migrate_set_state(&s->state, current_active_state,
                       MIGRATION_STATUS_FAILED);
 }
@@ -4052,11 +4057,11 @@ typedef enum {
     MIG_ITERATE_RESUME,         /* Resume current iteration */
     MIG_ITERATE_SKIP,           /* Skip current iteration */
     MIG_ITERATE_BREAK,          /* Break the loop */
+    MIG_ITERATE_FAIL,           /* Failures need to be detected */
 } MigIterateState;
 
 /*
- * Return true if continue to the next iteration directly, false
- * otherwise.
+ * Return migration thread iteration status.
  */
 static MigIterateState migration_iteration_run(MigrationState *s)
 {
@@ -4078,7 +4083,12 @@ static MigIterateState migration_iteration_run(MigrationState *s)
     if ((!pending_size || pending_size < s->threshold_size) && can_switchover) {
         trace_migration_thread_low_pending(pending_size);
         migration_completion(s);
-        return MIG_ITERATE_BREAK;
+        if (s->state == MIGRATION_STATUS_FAILED) {
+            /* Allow the caller to detect the errors in migration_completion. */
+            return MIG_ITERATE_FAIL;
+        } else {
+            return MIG_ITERATE_BREAK;
+        }
     }
 
     /* Still a significant amount to transfer */

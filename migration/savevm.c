@@ -1420,6 +1420,7 @@ int qemu_savevm_state_complete_precopy_iterable(QEMUFile *f, bool in_postcopy)
                                     end_ts_each - start_ts_each);
         if (migration_downtime_exceeded()) {
             migration_set_downtime_exceeded_error(s, f);
+            return -1;
         }
     }
 
@@ -1494,6 +1495,7 @@ int qemu_savevm_state_complete_precopy_non_iterable(QEMUFile *f,
             MigrationState *ms = migrate_get_current();
 
             migration_set_downtime_exceeded_error(ms, f);
+            return -1;
         }
 
     }
