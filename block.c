@@ -6665,7 +6665,15 @@ static int bdrv_inactivate_recurse(BlockDriverState *bs)
         return 0;
     }
 
-    assert(!(bs->open_flags & BDRV_O_INACTIVE));
+    if (bs->open_flags & BDRV_O_INACTIVE) {
+        /*
+         * Return here instead of throwing assert as a workaround to
+         * prevent failure on migrating paused VM.
+         * Here we assume that if we're trying to inactivate BDS that's
+         * already inactive, it's safe to just ignore it.
+         */
+        return 0;
+    }
 
     /* Inactivate this node */
     if (bs->drv->bdrv_inactivate) {
