@@ -258,7 +258,7 @@ Requires: %{name}-block-ssh = %{epoch}:%{version}-%{release}     \
 Summary: QEMU is a machine emulator and virtualizer
 Name: qemu-kvm
 Version: 7.2.0
-Release: 15%{?dist}
+Release: 16%{?dist}
 Epoch: 30
 License: GPLv2+ and LGPLv2+ and BSD
 Group: Development/Tools
@@ -1681,6 +1681,40 @@ getent passwd qemu >/dev/null || \
 
 
 %changelog
+* Tue Oct 1 2024 Karl Heubaum <karl.heubaum@oracle.com> - 7.2.0-16.el9
+- block: fix failing assert on paused VM migration (Andrey Drobyshev) [Orabug: 37106834]
+- migration/multifd: Fix rb->receivedmap cleanup race (Fabiano Rosas) [Orabug: 36932320]
+- migration/savevm: Remove extra load cleanup calls (Fabiano Rosas) [Orabug: 36932320]
+- migration: fix switchover abort termination paths (Elena Ufimtseva) [Orabug: 36932320]
+- nbd/server: CVE-2024-7409: Avoid use-after-free when closing server (Eric Blake) [Orabug: 36921582] {CVE-2024-7409}
+- nbd/server: CVE-2024-7409: Close stray clients at server-stop (Eric Blake) [Orabug: 36921582] {CVE-2024-7409}
+- nbd/server: CVE-2024-7409: Drop non-negotiating clients (Eric Blake) [Orabug: 36921582] {CVE-2024-7409}
+- nbd/server: CVE-2024-7409: Cap default max-connections to 100 (Eric Blake) [Orabug: 36921582] {CVE-2024-7409}
+- nbd/server: Plumb in new args to nbd_client_add() (Eric Blake) [Orabug: 36921582] {CVE-2024-7409}
+- nbd: Minor style and typo fixes (Eric Blake) [Orabug: 36921582] {CVE-2024-7409}
+- scsi-disk: Always report RESERVATION_CONFLICT to guest (Kevin Wolf)
+- scsi-disk: Add warning comments that host_status errors take a shortcut (Kevin Wolf)
+- scsi-block: Don't skip callback for sgio error status/driver_status (Kevin Wolf)
+- scsi-disk: Use positive return value for status in dma_readv/writev (Kevin Wolf)
+- target/i386: Add new CPU model SierraForest (Tao Su)
+- target/i386: Add few security fix bits in ARCH_CAPABILITIES into SapphireRapids CPU model (Lei Wang)
+- target/i386: Add new bit definitions of MSR_IA32_ARCH_CAPABILITIES (Tao Su)
+- target/i386: Allow MCDT_NO if host supports (Tao Su)
+- target/i386: Add support for MCDT_NO in CPUID enumeration (Tao Su)
+- target/i386: Adjust feature level according to FEAT_7_1_EDX (Tao Su)
+- target/i386: Export MSR_ARCH_CAPABILITIES bits to guests (Pawan Gupta)
+- target/i386: Add support for PREFETCHIT0/1 in CPUID enumeration (Jiaxi Chen)
+- target/i386: Add support for AVX-NE-CONVERT in CPUID enumeration (Jiaxi Chen)
+- target/i386: Add support for AVX-VNNI-INT8 in CPUID enumeration (Jiaxi Chen)
+- target/i386: Add support for AVX-IFMA in CPUID enumeration (Jiaxi Chen)
+- target/i386: Add support for AMX-FP16 in CPUID enumeration (Jiaxi Chen)
+- target/i386: Add support for CMPCCXADD in CPUID enumeration (Jiaxi Chen)
+- i386: Add new CPU model SapphireRapids (Wang, Lei)
+- target/i386: KVM: allow fast string operations if host supports them (Paolo Bonzini)
+- target/i386: add FZRM, FSRS, FSRC (Paolo Bonzini)
+- spec: disable keyutils (Mark Kanda) [Orabug: 36903731]
+- meson.build: Make keyutils independent from keyring (Thomas Huth) [Orabug: 36903731]
+
 * Wed Jul 31 2024 Karl Heubaum <karl.heubaum@oracle.com> - 7.2.0-15.el9
 - migration: abort on destination if switchover limit exceeded (Elena Ufimtseva)
 - migration: introduce strict switchover SLA (Elena Ufimtseva)
