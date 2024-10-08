@@ -1566,6 +1566,10 @@ static void kvm_log_sync(MemoryListener *listener,
 {
     KVMMemoryListener *kml = container_of(listener, KVMMemoryListener, listener);
 
+    if (memory_global_dirty_devices()) {
+        return;
+    }
+
     kvm_slots_lock();
     kvm_physical_sync_dirty_bitmap(kml, section);
     kvm_slots_unlock();
@@ -1577,6 +1581,10 @@ static void kvm_log_sync_global(MemoryListener *l)
     KVMState *s = kvm_state;
     KVMSlot *mem;
     int i;
+
+    if (memory_global_dirty_devices()) {
+        return;
+    }
 
     /* Flush all kernel dirty addresses into KVMSlot dirty bitmap */
     kvm_dirty_ring_flush();
@@ -1606,6 +1614,10 @@ static void kvm_log_clear(MemoryListener *listener,
 {
     KVMMemoryListener *kml = container_of(listener, KVMMemoryListener, listener);
     int r;
+
+    if (memory_global_dirty_devices()) {
+        return;
+    }
 
     r = kvm_physical_log_clear(kml, section);
     if (r < 0) {

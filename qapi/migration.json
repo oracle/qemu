@@ -1921,7 +1921,7 @@
 # Since: 6.2
 ##
 { 'enum': 'DirtyRateMeasureMode',
-  'data': ['page-sampling', 'dirty-ring', 'dirty-bitmap'] }
+  'data': ['page-sampling', 'dirty-ring', 'dirty-bitmap', 'x-orcl-dirty-bitmap-devices'] }
 
 ##
 # @DirtyRateInfo:

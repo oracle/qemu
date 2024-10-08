@@ -252,7 +252,8 @@ static struct DirtyRateInfo *query_dirty_rate_info(void)
             info->vcpu_dirty_rate = head;
         }
 
-        if (dirtyrate_mode == DIRTY_RATE_MEASURE_MODE_DIRTY_BITMAP) {
+        if (dirtyrate_mode == DIRTY_RATE_MEASURE_MODE_DIRTY_BITMAP ||
+            dirtyrate_mode == DIRTY_RATE_MEASURE_MODE_X_ORCL_DIRTY_BITMAP_DEVICES) {
             info->sample_pages = 0;
         }
     }
@@ -581,9 +582,14 @@ static void calculate_dirtyrate_dirty_bitmap(struct DirtyRateConfig config)
     int64_t msec = 0;
     int64_t start_time;
     DirtyPageRecord dirty_pages;
+    unsigned int flags = GLOBAL_DIRTY_DIRTY_RATE;
+
+    if (config.mode == DIRTY_RATE_MEASURE_MODE_X_ORCL_DIRTY_BITMAP_DEVICES) {
+        flags |= GLOBAL_DIRTY_DIRTY_RATE_DEVICES;
+    }
 
     qemu_mutex_lock_iothread();
-    memory_global_dirty_log_start(GLOBAL_DIRTY_DIRTY_RATE);
+    memory_global_dirty_log_start(flags);
 
     /*
      * 1'round of log sync may return all 1 bits with
@@ -615,7 +621,7 @@ static void calculate_dirtyrate_dirty_bitmap(struct DirtyRateConfig config)
      * 1. fetch dirty bitmap from kvm
      * 2. stop dirty tracking
      */
-    global_dirty_log_sync(GLOBAL_DIRTY_DIRTY_RATE, true);
+    global_dirty_log_sync(flags, true);
 
     record_dirtypages_bitmap(&dirty_pages, false);
 
@@ -685,7 +691,8 @@ out:
 
 static void calculate_dirtyrate(struct DirtyRateConfig config)
 {
-    if (config.mode == DIRTY_RATE_MEASURE_MODE_DIRTY_BITMAP) {
+    if (config.mode == DIRTY_RATE_MEASURE_MODE_DIRTY_BITMAP ||
+        config.mode == DIRTY_RATE_MEASURE_MODE_X_ORCL_DIRTY_BITMAP_DEVICES) {
         calculate_dirtyrate_dirty_bitmap(config);
     } else if (config.mode == DIRTY_RATE_MEASURE_MODE_DIRTY_RING) {
         calculate_dirtyrate_dirty_ring(config);
@@ -855,6 +862,7 @@ void hmp_calc_dirty_rate(Monitor *mon, const QDict *qdict)
     bool has_sample_pages = (sample_pages != -1);
     bool dirty_ring = qdict_get_try_bool(qdict, "dirty_ring", false);
     bool dirty_bitmap = qdict_get_try_bool(qdict, "dirty_bitmap", false);
+    bool dirty_devices = qdict_get_try_bool(qdict, "dirty_devices", false);
     DirtyRateMeasureMode mode = DIRTY_RATE_MEASURE_MODE_PAGE_SAMPLING;
     Error *err = NULL;
 
@@ -863,8 +871,9 @@ void hmp_calc_dirty_rate(Monitor *mon, const QDict *qdict)
         return;
     }
 
-    if (dirty_ring && dirty_bitmap) {
-        monitor_printf(mon, "Either dirty ring or dirty bitmap "
+    if ((dirty_ring && (dirty_bitmap ^ dirty_devices)) ||
+        (dirty_bitmap && dirty_devices)) {
+        monitor_printf(mon, "Either dirty ring or dirty bitmap or dirty devices "
                        "can be specified!\n");
         return;
     }
@@ -873,6 +882,8 @@ void hmp_calc_dirty_rate(Monitor *mon, const QDict *qdict)
         mode = DIRTY_RATE_MEASURE_MODE_DIRTY_BITMAP;
     } else if (dirty_ring) {
         mode = DIRTY_RATE_MEASURE_MODE_DIRTY_RING;
+    } else if (dirty_devices) {
+        mode = DIRTY_RATE_MEASURE_MODE_X_ORCL_DIRTY_BITMAP_DEVICES;
     }
 
     qmp_calc_dirty_rate(sec, has_sample_pages, sample_pages, true,

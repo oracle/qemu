@@ -2935,6 +2935,11 @@ void memory_global_dirty_log_start(unsigned int flags)
     }
 }
 
+bool memory_global_dirty_devices(void)
+{
+    return !!(global_dirty_tracking & GLOBAL_DIRTY_DIRTY_RATE_DEVICES);
+}
+
 static void memory_global_dirty_log_do_stop(unsigned int flags)
 {
     assert(flags && !(flags & (~GLOBAL_DIRTY_MASK)));

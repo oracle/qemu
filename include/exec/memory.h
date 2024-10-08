@@ -72,7 +72,10 @@ static inline void fuzz_dma_read_cb(size_t addr,
 /* Dirty tracking enabled because dirty limit */
 #define GLOBAL_DIRTY_LIMIT      (1U << 2)
 
-#define GLOBAL_DIRTY_MASK  (0x7)
+/* Dirty tracking enabled because measuring devices dirty rate */
+#define GLOBAL_DIRTY_DIRTY_RATE_DEVICES (1U << 3)
+
+#define GLOBAL_DIRTY_MASK  (0xF)
 
 extern unsigned int global_dirty_tracking;
 
@@ -2467,6 +2470,11 @@ void memory_global_dirty_log_start(unsigned int flags);
  * @flags: purpose of stopping dirty log, migration or dirty rate
  */
 void memory_global_dirty_log_stop(unsigned int flags);
+
+/**
+ * memory_global_dirty_devices: check if the scope is just devices
+ */
+bool memory_global_dirty_devices(void);
 
 void mtree_info(bool flatview, bool dispatch_tree, bool owner, bool disabled);
 
