@@ -1382,6 +1382,25 @@
   'data': { 'pass': 'int' } }
 
 ##
+# @MIGRATION_SWITCHOVER:
+#
+# Emitted from the source side of a migration at the start of switchover right before
+# the source VM begins the switchover
+#
+# @running: Whether the guest is running or not. Useful to track pre/post switchover.
+#
+# Since: 7.2
+#
+# Example:
+#
+# { "timestamp": {"seconds": 1449669631, "microseconds": 239225},
+#   "event": "MIGRATION_SWITCHOVER", "data": {"running": 0} }
+#
+##
+{ 'event': 'MIGRATION_SWITCHOVER',
+  'data': { 'running': 'bool' } }
+
+##
 # @COLOMessage:
 #
 # The message transmission between Primary side and Secondary side.

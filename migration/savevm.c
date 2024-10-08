@@ -43,6 +43,7 @@
 #include "postcopy-ram.h"
 #include "qapi/error.h"
 #include "qapi/qapi-commands-migration.h"
+#include "qapi/qapi-events-migration.h"
 #include "qapi/qmp/json-writer.h"
 #include "qapi/clone-visitor.h"
 #include "qapi/qapi-builtin-visit.h"
@@ -1870,12 +1871,32 @@ static int loadvm_handle_src_downtime(MigrationIncomingState *mis,
 {
     uint64_t src_abort_limit = qemu_get_be64(mis->from_src_file);
     uint64_t src_current_downtime = qemu_get_be64(mis->from_src_file);
+    static bool switchover = false;
 
     mis->abort_limit = src_abort_limit;
     mis->src_downtime = src_current_downtime;
-    mis->downtime_start = qemu_clock_get_ms(QEMU_CLOCK_REALTIME);
+
+    /*
+     * Initialize destination downtime timer only if source
+     * sent non-zero src_abort_limit. If src_abort_limit is zero,
+     * the live migration on source has not yet began the downtime
+     * timer.
+     */
+    if (mis->src_downtime) {
+        mis->downtime_start = qemu_clock_get_ms(QEMU_CLOCK_REALTIME);
+    }
 
     trace_loadvm_handle_src_downtime(src_abort_limit, src_current_downtime);
+
+    /* Zero downtime means we are about to switchover */
+    if (!src_current_downtime) {
+        qapi_event_send_migration_switchover(true);
+        trace_loadvm_src_switchover(true);
+    } else if (src_current_downtime && !switchover) {
+        qapi_event_send_migration_switchover(false);
+        switchover = true;
+        trace_loadvm_src_switchover(false);
+    }
     return 0;
 }
 

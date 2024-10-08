@@ -3602,6 +3602,15 @@ static void migration_completion(MigrationState *s)
 
         if (!ret) {
             bool inactivate = !migrate_colo_enabled();
+            uint64_t abort_limit_ms = s->parameters.downtime_limit +
+                                      s->parameters.switchover_limit;
+
+            /*
+             * Announce switchover will start but guest is running.
+             * Downtime value being zero has this special meaning.
+             */
+            qemu_savevm_send_downtime(s->to_dst_file, abort_limit_ms, 0);
+
             ret = migration_stop_vm(RUN_STATE_FINISH_MIGRATE);
             trace_migration_completion_vm_stop(ret);
             if (ret >= 0) {
