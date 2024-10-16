@@ -258,7 +258,7 @@ Requires: %{name}-block-ssh = %{epoch}:%{version}-%{release}     \
 Summary: QEMU is a machine emulator and virtualizer
 Name: qemu-kvm
 Version: 7.2.0
-Release: 16%{?dist}
+Release: 17%{?dist}
 Epoch: 30
 License: GPLv2+ and LGPLv2+ and BSD
 Group: Development/Tools
@@ -1681,6 +1681,14 @@ getent passwd qemu >/dev/null || \
 
 
 %changelog
+* Wed Oct 16 2024 Karl Heubaum <karl.heubaum@oracle.com> - 7.2.0-17.el9
+- target/i386: add feature bits for Inception/SRSO mitigations (Mark Kanda) [Orabug: 37170148]
+- hw/vfio/pci-quirks: Sanitize capability pointer (Alex Williamson) [Orabug: 37176213]
+- hw/vfio/pci-quirks: Support alternate offset for GPUDirect Cliques (Alex Williamson) [Orabug: 37176213]
+- migration/dirtyrate: Add new mode to dirty track non KVM device separately (Joao Martins) [Orabug: 37097510]
+- vfio/migration: Allow dirty tracking reports with MIGRATION_STATUS_NONE (Joao Martins) [Orabug: 37097510]
+- migration: Emit event when source starts switchover (Joao Martins) [Orabug: 37097503]
+
 * Tue Oct 1 2024 Karl Heubaum <karl.heubaum@oracle.com> - 7.2.0-16.el9
 - block: fix failing assert on paused VM migration (Andrey Drobyshev) [Orabug: 37106834]
 - migration/multifd: Fix rb->receivedmap cleanup race (Fabiano Rosas) [Orabug: 36932320]
