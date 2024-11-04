@@ -72,6 +72,7 @@ typedef struct VFIOMigration {
     bool initial_data_sent;
 
     bool event_save_iterate_started;
+    bool event_precopy_empty_hit;
 } VFIOMigration;
 
 typedef struct VFIOAddressSpace {
