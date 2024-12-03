@@ -1342,7 +1342,6 @@ rm %{buildroot}%{_datadir}/systemtap/tapset/qemu-system-%{kvm_target}.stp
 rm %{buildroot}%{_datadir}/systemtap/tapset/qemu-system-%{kvm_target}-simpletrace.stp
 rm %{buildroot}%{_datadir}/systemtap/tapset/qemu-system-%{kvm_target}-log.stp
 rm %{buildroot}%{_datadir}/applications/qemu.desktop
-rm -f %{buildroot}%{_bindir}/elf2dmp
 
 # Install simpletrace
 install -m 0755 scripts/simpletrace.py %{buildroot}%{_datadir}/%{name}/simpletrace.py
@@ -1388,8 +1387,6 @@ rm -rf %{buildroot}%{_datadir}/icons
 rm -rf %{buildroot}%{_datadir}/%{name}/qemu-nsis.bmp
 # We don't package the setuid root qemu-bridge-helper script
 rm -rf %{buildroot}%{_libexecdir}/qemu-bridge-helper
-# We don't package elf2dmp
-rm -rf %{buildroot}%{_bindir}/elf2dmp
 # We don't package virtfs-proxy-helper
 rm -rf %{buildroot}%{_libexecdir}/virtfs-proxy-helper
 rm -rf %{buildroot}%{_mandir}/man1/virtfs-proxy-helper*
@@ -1538,6 +1535,7 @@ getent passwd qemu >/dev/null || \
 %{_datadir}/%{name}/keymaps/
 %if 0%{?have_tools}
 %{_bindir}/qemu-pr-helper
+%{_bindir}/elf2dmp
 %endif
 %dir %{_sysconfdir}/%{name}
 %config(noreplace) %{_sysconfdir}/%{name}/bridge.conf
