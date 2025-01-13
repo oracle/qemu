@@ -258,7 +258,7 @@ Requires: %{name}-block-ssh = %{epoch}:%{version}-%{release}     \
 Summary: QEMU is a machine emulator and virtualizer
 Name: qemu-kvm
 Version: 7.2.0
-Release: 17%{?dist}
+Release: 18%{?dist}
 Epoch: 30
 License: GPLv2+ and LGPLv2+ and BSD
 Group: Development/Tools
@@ -1679,6 +1679,31 @@ getent passwd qemu >/dev/null || \
 
 
 %changelog
+* Mon Jan 13 2025 Karl Heubaum <karl.heubaum@oracle.com> - 7.2.0-18.el9
+- tests: acpi: update expected blobs (Igor Mammedov) [Orabug: 37274182]
+- cpuhp: make sure that remove events are handled within the same SCI (Igor Mammedov) [Orabug: 37274182]
+- tests: acpi: whitelist expected blobs (Igor Mammedov) [Orabug: 37274182]
+- target/i386: Reset TSCs of parked vCPUs too on VM reset (Maciej S. Szmigiero) [Orabug: 37318424]
+- 9pfs: fix regression regarding CVE-2023-2861 (Christian Schoenebeck) [Orabug: 37409273]
+- virtio-net: Ensure queue index fits with RSS (Akihiko Odaki) [Orabug: 36943011] {CVE-2024-6505}
+- qemu-kvm.spec: pack elf2dmp tool (Annie Li)
+- test: bios-tables-test: add IVRS changed binary (Bui Quang Minh) [Orabug: 35710551]
+- amd_iommu: Fix kvm_enable_x2apic link error with clang in non-KVM builds (Sairaj Kodilkar) [Orabug: 35710551]
+- amd_iommu: Check APIC ID > 255 for XTSup (Suravee Suthikulpanit) [Orabug: 35710551]
+- amd_iommu: Send notification when invalidate interrupt entry cache (Suravee Suthikulpanit) [Orabug: 35710551]
+- amd_iommu: Use shared memory region for Interrupt Remapping (Suravee Suthikulpanit) [Orabug: 35710551]
+- amd_iommu: Add support for pass though mode (Suravee Suthikulpanit) [Orabug: 35710551]
+- amd_iommu: Rename variable mmio to mr_mmio (Suravee Suthikulpanit) [Orabug: 35710551]
+- hw/i386/amd_iommu: Don't leak memory in amdvi_update_iotlb() (Peter Maydell) [Orabug: 35710551]
+- amd_iommu: report x2APIC support to the operating system (Bui Quang Minh) [Orabug: 35710551]
+- hw/i386/amd_iommu: Do not use SysBus API to map local MMIO region (Philippe Mathieu-Daudé) [Orabug: 35710551]
+- amd_iommu: Fix APIC address check (Akihiko Odaki) [Orabug: 35710551]
+- hw/i386/amd_iommu: Factor amdvi_pci_realize out of amdvi_sysbus_realize (Philippe Mathieu-Daudé) [Orabug: 35710551]
+- hw/i386/amd_iommu: Set PCI static/const fields via PCIDeviceClass (Philippe Mathieu-Daudé) [Orabug: 35710551]
+- hw/i386/amd_iommu: Move capab_offset from AMDVIState to AMDVIPCIState (Philippe Mathieu-Daudé) [Orabug: 35710551]
+- hw/i386/amd_iommu: Remove intermediate AMDVIState::devid field (Philippe Mathieu-Daudé) [Orabug: 35710551]
+- hw/i386/amd_iommu: Explicit use of AMDVI_BASE_ADDR in amdvi_init (Philippe Mathieu-Daudé) [Orabug: 35710551]
+
 * Wed Oct 16 2024 Karl Heubaum <karl.heubaum@oracle.com> - 7.2.0-17.el9
 - target/i386: add feature bits for Inception/SRSO mitigations (Mark Kanda) [Orabug: 37170148]
 - hw/vfio/pci-quirks: Sanitize capability pointer (Alex Williamson) [Orabug: 37176213]
