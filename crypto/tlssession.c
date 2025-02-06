@@ -498,34 +498,23 @@ qcrypto_tls_session_handshake(QCryptoTLSSession *session,
                               Error **errp)
 {
     int ret = gnutls_handshake(session->handle);
-    if (ret == 0) {
+    if (!ret) {
         session->handshakeComplete = true;
-    } else {
-        if (ret == GNUTLS_E_INTERRUPTED ||
-            ret == GNUTLS_E_AGAIN) {
-            ret = 1;
-        } else {
-            error_setg(errp, "TLS handshake failed: %s",
-                       gnutls_strerror(ret));
-            ret = -1;
-        }
-    }
-
-    return ret;
-}
-
-
-QCryptoTLSSessionHandshakeStatus
-qcrypto_tls_session_get_handshake_status(QCryptoTLSSession *session)
-{
-    if (session->handshakeComplete) {
         return QCRYPTO_TLS_HANDSHAKE_COMPLETE;
-    } else if (gnutls_record_get_direction(session->handle) == 0) {
-        return QCRYPTO_TLS_HANDSHAKE_RECVING;
-    } else {
-        return QCRYPTO_TLS_HANDSHAKE_SENDING;
     }
+
+    if (ret == GNUTLS_E_INTERRUPTED || ret == GNUTLS_E_AGAIN) {
+        int direction = gnutls_record_get_direction(session->handle);
+        return direction ? QCRYPTO_TLS_HANDSHAKE_SENDING :
+            QCRYPTO_TLS_HANDSHAKE_RECVING;
+    }
+
+    error_setg(errp, "TLS handshake failed: %s",
+               gnutls_strerror(ret));
+
+    return -1;
 }
+
 
 int
 qcrypto_tls_session_bye(QCryptoTLSSession *session, Error **errp)
@@ -645,13 +634,6 @@ qcrypto_tls_session_handshake(QCryptoTLSSession *sess,
 {
     error_setg(errp, "TLS requires GNUTLS support");
     return -1;
-}
-
-
-QCryptoTLSSessionHandshakeStatus
-qcrypto_tls_session_get_handshake_status(QCryptoTLSSession *sess)
-{
-    return QCRYPTO_TLS_HANDSHAKE_COMPLETE;
 }
 
 
