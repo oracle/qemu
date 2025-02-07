@@ -361,7 +361,8 @@ static ssize_t qio_channel_tls_readv(QIOChannel *ioc,
                     return QIO_CHANNEL_ERR_BLOCK;
                 }
             } else if (errno == ECONNABORTED &&
-                       (qatomic_load_acquire(&tioc->shutdown) &
+                       (flags & QIO_CHANNEL_READ_FLAG_RELAXED_EOF ||
+                        qatomic_load_acquire(&tioc->shutdown) &
                         QIO_CHANNEL_SHUTDOWN_READ)) {
                 return 0;
             }
