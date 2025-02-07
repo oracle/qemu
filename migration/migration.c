@@ -4655,6 +4655,8 @@ static Property migration_properties[] = {
                       multifd_flush_after_each_section, false),
     DEFINE_PROP_UINT8("x-clear-bitmap-shift", MigrationState,
                       clear_bitmap_shift, CLEAR_BITMAP_SHIFT_DEFAULT),
+    DEFINE_PROP_BOOL("multifd-clean-tls-termination", MigrationState,
+                     multifd_clean_tls_termination, false),
 
     /* Migration parameters */
     DEFINE_PROP_UINT8("x-compress-level", MigrationState,
