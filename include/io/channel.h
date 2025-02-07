@@ -798,6 +798,7 @@ void qio_channel_set_aio_fd_handler(QIOChannel *ioc,
  * @niov: the length of the @iov array
  * @fds: an array of file handles to read
  * @nfds: number of file handles in @fds
+ * @flags: read flags (QIO_CHANNEL_READ_FLAG_*)
  * @errp: pointer to a NULL-initialized error object
  *
  *
@@ -816,6 +817,7 @@ int qio_channel_readv_full_all_eof(QIOChannel *ioc,
                                    const struct iovec *iov,
                                    size_t niov,
                                    int **fds, size_t *nfds,
+                                   int flags,
                                    Error **errp);
 
 /**
