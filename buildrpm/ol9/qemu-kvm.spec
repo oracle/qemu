@@ -1434,8 +1434,8 @@ rm -rf %{buildroot}%{_datadir}/%{name}/linuxboot_dma.bin
 rm -rf %{buildroot}%{_datadir}/%{name}/multiboot.bin
 rm -rf %{buildroot}%{_datadir}/%{name}/pvh.bin
 rm -rf %{buildroot}%{_datadir}/%{name}/bios-microvm.bin
-%endif
 rm -rf %{buildroot}%{_datadir}/%{name}/multiboot_dma.bin
+%endif
 
 pxe_link() {
 	ln -s ../ipxe/$2.rom %{buildroot}%{_datadir}/%{name}/pxe-$1.rom
@@ -1562,6 +1562,7 @@ getent passwd qemu >/dev/null || \
     %{_datadir}/%{name}/linuxboot.bin
     %{_datadir}/%{name}/linuxboot_dma.bin
     %{_datadir}/%{name}/multiboot.bin
+    %{_datadir}/%{name}/multiboot_dma.bin
     %{_datadir}/%{name}/kvmvapic.bin
     %{_datadir}/%{name}/sgabios.bin
     %{_datadir}/%{name}/pvh.bin
