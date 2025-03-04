@@ -12,6 +12,7 @@
 
 #include "qemu/osdep.h"
 #include "qemu/cutils.h"
+#include "qemu/iov.h"
 #include "qemu/rcu.h"
 #include "exec/target_page.h"
 #include "sysemu/sysemu.h"
@@ -96,7 +97,7 @@ static size_t multifd_ram_payload_size(void)
     return sizeof(MultiFDPages_t) + n * sizeof(ram_addr_t);
 }
 
-static MultiFDSendData *multifd_send_data_alloc(void)
+MultiFDSendData *multifd_send_data_alloc(void)
 {
     size_t max_payload_size, size_minus_payload;
 
@@ -106,7 +107,9 @@ static MultiFDSendData *multifd_send_data_alloc(void)
      * added to the union in the future are larger than
      * (MultiFDPages_t + flex array).
      */
-    max_payload_size = MAX(multifd_ram_payload_size(), sizeof(MultiFDPayload));
+    max_payload_size = MAX(multifd_ram_payload_size(),
+                           multifd_device_state_payload_size());
+    max_payload_size = MAX(max_payload_size, sizeof(MultiFDPayload));
 
     /*
      * Account for any holes the compiler might insert. We can't pack
@@ -125,6 +128,9 @@ void multifd_send_data_clear(MultiFDSendData *data)
     }
 
     switch (data->type) {
+    case MULTIFD_PAYLOAD_DEVICE_STATE:
+        multifd_send_data_clear_device_state(&data->u.device_state);
+        break;
     default:
         /* Nothing to do */
         break;
@@ -184,6 +190,13 @@ static void nocomp_send_cleanup(MultiFDSendParams *p, Error **errp)
     return;
 }
 
+static void multifd_ram_prepare_header(MultiFDSendParams *p)
+{
+    p->iov[0].iov_len = p->packet_len;
+    p->iov[0].iov_base = p->packet;
+    p->iovs_num++;
+}
+
 /**
  * nocomp_send_prepare: prepare date to be able to send
  *
@@ -209,7 +222,7 @@ static int nocomp_send_prepare(MultiFDSendParams *p, Error **errp)
          * Only !zerocopy needs the header in IOV; zerocopy will
          * send it separately.
          */
-        multifd_send_prepare_header(p);
+        multifd_ram_prepare_header(p);
     }
 
     for (int i = 0; i < pages->normal_num; i++) {
@@ -230,6 +243,8 @@ static int nocomp_send_prepare(MultiFDSendParams *p, Error **errp)
         if (ret != 0) {
             return -1;
         }
+
+        stat64_add(&ram_counters.multifd_bytes, p->packet_len);
     }
 
     return 0;
@@ -414,6 +429,7 @@ static void multifd_ram_fill_packet(MultiFDSendParams *p)
     trace_multifd_send_ram_fill(p->id, pages->normal_num, zero_num);
 }
 
+/* Fills a RAM multifd packet */
 void multifd_send_fill_packet(MultiFDSendParams *p)
 {
     MultiFDPacket_t *packet = p->packet;
@@ -606,7 +622,7 @@ static void multifd_send_kick_main(MultiFDSendParams *p)
  *
  * Returns true if succeed, false otherwise.
  */
-static bool multifd_send(MultiFDSendData **send_data)
+bool multifd_send(MultiFDSendData **send_data)
 {
     int i;
     static int next_channel;
@@ -804,6 +820,7 @@ static bool multifd_send_cleanup_channel(MultiFDSendParams *p, Error **errp)
     p->name = NULL;
     g_clear_pointer(&p->data, multifd_send_data_free);
     p->packet_len = 0;
+    g_clear_pointer(&p->packet_device_state, g_free);
     g_free(p->packet);
     p->packet = NULL;
     g_free(p->iov);
@@ -815,6 +832,7 @@ static bool multifd_send_cleanup_channel(MultiFDSendParams *p, Error **errp)
 
 static void multifd_send_cleanup_state(void)
 {
+    multifd_device_state_send_cleanup();
     qemu_sem_destroy(&multifd_send_state->channels_created);
     qemu_sem_destroy(&multifd_send_state->channels_ready);
     qemu_mutex_destroy(&multifd_send_state->multifd_send_mutex);
@@ -987,14 +1005,28 @@ static void *multifd_send_thread(void *opaque)
          * qatomic_store_release() in multifd_send().
          */
         if (qatomic_load_acquire(&p->pending_job)) {
+            bool is_device_state = multifd_payload_device_state(p->data);
+            size_t total_size;
+
             p->flags = 0;
             p->iovs_num = 0;
             assert(!multifd_payload_empty(p->data));
 
-            ret = multifd_send_state->ops->send_prepare(p, &local_err);
-            if (ret != 0) {
-                break;
+            if (is_device_state) {
+                multifd_device_state_send_prepare(p);
+            } else {
+                ret = multifd_send_state->ops->send_prepare(p, &local_err);
+                if (ret != 0) {
+                    break;
+                }
             }
+
+            /*
+             * The packet header in the zerocopy RAM case is accounted for
+             * in nocomp_send_prepare() - where it is actually
+             * being sent.
+             */
+            total_size = iov_size(p->iov, p->iovs_num);
 
             ret = qio_channel_writev_full_all(p->c, p->iov, p->iovs_num, NULL,
                                               0, p->write_flags, &local_err);
@@ -1002,8 +1034,7 @@ static void *multifd_send_thread(void *opaque)
                 break;
             }
 
-            stat64_add(&ram_counters.multifd_bytes,
-                       p->next_packet_size + p->packet_len);
+            stat64_add(&ram_counters.multifd_bytes, total_size);
 
             p->next_packet_size = 0;
             multifd_send_data_clear(p->data);
@@ -1197,6 +1228,9 @@ bool multifd_send_setup(void)
         p->packet_len = sizeof(MultiFDPacket_t)
                       + sizeof(uint64_t) * page_count;
         p->packet = g_malloc0(p->packet_len);
+        p->packet_device_state = g_malloc0(sizeof(*p->packet_device_state));
+        p->packet_device_state->hdr.magic = cpu_to_be32(MULTIFD_MAGIC);
+        p->packet_device_state->hdr.version = cpu_to_be32(MULTIFD_VERSION);
         p->name = g_strdup_printf("multifdsend_%d", i);
         /* We need one extra place for the packet header */
         p->iov = g_new0(struct iovec, page_count + 1);
@@ -1230,6 +1264,8 @@ bool multifd_send_setup(void)
                           MIGRATION_STATUS_FAILED);
         return false;
     }
+
+    multifd_device_state_send_setup();
 
     return true;
 }
@@ -1652,7 +1688,7 @@ bool multifd_send_prepare_common(MultiFDSendParams *p)
         return false;
     }
 
-    multifd_send_prepare_header(p);
+    multifd_ram_prepare_header(p);
 
     return true;
 }

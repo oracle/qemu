@@ -21,6 +21,7 @@ softmmu_ss.add(files(
   'global_state.c',
   'migration.c',
   'multifd.c',
+  'multifd-device-state.c',
   'multifd-zlib.c',
   'multifd-zero-page.c',
   'postcopy-ram.c',

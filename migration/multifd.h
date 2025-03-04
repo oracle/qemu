@@ -96,13 +96,22 @@ typedef struct {
     ram_addr_t offset[];
 } MultiFDPages_t;
 
+typedef struct {
+    char *idstr;
+    uint32_t instance_id;
+    char *buf;
+    size_t buf_len;
+} MultiFDDeviceState_t;
+
 typedef enum {
     MULTIFD_PAYLOAD_NONE,
     MULTIFD_PAYLOAD_RAM,
+    MULTIFD_PAYLOAD_DEVICE_STATE,
 } MultiFDPayloadType;
 
 typedef union MultiFDPayload {
     MultiFDPages_t ram;
+    MultiFDDeviceState_t device_state;
 } MultiFDPayload;
 
 struct MultiFDSendData {
@@ -113,6 +122,11 @@ struct MultiFDSendData {
 static inline bool multifd_payload_empty(MultiFDSendData *data)
 {
     return data->type == MULTIFD_PAYLOAD_NONE;
+}
+
+static inline bool multifd_payload_device_state(MultiFDSendData *data)
+{
+    return data->type == MULTIFD_PAYLOAD_DEVICE_STATE;
 }
 
 static inline void multifd_set_payload_type(MultiFDSendData *data,
@@ -168,8 +182,9 @@ typedef struct {
 
     /* thread local variables. No locking required */
 
-    /* pointer to the packet */
+    /* pointers to the possible packet types */
     MultiFDPacket_t *packet;
+    MultiFDPacketDeviceState_t *packet_device_state;
     /* size of the next packet that contains pages */
     uint32_t next_packet_size;
     /* packets sent through this channel */
@@ -260,13 +275,8 @@ bool multifd_send_prepare_common(MultiFDSendParams *p);
 void multifd_send_zero_page_detect(MultiFDSendParams *p);
 void multifd_recv_zero_page_process(MultiFDRecvParams *p);
 
-static inline void multifd_send_prepare_header(MultiFDSendParams *p)
-{
-    p->iov[0].iov_len = p->packet_len;
-    p->iov[0].iov_base = p->packet;
-    p->iovs_num++;
-}
-
+bool multifd_send(MultiFDSendData **send_data);
+MultiFDSendData *multifd_send_data_alloc(void);
 void multifd_send_data_clear(MultiFDSendData *data);
 void multifd_send_data_free(MultiFDSendData *data);
 
@@ -282,4 +292,14 @@ static inline uint32_t multifd_ram_page_count(void)
 
 void multifd_ram_save_setup(void);
 void multifd_ram_save_cleanup(void);
+
+size_t multifd_device_state_payload_size(void);
+
+void multifd_send_data_clear_device_state(MultiFDDeviceState_t *device_state);
+
+void multifd_device_state_send_setup(void);
+void multifd_device_state_send_cleanup(void);
+
+void multifd_device_state_send_prepare(MultiFDSendParams *p);
+
 #endif
