@@ -23,6 +23,7 @@
 #include "migration/register.h"
 #include "migration/blocker.h"
 #include "migration/misc.h"
+#include "migration-multifd.h"
 #include "qapi/error.h"
 #include "qapi/qapi-events-vfio.h"
 #include "exec/ramlist.h"
