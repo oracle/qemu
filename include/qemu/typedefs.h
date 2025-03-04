@@ -149,5 +149,7 @@ typedef struct IRQState *qemu_irq;
 typedef void SaveStateHandler(QEMUFile *f, void *opaque);
 typedef int LoadStateHandler(QEMUFile *f, void *opaque, int version_id);
 typedef void (*qemu_irq_handler)(void *opaque, int n, int level);
+typedef bool (*MigrationLoadThread)(void *opaque, bool *should_quit,
+                                    Error **errp);
 
 #endif /* QEMU_TYPEDEFS_H */

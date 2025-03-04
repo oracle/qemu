@@ -408,7 +408,7 @@ void migration_incoming_state_destroy(void)
      * BQL and retake unconditionally.
      */
     assert(qemu_mutex_iothread_locked());
-    qemu_loadvm_state_cleanup();
+    qemu_loadvm_state_cleanup(mis);
 
     if (mis->to_src_file) {
         /* Tell source that we are done */
