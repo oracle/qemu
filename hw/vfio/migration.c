@@ -423,6 +423,10 @@ static int vfio_save_setup(QEMUFile *f, void *opaque)
     VFIOMigration *migration = vbasedev->migration;
     uint64_t stop_copy_size = VFIO_MIG_DEFAULT_DATA_BUFFER_SIZE;
 
+    if (!vfio_multifd_setup(vbasedev, false, NULL)) {
+        return -EINVAL;
+    }
+
     qemu_put_be64(f, VFIO_MIG_FLAG_DEV_SETUP_STATE);
 
     vfio_query_stop_copy_size(vbasedev, &stop_copy_size);
@@ -471,6 +475,9 @@ static void vfio_save_cleanup(void *opaque)
 {
     VFIODevice *vbasedev = opaque;
     VFIOMigration *migration = vbasedev->migration;
+
+    /* Currently a NOP, done for symmetry with load_cleanup() */
+    vfio_multifd_cleanup(vbasedev);
 
     /*
      * Changing device state from STOP_COPY to STOP can take time. Do it here,
@@ -639,14 +646,27 @@ static void vfio_save_state(QEMUFile *f, void *opaque)
 static int vfio_load_setup(QEMUFile *f, void *opaque)
 {
     VFIODevice *vbasedev = opaque;
+    VFIOMigration *migration = vbasedev->migration;
+    int ret;
 
-    return vfio_migration_set_state(vbasedev, VFIO_DEVICE_STATE_RESUMING,
-                                   vbasedev->migration->device_state);
+    if (!vfio_multifd_setup(vbasedev, true, NULL)) {
+        return -EINVAL;
+    }
+
+    ret = vfio_migration_set_state(vbasedev, VFIO_DEVICE_STATE_RESUMING,
+                                   migration->device_state);
+    if (ret) {
+        return ret;
+    }
+
+    return 0;
 }
 
 static int vfio_load_cleanup(void *opaque)
 {
     VFIODevice *vbasedev = opaque;
+
+    vfio_multifd_cleanup(vbasedev);
 
     vfio_migration_cleanup(vbasedev);
     trace_vfio_load_cleanup(vbasedev->name);
