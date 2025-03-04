@@ -86,39 +86,24 @@ struct {
 
 static MultiFDSendData *multifd_ram_send;
 
-static size_t multifd_ram_payload_size(void)
+static void multifd_ram_payload_alloc(MultiFDPages_t *pages)
 {
-    uint32_t n = multifd_ram_page_count();
+    pages->offset = g_new0(ram_addr_t, multifd_ram_page_count());
+}
 
-    /*
-     * We keep an array of page offsets at the end of MultiFDPages_t,
-     * add space for it in the allocation.
-     */
-    return sizeof(MultiFDPages_t) + n * sizeof(ram_addr_t);
+static void multifd_ram_payload_free(MultiFDPages_t *pages)
+{
+    g_clear_pointer(&pages->offset, g_free);
 }
 
 MultiFDSendData *multifd_send_data_alloc(void)
 {
-    size_t max_payload_size, size_minus_payload;
+    MultiFDSendData *new = g_new0(MultiFDSendData, 1);
 
-    /*
-     * MultiFDPages_t has a flexible array at the end, account for it
-     * when allocating MultiFDSendData. Use max() in case other types
-     * added to the union in the future are larger than
-     * (MultiFDPages_t + flex array).
-     */
-    max_payload_size = MAX(multifd_ram_payload_size(),
-                           multifd_device_state_payload_size());
-    max_payload_size = MAX(max_payload_size, sizeof(MultiFDPayload));
+    multifd_ram_payload_alloc(&new->u.ram);
+    /* Device state allocates its payload on-demand */
 
-    /*
-     * Account for any holes the compiler might insert. We can't pack
-     * the structure because that misaligns the members and triggers
-     * Waddress-of-packed-member.
-     */
-    size_minus_payload = sizeof(MultiFDSendData) - sizeof(MultiFDPayload);
-
-    return g_malloc0(size_minus_payload + max_payload_size);
+    return new;
 }
 
 void multifd_send_data_clear(MultiFDSendData *data)
@@ -145,7 +130,10 @@ void multifd_send_data_free(MultiFDSendData *data)
         return;
     }
 
+    /* This also free's device state payload */
     multifd_send_data_clear(data);
+
+    multifd_ram_payload_free(&data->u.ram);
 
     g_free(data);
 }
