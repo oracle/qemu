@@ -259,7 +259,7 @@ BlockAIOCB *thread_pool_submit_aio(ThreadPool *pool,
 
     QLIST_INSERT_HEAD(&pool->head, req, all);
 
-    trace_thread_pool_submit(pool, req, arg);
+    trace_thread_pool_submit_aio(pool, req, arg);
 
     qemu_mutex_lock(&pool->lock);
     if (pool->idle_threads == 0 && pool->cur_threads < pool->max_threads) {
@@ -292,11 +292,6 @@ int coroutine_fn thread_pool_submit_co(ThreadPool *pool, ThreadPoolFunc *func,
     thread_pool_submit_aio(pool, func, arg, thread_pool_co_cb, &tpc);
     qemu_coroutine_yield();
     return tpc.ret;
-}
-
-void thread_pool_submit(ThreadPool *pool, ThreadPoolFunc *func, void *arg)
-{
-    thread_pool_submit_aio(pool, func, arg, NULL, NULL);
 }
 
 void thread_pool_update_params(ThreadPool *pool, AioContext *ctx)
