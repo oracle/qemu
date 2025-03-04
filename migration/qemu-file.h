@@ -67,6 +67,8 @@ QEMUFile *qemu_file_new_output(QIOChannel *ioc);
 void qemu_file_set_hooks(QEMUFile *f, const QEMUFileHooks *hooks);
 int qemu_fclose(QEMUFile *f);
 
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(QEMUFile, qemu_fclose)
+
 /*
  * qemu_file_transferred:
  *
