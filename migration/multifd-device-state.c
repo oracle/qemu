@@ -13,6 +13,7 @@
 #include "qemu/lockable.h"
 #include "exec/cpu-common.h"
 #include "io/channel.h"
+#include "migration/migration.h"
 #include "migration/misc.h"
 #include "multifd.h"
 #include "ram.h"
@@ -113,4 +114,10 @@ bool multifd_queue_device_state(char *idstr, uint32_t instance_id,
     }
 
     return true;
+}
+
+bool multifd_device_state_supported(void)
+{
+    return migrate_use_multifd() &&
+        migrate_multifd_compression() == MULTIFD_COMPRESSION_NONE;
 }
