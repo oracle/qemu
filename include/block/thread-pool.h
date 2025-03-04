@@ -24,16 +24,16 @@
 
 typedef int ThreadPoolFunc(void *opaque);
 
-typedef struct ThreadPool ThreadPool;
+typedef struct ThreadPoolAio ThreadPoolAio;
 
-ThreadPool *thread_pool_new(struct AioContext *ctx);
-void thread_pool_free(ThreadPool *pool);
+ThreadPoolAio *thread_pool_new_aio(struct AioContext *ctx);
+void thread_pool_free_aio(ThreadPoolAio *pool);
 
-BlockAIOCB *thread_pool_submit_aio(ThreadPool *pool,
-        ThreadPoolFunc *func, void *arg,
-        BlockCompletionFunc *cb, void *opaque);
-int coroutine_fn thread_pool_submit_co(ThreadPool *pool,
-        ThreadPoolFunc *func, void *arg);
-void thread_pool_update_params(ThreadPool *pool, struct AioContext *ctx);
+BlockAIOCB *thread_pool_submit_aio(ThreadPoolAio *pool,
+                                   ThreadPoolFunc *func, void *arg,
+                                   BlockCompletionFunc *cb, void *opaque);
+int coroutine_fn thread_pool_submit_co(ThreadPoolAio *pool,
+                                       ThreadPoolFunc *func, void *arg);
+void thread_pool_update_params(ThreadPoolAio *pool, struct AioContext *ctx);
 
 #endif

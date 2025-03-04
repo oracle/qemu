@@ -100,7 +100,7 @@ bool tpm_backend_had_startup_error(TPMBackend *s)
 
 void tpm_backend_deliver_request(TPMBackend *s, TPMBackendCmd *cmd)
 {
-    ThreadPool *pool = aio_get_thread_pool(qemu_get_aio_context());
+    ThreadPoolAio *pool = aio_get_thread_pool(qemu_get_aio_context());
 
     if (s->cmd != NULL) {
         error_report("There is a TPM request pending");

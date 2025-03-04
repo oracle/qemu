@@ -2048,7 +2048,7 @@ static int coroutine_fn raw_thread_pool_submit(BlockDriverState *bs,
                                                ThreadPoolFunc func, void *arg)
 {
     /* @bs can be NULL, bdrv_get_aio_context() returns the main context then */
-    ThreadPool *pool = aio_get_thread_pool(bdrv_get_aio_context(bs));
+    ThreadPoolAio *pool = aio_get_thread_pool(bdrv_get_aio_context(bs));
     return thread_pool_submit_co(pool, func, arg);
 }
 

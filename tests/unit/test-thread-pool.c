@@ -8,7 +8,7 @@
 #include "qemu/main-loop.h"
 
 static AioContext *ctx;
-static ThreadPool *pool;
+static ThreadPoolAio *pool;
 static int active;
 
 typedef struct {

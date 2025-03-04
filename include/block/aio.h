@@ -54,7 +54,7 @@ typedef bool AioPollFn(void *opaque);
 typedef void IOHandler(void *opaque);
 
 struct Coroutine;
-struct ThreadPool;
+struct ThreadPoolAio;
 struct LinuxAioState;
 struct LuringState;
 
@@ -199,7 +199,7 @@ struct AioContext {
     /* Thread pool for performing work and receiving completion callbacks.
      * Has its own locking.
      */
-    struct ThreadPool *thread_pool;
+    struct ThreadPoolAio *thread_pool;
 
 #ifdef CONFIG_LINUX_AIO
     /*
@@ -524,8 +524,8 @@ void aio_set_event_notifier_poll(AioContext *ctx,
  */
 GSource *aio_get_g_source(AioContext *ctx);
 
-/* Return the ThreadPool bound to this AioContext */
-struct ThreadPool *aio_get_thread_pool(AioContext *ctx);
+/* Return the ThreadPoolAio bound to this AioContext */
+struct ThreadPoolAio *aio_get_thread_pool(AioContext *ctx);
 
 /* Setup the LinuxAioState bound to this AioContext */
 struct LinuxAioState *aio_setup_linux_aio(AioContext *ctx, Error **errp);
