@@ -72,6 +72,7 @@ void migration_global_dump(Monitor *mon);
 bool migration_in_incoming_postcopy(void);
 /* True if background snapshot is active */
 bool migration_in_bg_snapshot(void);
+bool migrate_send_switchover_start(void);
 
 /* migration/block-dirty-bitmap.c */
 void dirty_bitmap_mig_init(void);

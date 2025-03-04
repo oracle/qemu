@@ -90,7 +90,10 @@ enum qemu_vm_cmd {
     MIG_CMD_ENABLE_COLO,       /* Enable COLO */
     MIG_CMD_POSTCOPY_RESUME,   /* resume postcopy on dest */
     MIG_CMD_RECV_BITMAP,       /* Request for recved bitmap on dst */
-    MIG_CMD_SEND_SRC_DOWNTIME,    /* Send current downtime to dst */
+
+    /* Switchover start notification or src downtime */
+    MIG_CMD_SWITCHOVER_START_SRC_DOWNTIME,
+
     MIG_CMD_MAX
 };
 
@@ -110,7 +113,8 @@ static struct mig_cmd_args {
     [MIG_CMD_POSTCOPY_RESUME]  = { .len =  0, .name = "POSTCOPY_RESUME" },
     [MIG_CMD_PACKAGED]         = { .len =  4, .name = "PACKAGED" },
     [MIG_CMD_RECV_BITMAP]      = { .len = -1, .name = "RECV_BITMAP" },
-    [MIG_CMD_SEND_SRC_DOWNTIME] = { .len = -1, .name = "SEND_SRC_DOWNTIME" },
+    [MIG_CMD_SWITCHOVER_START_SRC_DOWNTIME] = { .len = -1,
+                                                .name = "SWITCHOVER_START_SRC_DOWNTIME" },
     [MIG_CMD_MAX]              = { .len = -1, .name = "MAX" },
 };
 
@@ -1119,8 +1123,21 @@ void qemu_savevm_send_downtime(QEMUFile *f, int64_t abort_limit_ms,
     tmp[1] = cpu_to_be64(source_downtime);
 
     trace_qemu_savevm_send_downtime(abort_limit_ms, source_downtime);
-    qemu_savevm_command_send(f, MIG_CMD_SEND_SRC_DOWNTIME,
+    qemu_savevm_command_send(f, MIG_CMD_SWITCHOVER_START_SRC_DOWNTIME,
                              16, (uint8_t *)tmp);
+}
+
+static void qemu_savevm_send_switchover_start(QEMUFile *f)
+{
+    trace_savevm_send_switchover_start();
+    qemu_savevm_command_send(f, MIG_CMD_SWITCHOVER_START_SRC_DOWNTIME, 0, NULL);
+}
+
+void qemu_savevm_maybe_send_switchover_start(QEMUFile *f)
+{
+    if (migrate_send_switchover_start()) {
+        qemu_savevm_send_switchover_start(f);
+    }
 }
 
 bool qemu_savevm_state_blocked(Error **errp)
@@ -1650,6 +1667,7 @@ static int qemu_savevm_state(QEMUFile *f, Error **errp)
 
     ret = qemu_file_get_error(f);
     if (ret == 0) {
+        qemu_savevm_maybe_send_switchover_start(f);
         qemu_savevm_state_complete_precopy(f, false, false);
         ret = qemu_file_get_error(f);
     }
@@ -2363,6 +2381,39 @@ static int loadvm_process_enable_colo(MigrationIncomingState *mis)
     return ret;
 }
 
+static int loadvm_postcopy_handle_switchover_start(void)
+{
+    SaveStateEntry *se;
+
+    QTAILQ_FOREACH(se, &savevm_state.handlers, entry) {
+        int ret;
+
+        if (!se->ops || !se->ops->switchover_start) {
+            continue;
+        }
+
+        ret = se->ops->switchover_start(se->opaque);
+        if (ret < 0) {
+            return ret;
+        }
+    }
+
+    return 0;
+}
+
+static int
+loadvm_handle_switchover_start_src_downtime(MigrationIncomingState *mis,
+                                            uint16_t len)
+{
+    /* Len == 0 means it is actually an upstream SWITCHOVER_START */
+    if (len == 0) {
+        return loadvm_postcopy_handle_switchover_start();
+    }
+
+    /* Otherwise it is our local QEMU's SEND_SRC_DOWNTIME */
+    return loadvm_handle_src_downtime(mis, len);
+}
+
 /*
  * Process an incoming 'QEMU_VM_COMMAND'
  * 0           just a normal return
@@ -2462,8 +2513,8 @@ static int loadvm_process_command(QEMUFile *f)
     case MIG_CMD_ENABLE_COLO:
         return loadvm_process_enable_colo(mis);
 
-    case MIG_CMD_SEND_SRC_DOWNTIME:
-        return loadvm_handle_src_downtime(mis, len);
+    case MIG_CMD_SWITCHOVER_START_SRC_DOWNTIME:
+        return loadvm_handle_switchover_start_src_downtime(mis, len);
     }
 
     return 0;

@@ -2963,6 +2963,13 @@ bool migrate_use_block_incremental(void)
     return s->parameters.block_incremental;
 }
 
+bool migrate_send_switchover_start(void)
+{
+    MigrationState *s = migrate_get_current();
+
+    return s->send_switchover_start;
+}
+
 bool migrate_background_snapshot(void)
 {
     MigrationState *s;
@@ -3411,6 +3418,8 @@ static int postcopy_start(MigrationState *ms)
     }
     restart_block = true;
 
+    qemu_savevm_maybe_send_switchover_start(ms->to_dst_file);
+
     /*
      * Cause any non-postcopiable, but iterative devices to
      * send out their final data.
@@ -3621,6 +3630,9 @@ static void migration_completion(MigrationState *s)
             }
             if (ret >= 0) {
                 migration_rate_set(RATE_LIMIT_DISABLED);
+
+                qemu_savevm_maybe_send_switchover_start(s->to_dst_file);
+
                 ret = qemu_savevm_state_complete_precopy(s->to_dst_file, false,
                                                          inactivate);
             }
@@ -4633,6 +4645,8 @@ void migration_global_dump(Monitor *mon)
                    ms->send_configuration ? "on" : "off");
     monitor_printf(mon, "send-section-footer: %s\n",
                    ms->send_section_footer ? "on" : "off");
+    monitor_printf(mon, "send-switchover-start: %s\n",
+                   ms->send_switchover_start ? "on" : "off");
     monitor_printf(mon, "decompress-error-check: %s\n",
                    ms->decompress_error_check ? "on" : "off");
     monitor_printf(mon, "clear-bitmap-shift: %u\n",
@@ -4649,6 +4663,8 @@ static Property migration_properties[] = {
                      send_configuration, true),
     DEFINE_PROP_BOOL("send-section-footer", MigrationState,
                      send_section_footer, true),
+    DEFINE_PROP_BOOL("send-switchover-start", MigrationState,
+                     send_switchover_start, false),
     DEFINE_PROP_BOOL("decompress-error-check", MigrationState,
                       decompress_error_check, true),
     DEFINE_PROP_BOOL("multifd-flush-after-each-section", MigrationState,

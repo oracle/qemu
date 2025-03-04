@@ -451,6 +451,9 @@ static int colo_do_checkpoint_transaction(MigrationState *s,
         qemu_mutex_unlock_iothread();
         goto out;
     }
+
+    qemu_savevm_maybe_send_switchover_start(s->to_dst_file);
+
     /* Note: device state is saved into buffer */
     ret = qemu_save_device_state(fb);
 
