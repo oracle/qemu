@@ -77,7 +77,6 @@ bool migration_in_bg_snapshot(void);
 void dirty_bitmap_mig_init(void);
 
 /* migration/multifd.c */
-bool migration_has_device_state_support(void);
 int multifd_queue_device_state(char *idstr, uint32_t instance_id,
                                char *data, size_t len);
 

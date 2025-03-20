@@ -736,12 +736,6 @@ retry:
     return true;
 }
 
-bool migration_has_device_state_support(void)
-{
-    return migrate_use_multifd() && migrate_multi_channels_is_allowed() &&
-        migrate_multifd_compression() == MULTIFD_COMPRESSION_NONE;
-}
-
 int multifd_queue_device_state(char *idstr, uint32_t instance_id,
                                char *data, size_t len)
 {
