@@ -269,8 +269,6 @@ void migration_object_init(void)
     qemu_mutex_init(&current_incoming->page_request_mutex);
     current_incoming->page_requested = g_tree_new(page_request_addr_cmp);
 
-    qemu_mutex_init(&current_incoming->load_finish_ready_mutex);
-    qemu_cond_init(&current_incoming->load_finish_ready_cond);
     qemu_mutex_init(&current_incoming->error_mutex);
     current_incoming->error = NULL;
     /* Downtime will start when source sends its current downtime. */
@@ -429,9 +427,6 @@ void migration_incoming_state_destroy(void)
         qemu_fclose(mis->postcopy_qemufile_dst);
         mis->postcopy_qemufile_dst = NULL;
     }
-
-    qemu_mutex_destroy(&mis->load_finish_ready_mutex);
-    qemu_cond_destroy(&mis->load_finish_ready_cond);
 
     yank_unregister_instance(MIGRATION_YANK_INSTANCE);
 }

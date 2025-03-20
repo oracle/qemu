@@ -2998,37 +2998,6 @@ int qemu_loadvm_state(QEMUFile *f)
         return ret;
     }
 
-    qemu_loadvm_load_finish_ready_lock();
-    while (!ret) { /* Don't call load_finish() handlers on the load failure path */
-        bool all_ready = true;
-        SaveStateEntry *se = NULL;
-
-        QTAILQ_FOREACH(se, &savevm_state.handlers, entry) {
-            bool this_ready;
-
-            if (!se->ops || !se->ops->load_finish) {
-                continue;
-            }
-
-            ret = se->ops->load_finish(se->opaque, &this_ready, &local_err);
-            if (ret) {
-                error_report_err(local_err);
-
-                qemu_loadvm_load_finish_ready_unlock();
-                return -EINVAL;
-            } else if (!this_ready) {
-                all_ready = false;
-            }
-        }
-
-        if (all_ready) {
-            break;
-        }
-
-        qemu_cond_wait(&mis->load_finish_ready_cond, &mis->load_finish_ready_mutex);
-    }
-    qemu_loadvm_load_finish_ready_unlock();
-
     if (ret == 0) {
         ret = qemu_file_get_error(f);
     }
@@ -3130,27 +3099,6 @@ int qemu_loadvm_load_state_buffer(const char *idstr, uint32_t instance_id,
     }
 
     return 0;
-}
-
-void qemu_loadvm_load_finish_ready_lock(void)
-{
-    MigrationIncomingState *mis = migration_incoming_get_current();
-
-    qemu_mutex_lock(&mis->load_finish_ready_mutex);
-}
-
-void qemu_loadvm_load_finish_ready_unlock(void)
-{
-    MigrationIncomingState *mis = migration_incoming_get_current();
-
-    qemu_mutex_unlock(&mis->load_finish_ready_mutex);
-}
-
-void qemu_loadvm_load_finish_ready_broadcast(void)
-{
-    MigrationIncomingState *mis = migration_incoming_get_current();
-
-    qemu_cond_broadcast(&mis->load_finish_ready_cond);
 }
 
 bool save_snapshot(const char *name, bool overwrite, const char *vmstate,

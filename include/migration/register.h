@@ -122,27 +122,6 @@ typedef struct SaveVMHandlers {
     int (*load_state_buffer)(void *opaque, char *data, size_t data_size,
                              Error **errp);
 
-    /**
-     * @load_finish
-     *
-     * Poll whether all asynchronous device state loading had finished.
-     * Not called on the load failure path.
-     *
-     * Called while holding the qemu_loadvm_load_finish_ready_lock.
-     *
-     * If this method signals "not ready" then it might not be called
-     * again until qemu_loadvm_load_finish_ready_broadcast() is invoked
-     * while holding qemu_loadvm_load_finish_ready_lock.
-     *
-     * @opaque: data pointer passed to register_savevm_live()
-     * @is_finished: whether the loading had finished (output parameter)
-     * @errp: pointer to Error*, to store an error if it happens.
-     *
-     * Returns zero to indicate success and negative for error
-     * It's not an error that the loading still hasn't finished.
-     */
-    int (*load_finish)(void *opaque, bool *is_finished, Error **errp);
-
     int (*load_setup)(QEMUFile *f, void *opaque);
     int (*load_cleanup)(void *opaque);
     /* Called when postcopy migration wants to resume from failure */

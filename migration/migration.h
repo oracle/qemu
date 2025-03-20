@@ -193,8 +193,6 @@ struct MigrationIncomingState {
      */
     unsigned int switchover_ack_pending_num;
 
-    QemuCond load_finish_ready_cond;
-    QemuMutex load_finish_ready_mutex;
     /*
      * The first error that has occurred.
      * We used the mutex to be able to return the 1st error message.
