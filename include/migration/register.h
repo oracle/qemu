@@ -106,22 +106,6 @@ typedef struct SaveVMHandlers {
     void (*state_pending_exact)(void *opaque, uint64_t *must_precopy,
                                 uint64_t *can_postcopy);
     LoadStateHandler *load_state;
-
-    /**
-     * @load_state_buffer
-     *
-     * Load device state buffer provided to qemu_loadvm_load_state_buffer().
-     *
-     * @opaque: data pointer passed to register_savevm_live()
-     * @data: the data buffer to load
-     * @data_size: the data length in buffer
-     * @errp: pointer to Error*, to store an error if it happens.
-     *
-     * Returns zero to indicate success and negative for error
-     */
-    int (*load_state_buffer)(void *opaque, char *data, size_t data_size,
-                             Error **errp);
-
     int (*load_setup)(QEMUFile *f, void *opaque);
     int (*load_cleanup)(void *opaque);
     /* Called when postcopy migration wants to resume from failure */
