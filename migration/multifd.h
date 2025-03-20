@@ -144,25 +144,18 @@ typedef struct {
      * cleared by the multifd sender threads.
      */
     bool pending_job;
-    bool pending_job_preparing;
     bool pending_sync;
-
-    /* Whether the pending job is pages (false) or device state (true) */
-    bool is_device_state_job;
-
-    /* Array of pages or device state to be sent (depending on the flag above).
-     * The owner of these depends of 'pending_job' value:
+    /* array of pages to sent.
+     * The owner of 'pages' depends of 'pending_job' value:
      * pending_job == 0 -> migration_thread can use it.
      * pending_job != 0 -> multifd_channel can use it.
      */
     MultiFDPages_t *pages;
-    MultiFDDeviceState_t *device_state;
 
     /* thread local variables. No locking required */
 
-    /* pointers to the possible packet types */
+    /* pointer to the packet */
     MultiFDPacket_t *packet;
-    MultiFDPacketDeviceState_t *packet_device_state;
     /* size of the next packet that contains pages */
     uint32_t next_packet_size;
     /* packets sent through this channel */
@@ -258,23 +251,17 @@ typedef struct {
 } MultiFDMethods;
 
 void multifd_register_ops(int method, MultiFDMethods *ops);
-void multifd_send_fill_packet_ram(MultiFDSendParams *p);
+void multifd_send_fill_packet(MultiFDSendParams *p);
 bool multifd_send_prepare_common(MultiFDSendParams *p);
 void multifd_send_zero_page_detect(MultiFDSendParams *p);
 void multifd_recv_zero_page_process(MultiFDRecvParams *p);
 
-static inline void multifd_send_prepare_header_ram(MultiFDSendParams *p)
+static inline void multifd_send_prepare_header(MultiFDSendParams *p)
 {
     p->iov[0].iov_len = p->packet_len;
     p->iov[0].iov_base = p->packet;
     p->iovs_num++;
 }
 
-static inline void multifd_send_prepare_header_device_state(MultiFDSendParams *p)
-{
-    p->iov[0].iov_len = sizeof(*p->packet_device_state);
-    p->iov[0].iov_base = p->packet_device_state;
-    p->iovs_num++;
-}
 
 #endif
