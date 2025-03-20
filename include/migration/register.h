@@ -29,40 +29,6 @@ typedef struct SaveVMHandlers {
     int (*save_live_complete_postcopy)(QEMUFile *f, void *opaque);
     int (*save_live_complete_precopy)(QEMUFile *f, void *opaque);
 
-    /**
-     * @save_live_complete_precopy_begin
-     *
-     * Called at the end of a precopy phase, before all @save_live_complete_precopy
-     * handlers. The handler might, for example, arrange for device-specific
-     * asynchronous transmission of the remaining data. When postcopy is enabled,
-     * devices that support postcopy will skip this step.
-     *
-     * @f: QEMUFile where the handler can synchronously send data before returning
-     * @idstr: this device section idstr
-     * @instance_id: this device section instance_id
-     * @opaque: data pointer passed to register_savevm_live()
-     *
-     * Returns zero to indicate success and negative for error
-     */
-    int (*save_live_complete_precopy_begin)(QEMUFile *f,
-                                            char *idstr, uint32_t instance_id,
-                                            void *opaque);
-    /**
-     * @save_live_complete_precopy_end
-     *
-     * Called at the end of a precopy phase, after all @save_live_complete_precopy
-     * handlers. The handler might, for example, wait for the asynchronous
-     * transmission started by the @save_live_complete_precopy_begin handler
-     * to complete. When postcopy is enabled, devices that support postcopy will
-     * skip this step.
-     *
-     * @f: QEMUFile where the handler can synchronously send data before returning
-     * @opaque: data pointer passed to register_savevm_live()
-     *
-     * Returns zero to indicate success and negative for error
-     */
-    int (*save_live_complete_precopy_end)(QEMUFile *f, void *opaque);
-
     /* This runs both outside and inside the iothread lock.  */
     bool (*is_active)(void *opaque);
     bool (*has_postcopy)(void *opaque);
