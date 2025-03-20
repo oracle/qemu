@@ -69,24 +69,15 @@ typedef struct VFIOMigration {
     uint64_t mig_flags;
     uint64_t precopy_init_size;
     uint64_t precopy_dirty_size;
-    bool multifd_transfer;
     bool initial_data_sent;
 
     bool save_iterate_run;
     bool save_iterate_empty_hit;
-
-    QemuThread save_complete_precopy_thread;
-    int save_complete_precopy_thread_ret;
-    bool save_complete_precopy_thread_started;
-
     QemuThread load_bufs_thread;
     Error *load_bufs_thread_errp;
     bool load_bufs_thread_started;
     bool load_bufs_thread_finished;
     bool load_bufs_thread_want_exit;
-
-    char *idstr;
-    uint32_t instance_id;
 
     GArray *load_bufs;
     bool load_bufs_device_ready;
