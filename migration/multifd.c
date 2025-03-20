@@ -546,38 +546,26 @@ static bool multifd_send_pages(QEMUFile *f)
         return false;
     }
 
+    /* We wait here, until at least one channel is ready */
+    qemu_sem_wait(&multifd_send_state->channels_ready);
+
     /*
      * next_channel can remain from a previous migration that was
      * using more channels, so ensure it doesn't overflow if the
      * limit is lower now.
      */
-    i = qatomic_load_acquire(&next_channel);
-    if (unlikely(i >= migrate_multifd_channels())) {
-        qatomic_cmpxchg(&next_channel, i, 0);
-    }
-
-    /* We wait here, until at least one channel is ready */
-    qemu_sem_wait(&multifd_send_state->channels_ready);
-
-    while (true) {
-        int i_next;
-
+    next_channel %= migrate_multifd_channels();
+    for (i = next_channel;; i = (i + 1) % migrate_multifd_channels()) {
         if (multifd_send_should_exit()) {
             return false;
         }
-
-        i = qatomic_load_acquire(&next_channel);
-        i_next = (i + 1) % migrate_multifd_channels();
-        if (qatomic_cmpxchg(&next_channel, i, i_next) != i) {
-            continue;
-        }
-
         p = &multifd_send_state->params[i];
         /*
          * Lockless read to p->pending_job is safe, because only multifd
          * sender thread can clear it.
          */
         if (qatomic_read(&p->pending_job) == false) {
+            next_channel = (i + 1) % migrate_multifd_channels();
             break;
         }
     }
