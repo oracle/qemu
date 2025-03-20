@@ -21,7 +21,6 @@
 #include "ram.h"
 #include "migration.h"
 #include "migration-stats.h"
-#include "savevm.h"
 #include "socket.h"
 #include "tls.h"
 #include "qemu-file.h"
@@ -342,7 +341,7 @@ void multifd_send_fill_packet(MultiFDSendParams *p)
     uint32_t zero_num = pages->num - pages->normal_num;
     int i;
 
-    packet->hdr.flags = cpu_to_be32(p->flags);
+    packet->flags = cpu_to_be32(p->flags);
     packet->pages_alloc = cpu_to_be32(p->pages->allocated);
     packet->normal_pages = cpu_to_be32(pages->normal_num);
     packet->zero_pages = cpu_to_be32(zero_num);
@@ -370,44 +369,28 @@ void multifd_send_fill_packet(MultiFDSendParams *p)
                        p->flags, p->next_packet_size);
 }
 
-static int multifd_recv_unfill_packet_header(MultiFDRecvParams *p, MultiFDPacketHdr_t *hdr,
-                                             Error **errp)
-{
-    hdr->magic = be32_to_cpu(hdr->magic);
-    if (hdr->magic != MULTIFD_MAGIC) {
-        error_setg(errp, "multifd: received packet "
-                   "magic %x and expected magic %x",
-                   hdr->magic, MULTIFD_MAGIC);
-        return -1;
-    }
-
-    hdr->version = be32_to_cpu(hdr->version);
-    if (hdr->version != MULTIFD_VERSION) {
-        error_setg(errp, "multifd: received packet "
-                   "version %u and expected version %u",
-                   hdr->version, MULTIFD_VERSION);
-        return -1;
-    }
-
-    p->flags = be32_to_cpu(hdr->flags);
-
-    return 0;
-}
-
-static int multifd_recv_unfill_packet_device_state(MultiFDRecvParams *p, Error **errp)
-{
-    MultiFDPacketDeviceState_t *packet = p->packet_dev_state;
-
-    packet->instance_id = be32_to_cpu(packet->instance_id);
-    p->next_packet_size = be32_to_cpu(packet->next_packet_size);
-
-    return 0;
-}
-
-static int multifd_recv_unfill_packet_ram(MultiFDRecvParams *p, Error **errp)
+static int multifd_recv_unfill_packet(MultiFDRecvParams *p, Error **errp)
 {
     MultiFDPacket_t *packet = p->packet;
     int i;
+
+    packet->magic = be32_to_cpu(packet->magic);
+    if (packet->magic != MULTIFD_MAGIC) {
+        error_setg(errp, "multifd: received packet "
+                   "magic %x and expected magic %x",
+                   packet->magic, MULTIFD_MAGIC);
+        return -1;
+    }
+
+    packet->version = be32_to_cpu(packet->version);
+    if (packet->version != MULTIFD_VERSION) {
+        error_setg(errp, "multifd: received packet "
+                   "version %u and expected version %u",
+                   packet->version, MULTIFD_VERSION);
+        return -1;
+    }
+
+    p->flags = be32_to_cpu(packet->flags);
 
     packet->pages_alloc = be32_to_cpu(packet->pages_alloc);
     /*
@@ -439,6 +422,7 @@ static int multifd_recv_unfill_packet_ram(MultiFDRecvParams *p, Error **errp)
 
     p->next_packet_size = be32_to_cpu(packet->next_packet_size);
     p->packet_num = be64_to_cpu(packet->packet_num);
+    p->packets_recved++;
     p->total_normal_pages += p->normal_num;
     p->total_zero_pages += p->zero_num;
 
@@ -484,19 +468,6 @@ static int multifd_recv_unfill_packet_ram(MultiFDRecvParams *p, Error **errp)
     }
 
     return 0;
-}
-
-static int multifd_recv_unfill_packet(MultiFDRecvParams *p, Error **errp)
-{
-    p->packets_recved++;
-
-    if (p->flags & MULTIFD_FLAG_DEVICE_STATE) {
-        return multifd_recv_unfill_packet_device_state(p, errp);
-    } else {
-        return multifd_recv_unfill_packet_ram(p, errp);
-    }
-
-    g_assert_not_reached();
 }
 
 static bool multifd_send_should_exit(void)
@@ -1087,8 +1058,8 @@ bool multifd_send_setup(void)
         p->packet_len = sizeof(MultiFDPacket_t)
                       + sizeof(uint64_t) * page_count;
         p->packet = g_malloc0(p->packet_len);
-        p->packet->hdr.magic = cpu_to_be32(MULTIFD_MAGIC);
-        p->packet->hdr.version = cpu_to_be32(MULTIFD_VERSION);
+        p->packet->magic = cpu_to_be32(MULTIFD_MAGIC);
+        p->packet->version = cpu_to_be32(MULTIFD_VERSION);
         p->name = g_strdup_printf("multifdsend_%d", i);
         /* We need one extra place for the packet header */
         p->iov = g_new0(struct iovec, page_count + 1);
@@ -1193,7 +1164,6 @@ static void multifd_recv_cleanup_channel(MultiFDRecvParams *p)
     p->packet_len = 0;
     g_free(p->packet);
     p->packet = NULL;
-    g_clear_pointer(&p->packet_dev_state, g_free);
     g_free(p->iov);
     p->iov = NULL;
     g_free(p->normal);
@@ -1276,37 +1246,14 @@ static void *multifd_recv_thread(void *opaque)
     rcu_register_thread();
 
     while (true) {
-        MultiFDPacketHdr_t hdr;
         uint32_t flags;
-        bool is_device_state = false;
-        uint8_t *pkt_buf;
-        size_t pkt_len;
 
         if (p->quit) {
             break;
         }
 
-        ret = qio_channel_read_all_eof(p->c, (void *)&hdr,
-                                       sizeof(hdr), &local_err);
-        if (ret == 0 || ret == -1) {   /* 0: EOF  -1: Error */
-            break;
-        }
-
-        ret = multifd_recv_unfill_packet_header(p, &hdr, &local_err);
-        if (ret) {
-            break;
-        }
-
-        is_device_state = p->flags & MULTIFD_FLAG_DEVICE_STATE;
-        if (is_device_state) {
-            pkt_buf = (uint8_t *)p->packet_dev_state + sizeof(hdr);
-            pkt_len = sizeof(*p->packet_dev_state) - sizeof(hdr);
-        } else {
-            pkt_buf = (uint8_t *)p->packet + sizeof(hdr);
-            pkt_len = p->packet_len - sizeof(hdr);
-        }
-
-        ret = qio_channel_read_all_eof(p->c, (char *)pkt_buf, pkt_len, &local_err);
+        ret = qio_channel_read_all_eof(p->c, (void *)p->packet,
+                                       p->packet_len, &local_err);
         if (ret == 0) {   /* EOF */
             break;
         }
@@ -1326,42 +1273,14 @@ static void *multifd_recv_thread(void *opaque)
         p->flags &= ~MULTIFD_FLAG_SYNC;
         qemu_mutex_unlock(&p->mutex);
 
-        if (!is_device_state) {
-            if (p->normal_num || p->zero_num) {
-                ret = multifd_recv_state->ops->recv_pages(p, &local_err);
-                if (ret != 0) {
-                    break;
-                }
-            }
-        } else {
-            g_autofree char *idstr = NULL;
-            g_autofree char *dev_state_buf = NULL;
-
-            if (p->next_packet_size > 0) {
-                dev_state_buf = g_malloc(p->next_packet_size);
-
-                ret = qio_channel_read_all(p->c, dev_state_buf, p->next_packet_size, &local_err);
-                if (ret != 0) {
-                    break;
-                }
-            }
-
-            idstr = g_strndup(p->packet_dev_state->idstr, sizeof(p->packet_dev_state->idstr));
-            ret = qemu_loadvm_load_state_buffer(idstr,
-                                                p->packet_dev_state->instance_id,
-                                                dev_state_buf, p->next_packet_size,
-                                                &local_err);
+        if (p->normal_num || p->zero_num) {
+            ret = multifd_recv_state->ops->recv_pages(p, &local_err);
             if (ret != 0) {
                 break;
             }
         }
 
         if (flags & MULTIFD_FLAG_SYNC) {
-            if (is_device_state) {
-                error_setg(&local_err, "multifd: received SYNC device state packet");
-                break;
-            }
-
             qemu_sem_post(&multifd_recv_state->sem_sync);
             qemu_sem_wait(&p->sem_sync);
         }
@@ -1415,7 +1334,6 @@ int multifd_recv_setup(Error **errp)
         p->packet_len = sizeof(MultiFDPacket_t)
                       + sizeof(uint64_t) * page_count;
         p->packet = g_malloc0(p->packet_len);
-        p->packet_dev_state = g_malloc0(sizeof(*p->packet_dev_state));
         p->name = g_strdup_printf("multifdrecv_%d", i);
         p->iov = g_new0(struct iovec, page_count);
         p->normal = g_new0(ram_addr_t, page_count);
