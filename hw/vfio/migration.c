@@ -14,7 +14,6 @@
 #include <linux/vfio.h>
 #include <sys/ioctl.h>
 
-#include "io/channel-buffer.h"
 #include "sysemu/runstate.h"
 #include "hw/vfio/vfio-common.h"
 #include "migration/migration.h"
@@ -48,7 +47,6 @@
 #define VFIO_MIG_FLAG_DEV_SETUP_STATE   (0xffffffffef100003ULL)
 #define VFIO_MIG_FLAG_DEV_DATA_STATE    (0xffffffffef100004ULL)
 #define VFIO_MIG_FLAG_DEV_INIT_DATA_SENT (0xffffffffef100005ULL)
-#define VFIO_MIG_FLAG_DEV_DATA_STATE_COMPLETE    (0xffffffffef100006ULL)
 
 /*
  * This is an arbitrary size based on migration of mlx5 devices, where typically
@@ -56,15 +54,6 @@
  * larger values, e.g. 128MB and 1GB, did not show a performance improvement.
  */
 #define VFIO_MIG_DEFAULT_DATA_BUFFER_SIZE (1 * MiB)
-
-#define VFIO_DEVICE_STATE_CONFIG_STATE (1)
-
-typedef struct VFIODeviceStatePacket {
-    uint32_t version;
-    uint32_t idx;
-    uint32_t flags;
-    uint8_t data[0];
-} QEMU_PACKED VFIODeviceStatePacket;
 
 static int64_t bytes_transferred;
 
@@ -245,176 +234,6 @@ static int vfio_load_buffer(QEMUFile *f, VFIODevice *vbasedev,
     return ret;
 }
 
-typedef struct LoadedBuffer {
-    bool is_present;
-    char *data;
-    size_t len;
-} LoadedBuffer;
-
-static void loaded_buffer_clear(gpointer data)
-{
-    LoadedBuffer *lb = data;
-
-    if (!lb->is_present) {
-        return;
-    }
-
-    g_clear_pointer(&lb->data, g_free);
-    lb->is_present = false;
-}
-
-static int vfio_load_state_buffer(void *opaque, char *data, size_t data_size,
-                                  Error **errp)
-{
-    VFIODevice *vbasedev = opaque;
-    VFIOMigration *migration = vbasedev->migration;
-    VFIODeviceStatePacket *packet = (VFIODeviceStatePacket *)data;
-    QEMU_LOCK_GUARD(&migration->load_bufs_mutex);
-    LoadedBuffer *lb;
-
-    if (data_size < sizeof(*packet)) {
-        error_setg(errp, "packet too short at %zu (min is %zu)",
-                   data_size, sizeof(*packet));
-        return -1;
-    }
-
-    if (packet->version != 0) {
-        error_setg(errp, "packet has unknown version %" PRIu32,
-                   packet->version);
-        return -1;
-    }
-
-    if (packet->idx == UINT32_MAX) {
-        error_setg(errp, "packet has too high idx %" PRIu32,
-                   packet->idx);
-        return -1;
-    }
-
-    trace_vfio_load_state_device_buffer_incoming(vbasedev->name, packet->idx);
-
-    /* config state packet should be the last one in the stream */
-    if (packet->flags & VFIO_DEVICE_STATE_CONFIG_STATE) {
-        migration->load_buf_idx_last = packet->idx;
-    }
-
-    assert(migration->load_bufs);
-    if (packet->idx >= migration->load_bufs->len) {
-        g_array_set_size(migration->load_bufs, packet->idx + 1);
-    }
-
-    lb = &g_array_index(migration->load_bufs, typeof(*lb), packet->idx);
-    if (lb->is_present) {
-        error_setg(errp, "state buffer %" PRIu32 " already filled", packet->idx);
-        return -1;
-    }
-
-    assert(packet->idx >= migration->load_buf_idx);
-
-    lb->data = g_memdup2(&packet->data, data_size - sizeof(*packet));
-    lb->len = data_size - sizeof(*packet);
-    lb->is_present = true;
-
-    qemu_cond_broadcast(&migration->load_bufs_buffer_ready_cond);
-
-    return 0;
-}
-
-static void *vfio_load_bufs_thread(void *opaque)
-{
-    VFIODevice *vbasedev = opaque;
-    VFIOMigration *migration = vbasedev->migration;
-    Error **errp = &migration->load_bufs_thread_errp;
-    g_autoptr(QemuLockable) locker = qemu_lockable_auto_lock(
-        QEMU_MAKE_LOCKABLE(&migration->load_bufs_mutex));
-    LoadedBuffer *lb;
-
-    while (!migration->load_bufs_device_ready &&
-           !migration->load_bufs_thread_want_exit) {
-        qemu_cond_wait(&migration->load_bufs_device_ready_cond, &migration->load_bufs_mutex);
-    }
-
-    while (!migration->load_bufs_thread_want_exit) {
-        bool starved;
-        ssize_t ret;
-
-        assert(migration->load_buf_idx <= migration->load_buf_idx_last);
-
-        if (migration->load_buf_idx >= migration->load_bufs->len) {
-            assert(migration->load_buf_idx == migration->load_bufs->len);
-            starved = true;
-        } else {
-            lb = &g_array_index(migration->load_bufs, typeof(*lb), migration->load_buf_idx);
-            starved = !lb->is_present;
-        }
-
-        if (starved) {
-            trace_vfio_load_state_device_buffer_starved(vbasedev->name, migration->load_buf_idx);
-            qemu_cond_wait(&migration->load_bufs_buffer_ready_cond, &migration->load_bufs_mutex);
-            continue;
-        }
-
-        if (migration->load_buf_idx == migration->load_buf_idx_last) {
-            break;
-        }
-
-        if (migration->load_buf_idx == 0) {
-            trace_vfio_load_state_device_buffer_start(vbasedev->name);
-        }
-
-        if (lb->len) {
-            g_autofree char *buf = NULL;
-            size_t buf_len;
-            int errno_save;
-
-            trace_vfio_load_state_device_buffer_load_start(vbasedev->name,
-                                                           migration->load_buf_idx);
-
-            /* lb might become re-allocated when we drop the lock */
-            buf = g_steal_pointer(&lb->data);
-            buf_len = lb->len;
-
-            /* Loading data to the device takes a while, drop the lock during this process */
-            qemu_mutex_unlock(&migration->load_bufs_mutex);
-            ret = write(migration->data_fd, buf, buf_len);
-            errno_save = errno;
-            qemu_mutex_lock(&migration->load_bufs_mutex);
-
-            if (ret < 0) {
-                error_setg(errp, "write to state buffer %" PRIu32 " failed with %d",
-                           migration->load_buf_idx, errno_save);
-                break;
-            } else if (ret < buf_len) {
-                error_setg(errp, "write to state buffer %" PRIu32 " incomplete %zd / %zu",
-                           migration->load_buf_idx, ret, buf_len);
-                break;
-            }
-
-            trace_vfio_load_state_device_buffer_load_end(vbasedev->name,
-                                                         migration->load_buf_idx);
-        }
-
-        if (migration->load_buf_idx == migration->load_buf_idx_last - 1) {
-            trace_vfio_load_state_device_buffer_end(vbasedev->name);
-        }
-
-        migration->load_buf_idx++;
-    }
-
-    if (migration->load_bufs_thread_want_exit &&
-        !*errp) {
-        error_setg(errp, "load bufs thread asked to quit");
-    }
-
-    g_clear_pointer(&locker, qemu_lockable_auto_unlock);
-
-    qemu_loadvm_load_finish_ready_lock();
-    migration->load_bufs_thread_finished = true;
-    qemu_loadvm_load_finish_ready_broadcast();
-    qemu_loadvm_load_finish_ready_unlock();
-
-    return NULL;
-}
-
 static int vfio_save_device_config_state(QEMUFile *f, void *opaque)
 {
     VFIODevice *vbasedev = opaque;
@@ -437,8 +256,6 @@ static int vfio_load_device_config_state(QEMUFile *f, void *opaque)
     VFIODevice *vbasedev = opaque;
     uint64_t data;
 
-    trace_vfio_load_device_config_state_start(vbasedev->name);
-
     if (vbasedev->ops && vbasedev->ops->vfio_load_config) {
         int ret;
 
@@ -457,7 +274,7 @@ static int vfio_load_device_config_state(QEMUFile *f, void *opaque)
         return -EINVAL;
     }
 
-    trace_vfio_load_device_config_state_end(vbasedev->name);
+    trace_vfio_load_device_config_state(vbasedev->name);
     return qemu_file_get_error(f);
 }
 
@@ -832,69 +649,16 @@ static void vfio_save_state(QEMUFile *f, void *opaque)
 static int vfio_load_setup(QEMUFile *f, void *opaque)
 {
     VFIODevice *vbasedev = opaque;
-    VFIOMigration *migration = vbasedev->migration;
-    int ret;
 
-    ret = vfio_migration_set_state(vbasedev, VFIO_DEVICE_STATE_RESUMING,
+    return vfio_migration_set_state(vbasedev, VFIO_DEVICE_STATE_RESUMING,
                                    vbasedev->migration->device_state);
-    if (ret) {
-        return ret;
-    }
-
-    assert(!migration->load_bufs);
-    migration->load_bufs = g_array_new(FALSE, TRUE, sizeof(LoadedBuffer));
-    g_array_set_clear_func(migration->load_bufs, loaded_buffer_clear);
-
-    qemu_mutex_init(&migration->load_bufs_mutex);
-
-    migration->load_bufs_device_ready = false;
-    qemu_cond_init(&migration->load_bufs_device_ready_cond);
-
-    migration->load_buf_idx = 0;
-    migration->load_buf_idx_last = UINT32_MAX;
-    qemu_cond_init(&migration->load_bufs_buffer_ready_cond);
-
-    migration->config_state_loaded_to_dev = false;
-
-    assert(!migration->load_bufs_thread_started);
-
-    migration->load_bufs_thread_finished = false;
-    migration->load_bufs_thread_want_exit = false;
-    qemu_thread_create(&migration->load_bufs_thread, "vfio-load-bufs",
-                       vfio_load_bufs_thread, opaque, QEMU_THREAD_JOINABLE);
-
-    migration->load_bufs_thread_started = true;
-
-    return 0;
 }
 
 static int vfio_load_cleanup(void *opaque)
 {
     VFIODevice *vbasedev = opaque;
-    VFIOMigration *migration = vbasedev->migration;
-
-    if (migration->load_bufs_thread_started) {
-        qemu_mutex_lock(&migration->load_bufs_mutex);
-        migration->load_bufs_thread_want_exit = true;
-        qemu_mutex_unlock(&migration->load_bufs_mutex);
-
-        qemu_cond_broadcast(&migration->load_bufs_device_ready_cond);
-        qemu_cond_broadcast(&migration->load_bufs_buffer_ready_cond);
-
-        qemu_thread_join(&migration->load_bufs_thread);
-
-        assert(migration->load_bufs_thread_finished);
-
-        migration->load_bufs_thread_started = false;
-    }
 
     vfio_migration_cleanup(vbasedev);
-
-    g_clear_pointer(&migration->load_bufs, g_array_unref);
-    qemu_cond_destroy(&migration->load_bufs_buffer_ready_cond);
-    qemu_cond_destroy(&migration->load_bufs_device_ready_cond);
-    qemu_mutex_destroy(&migration->load_bufs_mutex);
-
     trace_vfio_load_cleanup(vbasedev->name);
 
     return 0;
@@ -903,7 +667,6 @@ static int vfio_load_cleanup(void *opaque)
 static int vfio_load_state(QEMUFile *f, void *opaque, int version_id)
 {
     VFIODevice *vbasedev = opaque;
-    VFIOMigration *migration = vbasedev->migration;
     int ret = 0;
     uint64_t data;
 
@@ -915,7 +678,6 @@ static int vfio_load_state(QEMUFile *f, void *opaque, int version_id)
         switch (data) {
         case VFIO_MIG_FLAG_DEV_CONFIG_STATE:
         {
-            migration->config_state_loaded_to_dev = true;
             return vfio_load_device_config_state(f, opaque);
         }
         case VFIO_MIG_FLAG_DEV_SETUP_STATE:
@@ -940,15 +702,6 @@ static int vfio_load_state(QEMUFile *f, void *opaque, int version_id)
                     return ret;
                 }
             }
-            break;
-        }
-        case VFIO_MIG_FLAG_DEV_DATA_STATE_COMPLETE:
-        {
-            QEMU_LOCK_GUARD(&migration->load_bufs_mutex);
-
-            migration->load_bufs_device_ready = true;
-            qemu_cond_broadcast(&migration->load_bufs_device_ready_cond);
-
             break;
         }
         case VFIO_MIG_FLAG_DEV_INIT_DATA_SENT:
@@ -983,77 +736,6 @@ static int vfio_load_state(QEMUFile *f, void *opaque, int version_id)
     return ret;
 }
 
-static int vfio_load_finish(void *opaque, bool *is_finished, Error **errp)
-{
-    VFIODevice *vbasedev = opaque;
-    VFIOMigration *migration = vbasedev->migration;
-    g_autoptr(QemuLockable) locker = NULL;
-    LoadedBuffer *lb;
-    g_autoptr(QIOChannelBuffer) bioc = NULL;
-    QEMUFile *f_out = NULL, *f_in = NULL;
-    uint64_t mig_header;
-    int ret;
-
-    if (migration->config_state_loaded_to_dev) {
-        *is_finished = true;
-        return 0;
-    }
-
-    if (!migration->load_bufs_thread_finished) {
-        assert(migration->load_bufs_thread_started);
-        *is_finished = false;
-        return 0;
-    }
-
-    if (migration->load_bufs_thread_errp) {
-        error_propagate(errp, g_steal_pointer(&migration->load_bufs_thread_errp));
-        return -1;
-    }
-
-    locker = qemu_lockable_auto_lock(QEMU_MAKE_LOCKABLE(&migration->load_bufs_mutex));
-
-    assert(migration->load_buf_idx == migration->load_buf_idx_last);
-    lb = &g_array_index(migration->load_bufs, typeof(*lb), migration->load_buf_idx);
-    assert(lb->is_present);
-
-    bioc = qio_channel_buffer_new(lb->len);
-    qio_channel_set_name(QIO_CHANNEL(bioc), "vfio-device-config-load");
-
-    f_out = qemu_file_new_output(QIO_CHANNEL(bioc));
-    qemu_put_buffer(f_out, (uint8_t *)lb->data, lb->len);
-
-    qemu_fflush(f_out);
-    ret = qemu_file_get_error(f_out);
-    if (ret) {
-        error_setg(errp, "load device config state file flush failed with %d", ret);
-        g_clear_pointer(&f_out, qemu_fclose);
-        return -1;
-    }
-
-    qio_channel_io_seek(QIO_CHANNEL(bioc), 0, 0, NULL);
-    f_in = qemu_file_new_input(QIO_CHANNEL(bioc));
-
-    mig_header = qemu_get_be64(f_in);
-    if (mig_header != VFIO_MIG_FLAG_DEV_CONFIG_STATE) {
-        error_setg(errp, "load device config state invalid header %"PRIu64, mig_header);
-        g_clear_pointer(&f_out, qemu_fclose);
-        g_clear_pointer(&f_in, qemu_fclose);
-        return -1;
-    }
-
-    ret = vfio_load_device_config_state(f_in, opaque);
-    g_clear_pointer(&f_out, qemu_fclose);
-    g_clear_pointer(&f_in, qemu_fclose);
-    if (ret < 0) {
-        error_setg(errp, "load device config state failed with %d", ret);
-        return -1;
-    }
-
-    migration->config_state_loaded_to_dev = true;
-    *is_finished = true;
-    return 0;
-}
-
 static bool vfio_switchover_ack_needed(void *opaque)
 {
     VFIODevice *vbasedev = opaque;
@@ -1074,8 +756,6 @@ static const SaveVMHandlers savevm_vfio_handlers = {
     .load_setup = vfio_load_setup,
     .load_cleanup = vfio_load_cleanup,
     .load_state = vfio_load_state,
-    .load_state_buffer = vfio_load_state_buffer,
-    .load_finish = vfio_load_finish,
     .switchover_ack_needed = vfio_switchover_ack_needed,
 };
 

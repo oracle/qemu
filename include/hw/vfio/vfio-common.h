@@ -73,20 +73,6 @@ typedef struct VFIOMigration {
 
     bool save_iterate_run;
     bool save_iterate_empty_hit;
-    QemuThread load_bufs_thread;
-    Error *load_bufs_thread_errp;
-    bool load_bufs_thread_started;
-    bool load_bufs_thread_finished;
-    bool load_bufs_thread_want_exit;
-
-    GArray *load_bufs;
-    bool load_bufs_device_ready;
-    QemuCond load_bufs_device_ready_cond;
-    QemuCond load_bufs_buffer_ready_cond;
-    QemuMutex load_bufs_mutex;
-    uint32_t load_buf_idx;
-    uint32_t load_buf_idx_last;
-    bool config_state_loaded_to_dev;
 } VFIOMigration;
 
 typedef struct VFIOAddressSpace {
