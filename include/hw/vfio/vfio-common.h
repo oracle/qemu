@@ -158,7 +158,6 @@ typedef struct VFIODevice {
     bool no_mmap;
     bool ram_block_discard_allowed;
     OnOffAuto enable_migration;
-    bool migration_multifd_transfer;
     bool iommu_passthrough;
     bool migration_events;
     VFIODeviceOps *ops;
