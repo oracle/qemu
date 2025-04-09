@@ -3633,7 +3633,9 @@ static void migration_completion(MigrationState *s)
              * Announce switchover will start but guest is running.
              * Downtime value being zero has this special meaning.
              */
-            qemu_savevm_send_downtime(s->to_dst_file, abort_limit_ms, 0);
+            if (s->enabled_capabilities[MIGRATION_CAPABILITY_SWITCHOVER_EVENT]) {
+                qemu_savevm_send_downtime(s->to_dst_file, abort_limit_ms, 0);
+            }
 
             ret = migration_stop_vm(RUN_STATE_FINISH_MIGRATE);
             trace_migration_completion_vm_stop(ret);
@@ -4791,6 +4793,8 @@ static Property migration_properties[] = {
 
     DEFINE_PROP_MIG_CAP("x-orcl-switchover-abort",
                         MIGRATION_CAPABILITY_SWITCHOVER_ABORT),
+    DEFINE_PROP_MIG_CAP("x-orcl-switchover-event",
+                        MIGRATION_CAPABILITY_SWITCHOVER_EVENT),
     DEFINE_PROP_END_OF_LIST(),
 };
 
