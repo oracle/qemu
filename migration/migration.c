@@ -4827,6 +4827,12 @@ static void migration_instance_init(Object *obj)
     MigrationState *ms = MIGRATION_OBJ(obj);
     MigrationParameters *params = &ms->parameters;
 
+    /*
+     * TEMP for qemu-kvm-7.2.0-21
+     * TODO: Remove for qemu-kvm-7.2.0-22
+     */
+    ms->enabled_capabilities[MIGRATION_CAPABILITY_SWITCHOVER_EVENT] = true;
+
     ms->state = MIGRATION_STATUS_NONE;
     ms->mbps = -1;
     ms->pages_per_second = -1;
