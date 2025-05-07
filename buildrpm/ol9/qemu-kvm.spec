@@ -258,7 +258,7 @@ Requires: %{name}-block-ssh = %{epoch}:%{version}-%{release}     \
 Summary: QEMU is a machine emulator and virtualizer
 Name: qemu-kvm
 Version: 7.2.0
-Release: 18%{?dist}
+Release: 20%{?dist}
 Epoch: 30
 License: GPLv2+ and LGPLv2+ and BSD
 Group: Development/Tools
@@ -1680,6 +1680,96 @@ getent passwd qemu >/dev/null || \
 
 
 %changelog
+* Wed May 7 2025 Mark Kanda <mark.kanda@oracle.com> - 7.2.0-20.el9
+- Document CVEs as not applicable to QEMU 7.2.0 (Mark Kanda) [Orabug: 36869706] [Orabug: 36620547] [Orabug: 37043479] {CVE-2024-3567} {CVE-2024-4693} {CVE-2024-7730}
+- target/i386: Remove rtm, hle and taa-no from the Sapphire Rapids CPU model (Mark Kanda) [Orabug: 37867203]
+- target/i386: Reset parked vCPUs together with the online ones (Maciej S. Szmigiero)
+- migration: Add capability for our custom switchover event (Maciej S. Szmigiero)
+- iotests: Disable ones that hang (Maciej S. Szmigiero)
+- vfio/migration: Use BE byte order for device state wire packets (Maciej S. Szmigiero)
+- vfio/migration: Make x-migration-multifd-transfer VFIO property mutable (Maciej S. Szmigiero)
+- vfio/migration: Add x-migration-multifd-transfer VFIO property (Maciej S. Szmigiero)
+- vfio/migration: Multifd device state transfer support - send side (Maciej S. Szmigiero)
+- vfio/migration: Multifd device state transfer support - config loading support (Maciej S. Szmigiero)
+- migration/qemu-file: Define g_autoptr() cleanup function for QEMUFile (Maciej S. Szmigiero)
+- vfio/migration: Multifd device state transfer support - load thread (Maciej S. Szmigiero)
+- vfio/migration: Multifd device state transfer support - received buffers queuing (Maciej S. Szmigiero)
+- vfio/migration: Setup and cleanup multifd transfer in these general methods (Maciej S. Szmigiero)
+- vfio/migration: Multifd setup/cleanup functions and associated VFIOMultifd (Maciej S. Szmigiero)
+- vfio/migration: Multifd device state transfer - add support checking function (Maciej S. Szmigiero)
+- vfio/migration: Multifd device state transfer support - basic types (Maciej S. Szmigiero)
+- vfio/migration: Move migration channel flags to vfio-common.h header file (Maciej S. Szmigiero)
+- vfio/migration: Add vfio_add_bytes_transferred() (Maciej S. Szmigiero)
+- vfio/migration: Convert bytes_transferred counter to atomic (Maciej S. Szmigiero)
+- vfio/migration: Add load_device_config_state_start trace event (Maciej S. Szmigiero)
+- migration: Add save_live_complete_precopy_thread handler (Maciej S. Szmigiero)
+- migration/multifd: Add multifd_device_state_supported() (Maciej S. Szmigiero)
+- migration/multifd: Make MultiFDSendData a struct (Peter Xu)
+- migration/multifd: Device state transfer support - send side (Maciej S. Szmigiero)
+- migration/multifd: Add an explicit MultiFDSendData destructor (Maciej S. Szmigiero)
+- migration/multifd: Make multifd_send() thread safe (Maciej S. Szmigiero)
+- migration/multifd: Device state transfer support - receive side (Maciej S. Szmigiero)
+- migration/multifd: Split packet into header and RAM data (Maciej S. Szmigiero)
+- migration: Add thread pool of optional load threads (Maciej S. Szmigiero)
+- error: define g_autoptr() cleanup function for the Error type (Maciej S. Szmigiero)
+- migration: Always take BQL for migration_incoming_state_destroy() (Maciej S. Szmigiero)
+- migration: Add qemu_loadvm_load_state_buffer() and its handler (Maciej S. Szmigiero)
+- migration: Add MIG_CMD_SWITCHOVER_START and its load handler (Maciej S. Szmigiero)
+- thread-pool: Implement generic (non-AIO) pool support (Maciej S. Szmigiero)
+- thread-pool: Rename AIO pool functions to *_aio() and data types to *Aio (Maciej S. Szmigiero)
+- thread-pool: Remove thread_pool_submit() function (Maciej S. Szmigiero)
+- migration: Check migration error after loadvm (Fabiano Rosas)
+- migration/multifd: Add a compat property for TLS termination (Fabiano Rosas)
+- migration/multifd: Terminate the TLS connection (Fabiano Rosas)
+- io: Add a read flag for relaxed EOF (Fabiano Rosas)
+- io: Add flags argument to qio_channel_readv_full_all_eof (Fabiano Rosas)
+- crypto: Remove qcrypto_tls_session_get_handshake_status (Fabiano Rosas)
+- io: tls: Add qio_channel_tls_bye (Fabiano Rosas)
+- crypto: Allow gracefully ending the TLS session (Fabiano Rosas)
+- migration/multifd: Fix compat with QEMU < 9.0 (Fabiano Rosas)
+- vfio/migration: Add vfio_save_block_precopy_empty_hit trace event (Maciej S. Szmigiero)
+- vfio/migration: Add save_{iterate, complete_precopy}_start trace events (Maciej S. Szmigiero)
+- migration/ram: Add load start trace event (Maciej S. Szmigiero)
+- migration/multifd: Stop changing the packet on recv side (Fabiano Rosas)
+- migration/multifd: Replace multifd_send_state->pages with client data (Fabiano Rosas)
+- migration/multifd: Don't send ram data during SYNC (Fabiano Rosas)
+- migration/multifd: Isolate ram pages packet data (Fabiano Rosas)
+- migration/multifd: Remove total pages tracing (Fabiano Rosas)
+- migration/multifd: Move pages accounting into multifd_send_zero_page_detect() (Fabiano Rosas)
+- migration/multifd: Replace p->pages with an union pointer (Fabiano Rosas)
+- migration/multifd: Make MultiFDPages_t:offset a flexible array member (Fabiano Rosas)
+- migration/multifd: Introduce MultiFDSendData (Fabiano Rosas)
+- migration/multifd: Remove pages->allocated (Fabiano Rosas)
+- migration/multifd: Inline page_size and page_count (Fabiano Rosas)
+- migration/multifd: Reduce access to p->pages (Fabiano Rosas)
+- migration/multifd: Decouple recv method from pages (Fabiano Rosas)
+- migration/multifd: Rename MultiFDSend|RecvParams::data to compress_data (Fabiano Rosas)
+- migration/multifd: Change multifd_pages_init argument (Fabiano Rosas)
+- migration: Introduce migrate_has_error() (Peter Xu)
+- test-vmstate: fix bad GTree usage, use-after-free (Eric Auger)
+- Revert "vfio/migration: Add save_{iterate,complete_precopy}_started trace events" (Maciej S. Szmigiero)
+- Revert "migration/ram: Add load start trace event" (Maciej S. Szmigiero)
+- Revert "migration: Add save_live_complete_precopy_{begin,end} handlers" (Maciej S. Szmigiero)
+- Revert "migration: Add qemu_loadvm_load_state_buffer() and its handler" (Maciej S. Szmigiero)
+- Revert "migration: Add load_finish handler and associated functions" (Maciej S. Szmigiero)
+- Revert "migration/multifd: Device state transfer support - receive side" (Maciej S. Szmigiero)
+- Revert "migration/multifd: Convert multifd_send_pages::next_channel to atomic" (Maciej S. Szmigiero)
+- Revert "migration/multifd: Device state transfer support - send side" (Maciej S. Szmigiero)
+- Revert "migration/multifd: Add migration_has_device_state_support()" (Maciej S. Szmigiero)
+- Revert "vfio/migration: Multifd device state transfer support - receive side" (Maciej S. Szmigiero)
+- Revert "vfio/migration: Add x-orcl-migration-multifd-transfer VFIO property" (Maciej S. Szmigiero)
+- Revert "vfio/migration: Multifd device state transfer support - send side" (Maciej S. Szmigiero)
+- target/i386: fix feature dependency for WAITPKG (Paolo Bonzini) [Orabug: 35941551]
+- target/i386: add support for VMX_SECONDARY_EXEC_ENABLE_USER_WAIT_PAUSE (Ake Koomsin) [Orabug: 35941551]
+- vhost-scsi: Add support for a worker thread per virtqueue (Mike Christie) [Orabug: 37723795]
+- vhost: Add worker backend callouts (Mike Christie) [Orabug: 37723795]
+- linux-headers: update vhost related headers to v6.5-rc1 (Mark Kanda) [Orabug: 37723795]
+- system/physmem: poisoned memory discard on reboot (William Roche) [Orabug: 34545034]
+- system/physmem: handle hugetlb correctly in qemu_ram_remap() (William Roche) [Orabug: 34545034]
+- qemu-kvm.spec: Ship multiboot_dma.bin (Liam Merwick) [Orabug: 37593199]
+- target/i386: Change unavail from u32 to u64 (Xiong Zhang) [Orabug: 37560962]
+- vfio/pci: Add x-device-dirty-page-tracking param (Joao Martins)
+
 * Mon Jan 13 2025 Karl Heubaum <karl.heubaum@oracle.com> - 7.2.0-18.el9
 - tests: acpi: update expected blobs (Igor Mammedov) [Orabug: 37274182]
 - cpuhp: make sure that remove events are handled within the same SCI (Igor Mammedov) [Orabug: 37274182]
