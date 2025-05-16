@@ -258,7 +258,7 @@ Requires: %{name}-block-ssh = %{epoch}:%{version}-%{release}     \
 Summary: QEMU is a machine emulator and virtualizer
 Name: qemu-kvm
 Version: 7.2.0
-Release: 20%{?dist}
+Release: 21%{?dist}
 Epoch: 30
 License: GPLv2+ and LGPLv2+ and BSD
 Group: Development/Tools
@@ -1680,6 +1680,9 @@ getent passwd qemu >/dev/null || \
 
 
 %changelog
+* Fri May 16 2025 Mark Kanda <mark.kanda@oracle.com> - 7.2.0-21.el9
+- migration: Temporarily re-enable our custom switchover event by default (Maciej S. Szmigiero)
+
 * Wed May 7 2025 Mark Kanda <mark.kanda@oracle.com> - 7.2.0-20.el9
 - Document CVEs as not applicable to QEMU 7.2.0 (Mark Kanda) [Orabug: 36869706] [Orabug: 36620547] [Orabug: 37043479] {CVE-2024-3567} {CVE-2024-4693} {CVE-2024-7730}
 - target/i386: Remove rtm, hle and taa-no from the Sapphire Rapids CPU model (Mark Kanda) [Orabug: 37867203]
