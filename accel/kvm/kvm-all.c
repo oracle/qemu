@@ -540,6 +540,10 @@ static void kvm_log_start(MemoryListener *listener,
     KVMMemoryListener *kml = container_of(listener, KVMMemoryListener, listener);
     int r;
 
+    if (memory_global_dirty_devices()) {
+        return;
+    }
+
     if (old != 0) {
         return;
     }
@@ -556,6 +560,10 @@ static void kvm_log_stop(MemoryListener *listener,
 {
     KVMMemoryListener *kml = container_of(listener, KVMMemoryListener, listener);
     int r;
+
+    if (memory_global_dirty_devices()) {
+        return;
+    }
 
     if (new != 0) {
         return;
