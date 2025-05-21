@@ -995,6 +995,7 @@ static void *multifd_send_thread(void *opaque)
         if (qatomic_load_acquire(&p->pending_job)) {
             bool is_device_state = multifd_payload_device_state(p->data);
             size_t total_size;
+            int write_flags_masked = 0;
 
             p->flags = 0;
             p->iovs_num = 0;
@@ -1002,6 +1003,9 @@ static void *multifd_send_thread(void *opaque)
 
             if (is_device_state) {
                 multifd_device_state_send_prepare(p);
+
+                /* Device state packets cannot be sent via zerocopy */
+                write_flags_masked |= QIO_CHANNEL_WRITE_FLAG_ZERO_COPY;
             } else {
                 ret = multifd_send_state->ops->send_prepare(p, &local_err);
                 if (ret != 0) {
@@ -1016,8 +1020,10 @@ static void *multifd_send_thread(void *opaque)
              */
             total_size = iov_size(p->iov, p->iovs_num);
 
-            ret = qio_channel_writev_full_all(p->c, p->iov, p->iovs_num, NULL,
-                                              0, p->write_flags, &local_err);
+            ret = qio_channel_writev_full_all(p->c, p->iov, p->iovs_num,
+                                              NULL, 0,
+                                              p->write_flags & ~write_flags_masked,
+                                              &local_err);
             if (ret != 0) {
                 break;
             }
