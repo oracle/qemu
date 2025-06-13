@@ -258,7 +258,7 @@ Requires: %{name}-block-ssh = %{epoch}:%{version}-%{release}     \
 Summary: QEMU is a machine emulator and virtualizer
 Name: qemu-kvm
 Version: 7.2.0
-Release: 21%{?dist}
+Release: 22%{?dist}
 Epoch: 30
 License: GPLv2+ and LGPLv2+ and BSD
 Group: Development/Tools
@@ -1680,6 +1680,10 @@ getent passwd qemu >/dev/null || \
 
 
 %changelog
+* Fri Jun 13 2025 Mark Kanda <mark.kanda@oracle.com> - 7.2.0-22.el9
+- migration/multifd: Don't send device state packets with zerocopy flag (Maciej S. Szmigiero) [Orabug: 37372623]
+- migration/dirtyrate: skip kvm_log_start/kvm_log_stop for non-KVM (Dongli Zhang) [Orabug: 37939813]
+
 * Fri May 16 2025 Mark Kanda <mark.kanda@oracle.com> - 7.2.0-21.el9
 - migration: Temporarily re-enable our custom switchover event by default (Maciej S. Szmigiero)
 
