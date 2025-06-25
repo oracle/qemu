@@ -258,7 +258,7 @@ Requires: %{name}-block-ssh = %{epoch}:%{version}-%{release}     \
 Summary: QEMU is a machine emulator and virtualizer
 Name: qemu-kvm
 Version: 7.2.0
-Release: 22%{?dist}
+Release: 23%{?dist}
 Epoch: 30
 License: GPLv2+ and LGPLv2+ and BSD
 Group: Development/Tools
@@ -1680,6 +1680,9 @@ getent passwd qemu >/dev/null || \
 
 
 %changelog
+* Wed Jun 25 2025 Mark Kanda <mark.kanda@oracle.com> - 7.2.0-23.el9
+- vhost-scsi: support VIRTIO_SCSI_F_HOTPLUG (Dongli Zhang) [Orabug: 38113473]
+
 * Fri Jun 13 2025 Mark Kanda <mark.kanda@oracle.com> - 7.2.0-22.el9
 - migration/multifd: Don't send device state packets with zerocopy flag (Maciej S. Szmigiero) [Orabug: 37372623]
 - migration/dirtyrate: skip kvm_log_start/kvm_log_stop for non-KVM (Dongli Zhang) [Orabug: 37939813]
