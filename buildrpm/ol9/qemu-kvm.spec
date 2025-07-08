@@ -258,7 +258,7 @@ Requires: %{name}-block-ssh = %{epoch}:%{version}-%{release}     \
 Summary: QEMU is a machine emulator and virtualizer
 Name: qemu-kvm
 Version: 7.2.0
-Release: 23%{?dist}
+Release: 24%{?dist}
 Epoch: 30
 License: GPLv2+ and LGPLv2+ and BSD
 Group: Development/Tools
@@ -1680,6 +1680,10 @@ getent passwd qemu >/dev/null || \
 
 
 %changelog
+* Tue Jul 8 2025 Mark Kanda <mark.kanda@oracle.com> - 7.2.0-24.el9
+- Revert "migration: Temporarily re-enable our custom switchover event by default" (Mark Kanda)
+- target/i386: Enumerate verw-clear CPUID feature (Boris Ostrovsky) [Orabug: 38118557] {CVE-2024-36350} {CVE-2024-36357}
+
 * Wed Jun 25 2025 Mark Kanda <mark.kanda@oracle.com> - 7.2.0-23.el9
 - vhost-scsi: support VIRTIO_SCSI_F_HOTPLUG (Dongli Zhang) [Orabug: 38113473]
 
