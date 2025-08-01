@@ -33,18 +33,20 @@ struct CacheItem {
 
 struct PageCache {
     CacheItem *page_cache;
+    size_t item_size;
     size_t page_size;
     size_t max_num_items;
     size_t num_items;
 };
 
-PageCache *cache_init(uint64_t new_size, size_t page_size, Error **errp)
+PageCache *cache_init(size_t num_pages, size_t page_size, size_t item_size,
+                      Error **errp)
 {
     int64_t i;
-    size_t num_pages = new_size / page_size;
+    size_t new_size = num_pages * item_size;
     PageCache *cache;
 
-    if (new_size < page_size) {
+    if (new_size < item_size) {
         error_setg(errp, QERR_INVALID_PARAMETER_VALUE, "cache size",
                    "is smaller than one target page size");
         return NULL;
@@ -63,6 +65,7 @@ PageCache *cache_init(uint64_t new_size, size_t page_size, Error **errp)
         error_setg(errp, "Failed to allocate cache");
         return NULL;
     }
+    cache->item_size = item_size;
     cache->page_size = page_size;
     cache->num_items = 0;
     cache->max_num_items = num_pages;
@@ -158,7 +161,7 @@ int cache_insert(PageCache *cache, uint64_t addr, const uint8_t *pdata,
     }
     /* allocate page */
     if (!it->it_data) {
-        it->it_data = g_try_malloc(cache->page_size);
+        it->it_data = g_try_malloc(cache->item_size);
         if (!it->it_data) {
             trace_migration_pagecache_insert();
             return -1;
@@ -166,7 +169,7 @@ int cache_insert(PageCache *cache, uint64_t addr, const uint8_t *pdata,
         cache->num_items++;
     }
 
-    memcpy(it->it_data, pdata, cache->page_size);
+    memcpy(it->it_data, pdata, cache->item_size);
 
     it->it_age = current_age;
     it->it_addr = addr;

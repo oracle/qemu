@@ -154,7 +154,7 @@ int xbzrle_cache_resize(uint64_t new_size, Error **errp)
     XBZRLE_cache_lock();
 
     if (XBZRLE.cache != NULL) {
-        new_cache = cache_init(new_size, TARGET_PAGE_SIZE, errp);
+        new_cache = cache_init(new_size / TARGET_PAGE_SIZE, TARGET_PAGE_SIZE, TARGET_PAGE_SIZE, errp);
         if (!new_cache) {
             ret = -1;
             goto out;
@@ -3009,8 +3009,8 @@ static int xbzrle_init(void)
         goto err_out;
     }
 
-    XBZRLE.cache = cache_init(migrate_xbzrle_cache_size(),
-                              TARGET_PAGE_SIZE, &local_err);
+    XBZRLE.cache = cache_init(migrate_xbzrle_cache_size() / TARGET_PAGE_SIZE,
+                              TARGET_PAGE_SIZE, TARGET_PAGE_SIZE, &local_err);
     if (!XBZRLE.cache) {
         error_report_err(local_err);
         goto free_zero_page;
