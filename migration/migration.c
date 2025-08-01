@@ -2117,6 +2117,7 @@ static void migrate_fd_cleanup(MigrationState *s)
         qemu_mutex_lock_iothread();
 
         multifd_send_shutdown();
+        hash_cache_cleanup();
         qemu_mutex_lock(&s->qemu_file_lock);
         tmp = s->to_dst_file;
         s->to_dst_file = NULL;
@@ -3049,6 +3050,13 @@ void migration_set_downtime_exceeded_error(MigrationState *s, QEMUFile *f)
                 " ms", s->parameters.switchover_limit, downtime, limit);
     qemu_file_set_error_obj(f, -ETIMEDOUT, local_err);
 
+}
+
+int migrate_use_hash(void)
+{
+    MigrationState *s = migrate_get_current();
+
+    return s->enabled_capabilities[MIGRATION_CAPABILITY_MIGRATE_USE_HASH];
 }
 
 /* migration thread support */
@@ -4320,11 +4328,18 @@ static void *migration_thread(void *opaque)
     int64_t setup_start = qemu_clock_get_ms(QEMU_CLOCK_HOST);
     MigThrError thr_error;
     bool urgent = false;
+    Error *local_error = NULL;
 
     rcu_register_thread();
 
     object_ref(OBJECT(s));
     update_iteration_initial_status(s);
+
+    if (!hash_cache_init(&local_error)) {
+        qemu_file_set_error_obj(s->to_dst_file, -ENOMEM, local_error);
+        migration_detect_error(s);
+        goto out;
+    }
 
     if (!multifd_send_setup()) {
         goto out;
@@ -4795,6 +4810,9 @@ static Property migration_properties[] = {
                         MIGRATION_CAPABILITY_SWITCHOVER_ABORT),
     DEFINE_PROP_MIG_CAP("x-orcl-switchover-event",
                         MIGRATION_CAPABILITY_SWITCHOVER_EVENT),
+    DEFINE_PROP_MIG_CAP("x-orcl-migrate-use-hash",
+                        MIGRATION_CAPABILITY_MIGRATE_USE_HASH),
+
     DEFINE_PROP_END_OF_LIST(),
 };
 

@@ -37,6 +37,7 @@ struct PageCache {
     size_t page_size;
     size_t max_num_items;
     size_t num_items;
+    void (*hash_func)(PageCache *, const void *, size_t, uint8_t *);
 };
 
 PageCache *cache_init(size_t num_pages, size_t page_size, size_t item_size,
@@ -69,6 +70,7 @@ PageCache *cache_init(size_t num_pages, size_t page_size, size_t item_size,
     cache->page_size = page_size;
     cache->num_items = 0;
     cache->max_num_items = num_pages;
+    cache->hash_func = NULL;
 
     trace_migration_pagecache_init(cache->max_num_items);
 
@@ -175,4 +177,75 @@ int cache_insert(PageCache *cache, uint64_t addr, const uint8_t *pdata,
     it->it_addr = addr;
 
     return 0;
+}
+
+PageCache *cache_hash_init(size_t num_pages, size_t page_size,
+                           enum cache_hash_algorithm algo, Error **errp)
+{
+    error_setg(errp, QERR_INVALID_PARAMETER_VALUE, "algo",
+               "a known hash algorithm");
+    return NULL;
+}
+
+static int cache_hash_insert(PageCache *cache, uint64_t addr,
+                             uint64_t current_age)
+{
+    CacheItem *it;
+
+    /* actual update of entry */
+    it = cache_get_by_addr(cache, addr);
+
+    /* allocate page */
+    if (!it->it_data) {
+        it->it_data = g_try_malloc0(cache->item_size);
+        if (!it->it_data) {
+            trace_migration_pagecache_insert();
+            return -1;
+        }
+        cache->num_items++;
+    } else {
+        memset(it->it_data, 0, cache->item_size);
+    }
+
+    it->it_age = current_age;
+    it->it_addr = addr;
+
+    return 0;
+}
+
+bool cache_hash_is_cached(PageCache *cache, uint64_t addr, const void *buf,
+                          void *digest, void **out_page)
+{
+    CacheItem *it = cache_get_by_addr(cache, addr);
+    bool match = false;
+    uint64_t age = 0;
+
+    memset(digest, 0, cache->item_size);
+    cache->hash_func(cache, buf, cache->page_size, digest);
+
+    if (it->it_data && it->it_addr == addr) {
+        match = !memcmp(it->it_data, digest, cache->item_size);
+    }
+
+    if (!match) {
+        cache_hash_insert(cache, addr, age);
+        memcpy(*out_page, buf, cache->page_size);
+        cache->hash_func(cache, *out_page, cache->page_size, it->it_data);
+    }
+    return match;
+}
+
+void cache_hash_invalidate(PageCache *cache, uint64_t addr)
+{
+    CacheItem *it = cache_get_by_addr(cache, addr);
+
+    if (it->it_data) {
+        it->it_addr = -1;
+        memset(it->it_data, 0, cache->item_size);
+    }
+}
+
+size_t cache_hash_item_size(PageCache *cache)
+{
+    return cache->item_size;
 }

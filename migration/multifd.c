@@ -88,12 +88,31 @@ static MultiFDSendData *multifd_ram_send;
 
 static void multifd_ram_payload_alloc(MultiFDPages_t *pages)
 {
-    pages->offset = g_new0(ram_addr_t, multifd_ram_page_count());
+    uint32_t page_count = multifd_ram_page_count();
+    uint32_t page_size = multifd_ram_page_size();
+
+    pages->offset = g_new0(ram_addr_t, page_count);
+    if (migrate_use_hash()) {
+        pages->digest = g_malloc0(cache_hash_item_size(hash_cache));
+        pages->cached = g_new0(void*, page_count);
+        for (int i = 0; i < page_count; i++) {
+             pages->cached[i] = g_malloc0(page_size);
+        }
+    }
 }
 
 static void multifd_ram_payload_free(MultiFDPages_t *pages)
 {
+    uint32_t page_count = multifd_ram_page_count();
+
     g_clear_pointer(&pages->offset, g_free);
+    if (migrate_use_hash()) {
+        g_clear_pointer(&pages->digest, g_free);
+        for (int i = 0; i < page_count; i++) {
+             g_clear_pointer(&pages->cached[i], g_free);
+        }
+        g_clear_pointer(&pages->cached, g_free);
+    }
 }
 
 MultiFDSendData *multifd_send_data_alloc(void)
@@ -214,7 +233,11 @@ static int nocomp_send_prepare(MultiFDSendParams *p, Error **errp)
     }
 
     for (int i = 0; i < pages->normal_num; i++) {
-        p->iov[p->iovs_num].iov_base = pages->block->host + pages->offset[i];
+        if (migrate_use_hash()) {
+            p->iov[p->iovs_num].iov_base = pages->cached[i];
+        } else {
+            p->iov[p->iovs_num].iov_base = pages->block->host + pages->offset[i];
+        }
         p->iov[p->iovs_num].iov_len = page_size;
         p->iovs_num++;
     }
@@ -326,6 +349,7 @@ static void multifd_pages_reset(MultiFDPages_t *pages)
      */
     pages->num = 0;
     pages->normal_num = 0;
+    pages->skipped_num = 0;
     pages->block = NULL;
 }
 
@@ -397,11 +421,12 @@ static void multifd_ram_fill_packet(MultiFDSendParams *p)
 {
     MultiFDPacket_t *packet = p->packet;
     MultiFDPages_t *pages = &p->data->u.ram;
-    uint32_t zero_num = pages->num - pages->normal_num;
+    uint32_t zero_num = (pages->num - pages->normal_num) - pages->skipped_num;
 
     packet->pages_alloc = cpu_to_be32(multifd_ram_page_count());
     packet->normal_pages = cpu_to_be32(pages->normal_num);
     packet->zero_pages = cpu_to_be32(zero_num);
+    packet->skipped_pages = cpu_to_be32(pages->skipped_num);
 
     if (pages->block) {
         strncpy(packet->ramblock, pages->block->idstr, 256);
@@ -412,6 +437,12 @@ static void multifd_ram_fill_packet(MultiFDSendParams *p)
         uint64_t temp = pages->offset[i];
 
         packet->offset[i] = cpu_to_be64(temp);
+
+        /* TODO: Workaround spurious zero pages ghosting in the pages->offset array */
+        if (migrate_use_hash() &&
+            i >= (pages->normal_num + pages->skipped_num)) {
+            cache_hash_invalidate(hash_cache, pages->block->offset + temp);
+        }
     }
 
     trace_multifd_send_ram_fill(p->id, pages->normal_num, zero_num);
@@ -475,7 +506,15 @@ static int multifd_ram_unfill_packet(MultiFDRecvParams *p, Error **errp)
         return -1;
     }
 
-    if (p->normal_num == 0 && p->zero_num == 0) {
+    p->skipped_num = be32_to_cpu(packet->skipped_pages);
+    if (p->skipped_num > pages_per_packet) {
+        error_setg(errp, "multifd: received packet with %u non-zero pages, "
+                   "which exceeds maximum expected pages %u",
+                   p->skipped_num, pages_per_packet);
+        return -1;
+    }
+
+    if (p->normal_num == 0 && p->skipped_num == 0 && p->zero_num == 0) {
         return 0;
     }
 
@@ -502,7 +541,7 @@ static int multifd_ram_unfill_packet(MultiFDRecvParams *p, Error **errp)
     }
 
     for (i = 0; i < p->zero_num; i++) {
-        uint64_t offset = be64_to_cpu(packet->offset[p->normal_num + i]);
+        uint64_t offset = be64_to_cpu(packet->offset[p->normal_num + p->skipped_num + i]);
 
         if (offset > (p->block->used_length - page_size)) {
             error_setg(errp, "multifd: offset too long %" PRIu64
@@ -834,7 +873,8 @@ void multifd_send_shutdown(void)
 {
     int i;
 
-    if (!migrate_use_multifd() || !migrate_multi_channels_is_allowed()) {
+    if (!migrate_use_multifd() || !migrate_multi_channels_is_allowed() ||
+        !multifd_send_state) {
         return;
     }
 
@@ -1010,6 +1050,11 @@ static void *multifd_send_thread(void *opaque)
                 ret = multifd_send_state->ops->send_prepare(p, &local_err);
                 if (ret != 0) {
                     break;
+                }
+
+                /* Hash cache packets cannot be sent via zerocopy */
+                if (migrate_use_hash()) {
+                    write_flags_masked |= QIO_CHANNEL_WRITE_FLAG_ZERO_COPY;
                 }
             }
 
@@ -1457,6 +1502,7 @@ static void *multifd_recv_thread(void *opaque)
         size_t pkt_len;
 
         p->normal_num = 0;
+        p->skipped_num = 0;
 
         if (p->quit) {
             break;
@@ -1519,7 +1565,7 @@ static void *multifd_recv_thread(void *opaque)
              * because older upstream QEMUs (<9.0) still send data along with
              * the SYNC packet.
              */
-            has_data = p->normal_num || p->zero_num;
+            has_data = p->normal_num || p->zero_num || p->skipped_num;
         }
 
         qemu_mutex_unlock(&p->mutex);

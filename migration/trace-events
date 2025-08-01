@@ -128,6 +128,7 @@ postcopy_preempt_hit(char *str, uint64_t offset) "ramblock %s offset 0x%"PRIx64
 postcopy_preempt_send_host_page(char *str, uint64_t offset) "ramblock %s offset 0x%"PRIx64
 postcopy_preempt_switch_channel(int channel) "%d"
 postcopy_preempt_reset_channel(void) ""
+hash_cache_total_stats(uint64_t dirty_sync, uint64_t cache_digests, uint64_t cache_misses, uint64_t cache_hits) "ram save block: sync count %" PRIu64 ", cache_digests %" PRIu64 ", cache_misses %" PRIu64 ", cache_hits %" PRIu64
 
 # multifd.c
 multifd_new_send_channel_async(uint8_t id) "channel %u"

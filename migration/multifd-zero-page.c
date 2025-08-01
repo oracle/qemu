@@ -36,6 +36,41 @@ static void swap_page_offset(ram_addr_t *pages_offset, int a, int b)
     pages_offset[b] = temp;
 }
 
+static void multifd_skip_cached_pages(MultiFDSendParams *p, int normal_num)
+{
+    MultiFDPages_t *pages = &p->data->u.ram;
+    RAMBlock *rb = pages->block;
+    int i = 0;
+    int j = normal_num - 1;
+
+    /*
+     * Sort the page offset array by moving all normal pages to
+     * the left and all skipped pages to the right of the array.
+     */
+    while (i <= j) {
+        uint64_t offset = pages->offset[i];
+
+        if (!cache_hash_is_cached(hash_cache,
+                                  rb->offset + offset,
+                                  rb->host + offset, pages->digest,
+                                  &pages->cached[i])) {
+            i++;
+            continue;
+        }
+
+        swap_page_offset(pages->offset, i, j);
+        ram_release_page(rb->idstr, offset);
+        j--;
+    }
+
+    stat64_add(&ram_counters.cache_digests, normal_num);
+    stat64_add(&ram_counters.cache_misses, i);
+    stat64_add(&ram_counters.cache_hits, normal_num - i);
+
+    pages->normal_num = i;
+    pages->skipped_num = normal_num - pages->normal_num;
+}
+
 /**
  * multifd_send_zero_page_detect: Perform zero page detection on all pages.
  *
@@ -75,9 +110,13 @@ void multifd_send_zero_page_detect(MultiFDSendParams *p)
 
     pages->normal_num = i;
 
+    if (migrate_use_hash() && pages->normal_num) {
+        multifd_skip_cached_pages(p, pages->normal_num);
+    }
+
 out:
     stat64_add(&ram_counters.normal_pages, pages->normal_num);
-    stat64_add(&ram_counters.zero_pages, pages->num - pages->normal_num);
+    stat64_add(&ram_counters.zero_pages, pages->num - pages->normal_num - pages->skipped_num);
 }
 
 void multifd_recv_zero_page_process(MultiFDRecvParams *p)

@@ -519,6 +519,7 @@ bool migrate_use_zero_copy_send(void);
 #endif
 int migrate_use_tls(void);
 int migrate_use_xbzrle(void);
+int migrate_use_hash(void);
 uint64_t migrate_xbzrle_cache_size(void);
 bool migrate_colo_enabled(void);
 

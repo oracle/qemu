@@ -97,6 +97,18 @@ typedef struct {
      * Maximum amount of data we can send in a cycle.
      */
     Stat64 rate_limit_max;
+    /*
+     * Number of pages that calculated an hash.
+     */
+    Stat64 cache_digests;
+    /*
+     * Number of pages that miss the hash cache.
+     */
+    Stat64 cache_misses;
+    /*
+     * Number of pages that hit the hash cache.
+     */
+    Stat64 cache_hits;
 } RAMStats;
 
 extern RAMStats ram_counters;

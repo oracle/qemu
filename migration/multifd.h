@@ -65,7 +65,8 @@ typedef struct {
     uint64_t packet_num;
     /* zero pages */
     uint32_t zero_pages;
-    uint32_t unused32[1];    /* Reserved for future use */
+    /* skipped pages */
+    uint32_t skipped_pages;
     uint64_t unused64[3];    /* Reserved for future use */
     char ramblock[256];
     /*
@@ -89,6 +90,8 @@ typedef struct {
 typedef struct {
     /* number of used pages */
     uint32_t num;
+    /* number of skipped pages */
+    uint32_t skipped_num;
     /* number of normal pages */
     uint32_t normal_num;
     /*
@@ -98,6 +101,10 @@ typedef struct {
     RAMBlock *block;
     /* offset array of each page, managed by multifd */
     ram_addr_t *offset;
+    /* buffer array of each cached page, managed by multifd */
+    void **cached;
+    /* temporary buffer for digest computation */
+    void *digest;
 } MultiFDPages_t;
 
 typedef struct {
@@ -252,6 +259,8 @@ typedef struct {
     ram_addr_t *zero;
     /* num of zero pages */
     uint32_t zero_num;
+    /* num of non zero skipped pages */
+    uint32_t skipped_num;
     /* used for de-compression methods */
     void *compress_data;
     /* Flags for the QIOChannel */

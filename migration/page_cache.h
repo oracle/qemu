@@ -71,4 +71,16 @@ uint8_t *get_cached_data(const PageCache *cache, uint64_t addr);
 int cache_insert(PageCache *cache, uint64_t addr, const uint8_t *pdata,
                  uint64_t current_age);
 
+enum cache_hash_algorithm {
+    CACHE_HASH_NONE = 0,
+};
+
+PageCache *cache_hash_init(size_t num_pages, size_t page_size,
+                           enum cache_hash_algorithm algo, Error **errp);
+bool cache_hash_is_cached(PageCache *cache, uint64_t addr, const void *buf,
+                          void *digest, void **out_page);
+void cache_hash_invalidate(PageCache *cache, uint64_t addr);
+size_t cache_hash_item_size(PageCache *cache);
+extern PageCache *hash_cache;
+
 #endif

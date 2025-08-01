@@ -32,6 +32,7 @@
 #include "qapi/qapi-types-migration.h"
 #include "exec/cpu-common.h"
 #include "io/channel.h"
+#include "page_cache.h"
 
 extern XBZRLECacheStats xbzrle_counters;
 extern CompressionStats compression_counters;
@@ -90,5 +91,8 @@ bool ram_write_tracking_compatible(void);
 void ram_write_tracking_prepare(void);
 int ram_write_tracking_start(void);
 void ram_write_tracking_stop(void);
+
+bool hash_cache_init(Error **local_err);
+void hash_cache_cleanup(void);
 
 #endif

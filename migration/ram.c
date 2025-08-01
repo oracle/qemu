@@ -388,6 +388,7 @@ struct RAMState {
 typedef struct RAMState RAMState;
 
 static RAMState *ram_state;
+PageCache *hash_cache;
 
 static NotifierWithReturnList precopy_notifier_list;
 
@@ -2698,6 +2699,16 @@ static void ram_state_cleanup(RAMState **rsp)
     }
 }
 
+void hash_cache_cleanup(void)
+{
+    if (!hash_cache) {
+        return;
+    }
+
+    cache_fini(hash_cache);
+    hash_cache = NULL;
+}
+
 static void xbzrle_cleanup(void)
 {
     XBZRLE_cache_lock();
@@ -3145,6 +3156,40 @@ static void ram_init_bitmaps(RAMState *rs)
      * containing all 1s to exclude any discarded pages from migration.
      */
     migration_bitmap_clear_discarded_pages(rs);
+}
+
+bool hash_cache_init(Error **local_err)
+{
+    enum cache_hash_algorithm hash_algo = CACHE_HASH_NONE;
+    ram_addr_t max_ram_addr = 0;
+
+    size_t num_pages = 0;
+    RAMBlock *block;
+    hash_cache = NULL;
+
+    if (!migrate_use_hash()) {
+        return true;
+    }
+
+    WITH_RCU_READ_LOCK_GUARD() {
+        RAMBLOCK_FOREACH_NOT_IGNORED(block) {
+            ram_addr_t temp = qemu_ram_get_offset(block) + qemu_ram_get_max_length(block);
+
+            if (temp > max_ram_addr) {
+                max_ram_addr = temp;
+            }
+        }
+    }
+
+    num_pages = ((size_t) max_ram_addr) >> TARGET_PAGE_BITS;
+    num_pages = pow2ceil(num_pages);
+    hash_cache = cache_hash_init(num_pages, TARGET_PAGE_SIZE,
+                                 hash_algo, local_err);
+    if (!hash_cache) {
+        return false;
+    }
+
+    return true;
 }
 
 static int ram_init_all(RAMState **rsp)

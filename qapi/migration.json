@@ -509,7 +509,7 @@
            { 'name': 'x-ignore-shared', 'features': [ 'unstable' ] },
            'validate-uuid', 'background-snapshot',
            'zero-copy-send', 'postcopy-preempt', 'switchover-ack',
-           'switchover-abort', 'switchover-event'] }
+           'switchover-abort', 'switchover-event', 'migrate-use-hash'] }
 
 ##
 # @MigrationCapabilityStatus:
