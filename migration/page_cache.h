@@ -73,6 +73,9 @@ int cache_insert(PageCache *cache, uint64_t addr, const uint8_t *pdata,
 
 enum cache_hash_algorithm {
     CACHE_HASH_NONE = 0,
+#if defined(CONFIG_GNUTLS)
+    CACHE_HASH_GNUTLS_SHA256,
+#endif
 };
 
 PageCache *cache_hash_init(size_t num_pages, size_t page_size,

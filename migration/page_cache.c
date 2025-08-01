@@ -20,6 +20,9 @@
 #include "qemu/timer.h"
 #include "page_cache.h"
 #include "trace.h"
+#if defined(CONFIG_GNUTLS)
+#include <gnutls/crypto.h>
+#endif
 
 /* the page in cache will not be replaced in two cycles */
 #define CACHED_PAGE_LIFETIME 2
@@ -184,12 +187,60 @@ int cache_insert(PageCache *cache, uint64_t addr, const uint8_t *pdata,
     return 0;
 }
 
+#if defined(CONFIG_GNUTLS)
+static bool cache_hash_gnutls_sha256_supported(void)
+{
+    size_t i;
+    const gnutls_digest_algorithm_t *algs;
+
+    algs = gnutls_digest_list();
+    for (i = 0; algs[i] != GNUTLS_DIG_UNKNOWN; i++) {
+        if (algs[i] == GNUTLS_DIG_SHA256) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+static void cache_hash_gnutls_sha256_digest(PageCache *cache,
+                                            const void *buf, size_t size,
+                                            uint8_t *output_digest)
+{
+    gnutls_hash_hd_t hash;
+    int ret;
+
+    ret = gnutls_hash_init(&hash, GNUTLS_DIG_SHA256);
+    assert(ret >= 0);
+    gnutls_hash(hash, buf, size);
+    gnutls_hash_deinit(hash, output_digest);
+}
+#endif
+
 PageCache *cache_hash_init(size_t num_pages, size_t page_size,
                            enum cache_hash_algorithm algo, Error **errp)
 {
-    error_setg(errp, QERR_INVALID_PARAMETER_VALUE, "algo",
-               "a known hash algorithm");
-    return NULL;
+    struct PageCache *cache = NULL;
+
+#if defined(CONFIG_GNUTLS)
+    if (algo == CACHE_HASH_GNUTLS_SHA256 &&
+        cache_hash_gnutls_sha256_supported()) {
+        cache = cache_init(num_pages, page_size,
+                           gnutls_hash_get_len(GNUTLS_DIG_SHA256), errp);
+
+        if (!cache) {
+            return NULL;
+        }
+
+        cache->hash_func = cache_hash_gnutls_sha256_digest;
+    }
+#endif
+
+    if (!cache) {
+        error_setg(errp, QERR_INVALID_PARAMETER_VALUE, "algo",
+                   "a known hash algorithm");
+    }
+    return cache;
 }
 
 static int cache_hash_insert(PageCache *cache, uint64_t addr,

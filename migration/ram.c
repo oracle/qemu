@@ -3209,6 +3209,7 @@ bool hash_cache_init(Error **local_err)
 
     size_t num_pages = 0;
     RAMBlock *block;
+    const char *algo;
     hash_cache = NULL;
 
     if (!migrate_use_hash()) {
@@ -3224,6 +3225,18 @@ bool hash_cache_init(Error **local_err)
             }
         }
     }
+
+    algo = migrate_hash_algo();
+    if (!algo) {
+        algo = "gnutls-sha256";
+    }
+
+#if defined(CONFIG_GNUTLS)
+    if (strlen(algo) == strlen("gnutls-sha256") &&
+        strncmp(algo, "gnutls-sha256", strlen(algo)) == 0)  {
+        hash_algo = CACHE_HASH_GNUTLS_SHA256;
+    }
+#endif
 
     num_pages = ((size_t) max_ram_addr) >> TARGET_PAGE_BITS;
     num_pages = pow2ceil(num_pages);
