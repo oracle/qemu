@@ -23,6 +23,9 @@
 #if defined(CONFIG_GNUTLS)
 #include <gnutls/crypto.h>
 #endif
+#if defined(CONFIG_NETTLE)
+#include <nettle/sha2.h>
+#endif
 #if defined(CONFIG_GCRYPT)
 #include "gcrypt.h"
 #endif
@@ -227,6 +230,18 @@ static void cache_hash_gcrypt_sha256_digest(PageCache *cache,
     gcry_md_hash_buffer(GCRY_MD_SHA256, output_digest, buf, size);
 }
 #endif
+#if defined(CONFIG_NETTLE)
+static void cache_hash_nettle_sha256_digest(PageCache *cache,
+                                            const void *buf, size_t size,
+                                            uint8_t *output_digest)
+{
+    struct sha256_ctx ctx;
+
+    sha256_init(&ctx);
+    sha256_update(&ctx, size, buf);
+    sha256_digest(&ctx, SHA256_DIGEST_SIZE, output_digest);
+}
+#endif
 
 PageCache *cache_hash_init(size_t num_pages, size_t page_size,
                            enum cache_hash_algorithm algo, Error **errp)
@@ -255,6 +270,16 @@ PageCache *cache_hash_init(size_t num_pages, size_t page_size,
         }
 
         cache->hash_func = cache_hash_gcrypt_sha256_digest;
+    }
+#endif
+#if defined(CONFIG_NETTLE)
+    if (algo == CACHE_HASH_NETTLE_SHA256) {
+        cache = cache_init(num_pages, page_size, SHA256_DIGEST_SIZE, errp);
+        if (!cache) {
+            return NULL;
+        }
+
+        cache->hash_func = cache_hash_nettle_sha256_digest;
     }
 #endif
 
