@@ -17,6 +17,7 @@
 #include "qapi/qmp/qerror.h"
 #include "qapi/error.h"
 #include "qemu/host-utils.h"
+#include "qemu/timer.h"
 #include "page_cache.h"
 #include "trace.h"
 
@@ -37,6 +38,10 @@ struct PageCache {
     size_t page_size;
     size_t max_num_items;
     size_t num_items;
+
+#define CACHE_HASH_NSEC_PER_MISS 0
+#define CACHE_HASH_NSEC_PER_HIT  1
+    int64_t nsec_per_access[2];
     void (*hash_func)(PageCache *, const void *, size_t, uint8_t *);
 };
 
@@ -219,7 +224,9 @@ bool cache_hash_is_cached(PageCache *cache, uint64_t addr, const void *buf,
     CacheItem *it = cache_get_by_addr(cache, addr);
     bool match = false;
     uint64_t age = 0;
+    int64_t time;
 
+    time = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
     memset(digest, 0, cache->item_size);
     cache->hash_func(cache, buf, cache->page_size, digest);
 
@@ -232,6 +239,10 @@ bool cache_hash_is_cached(PageCache *cache, uint64_t addr, const void *buf,
         memcpy(*out_page, buf, cache->page_size);
         cache->hash_func(cache, *out_page, cache->page_size, it->it_data);
     }
+
+    time = qemu_clock_get_ns(QEMU_CLOCK_REALTIME) - time;
+    cache->nsec_per_access[match] = time;
+
     return match;
 }
 
@@ -248,4 +259,14 @@ void cache_hash_invalidate(PageCache *cache, uint64_t addr)
 size_t cache_hash_item_size(PageCache *cache)
 {
     return cache->item_size;
+}
+
+int64_t cache_hash_nsec_per_miss(PageCache *cache)
+{
+    return cache->nsec_per_access[CACHE_HASH_NSEC_PER_MISS];
+}
+
+int64_t cache_hash_nsec_per_hit(PageCache *cache)
+{
+    return cache->nsec_per_access[CACHE_HASH_NSEC_PER_HIT];
 }

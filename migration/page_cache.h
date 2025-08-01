@@ -81,6 +81,8 @@ bool cache_hash_is_cached(PageCache *cache, uint64_t addr, const void *buf,
                           void *digest, void **out_page);
 void cache_hash_invalidate(PageCache *cache, uint64_t addr);
 size_t cache_hash_item_size(PageCache *cache);
+int64_t cache_hash_nsec_per_miss(PageCache *cache);
+int64_t cache_hash_nsec_per_hit(PageCache *cache);
 extern PageCache *hash_cache;
 
 #endif

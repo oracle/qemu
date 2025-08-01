@@ -1215,7 +1215,10 @@ static void calc_dirty_pages_factor(RAMState *rs, uint64_t end_ts)
     }
 
     trace_hash_cache_dirty_stats(hash_dirty_pages, cache_hits - rs->prev_cache_hits,
-                                 dirty_pages, 1/rs->dirty_rate_factor, interval);
+                                 dirty_pages, 1/rs->dirty_rate_factor, interval,
+                                 cache_hash_nsec_per_hit(hash_cache),
+                                 cache_hash_nsec_per_miss(hash_cache));
+
     rs->prev_cache_misses = cache_misses;
     rs->prev_cache_hits = cache_hits;
     rs->prev_dirty_pages_factor_calc = end_ts;
