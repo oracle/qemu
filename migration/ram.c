@@ -3237,6 +3237,12 @@ bool hash_cache_init(Error **local_err)
         hash_algo = CACHE_HASH_GNUTLS_SHA256;
     }
 #endif
+#if defined(CONFIG_GCRYPT)
+    if (strlen(algo) == strlen("gcrypt-sha256") &&
+        strncmp(algo, "gcrypt-sha256", strlen(algo)) == 0)  {
+        hash_algo = CACHE_HASH_GCRYPT_SHA256;
+    }
+#endif
 
     num_pages = ((size_t) max_ram_addr) >> TARGET_PAGE_BITS;
     num_pages = pow2ceil(num_pages);

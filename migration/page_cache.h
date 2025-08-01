@@ -76,6 +76,9 @@ enum cache_hash_algorithm {
 #if defined(CONFIG_GNUTLS)
     CACHE_HASH_GNUTLS_SHA256,
 #endif
+#if defined(CONFIG_GCRYPT)
+    CACHE_HASH_GCRYPT_SHA256,
+#endif
 };
 
 PageCache *cache_hash_init(size_t num_pages, size_t page_size,

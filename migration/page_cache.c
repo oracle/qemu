@@ -23,6 +23,9 @@
 #if defined(CONFIG_GNUTLS)
 #include <gnutls/crypto.h>
 #endif
+#if defined(CONFIG_GCRYPT)
+#include "gcrypt.h"
+#endif
 
 /* the page in cache will not be replaced in two cycles */
 #define CACHED_PAGE_LIFETIME 2
@@ -216,6 +219,14 @@ static void cache_hash_gnutls_sha256_digest(PageCache *cache,
     gnutls_hash_deinit(hash, output_digest);
 }
 #endif
+#if defined(CONFIG_GCRYPT)
+static void cache_hash_gcrypt_sha256_digest(PageCache *cache,
+                                            const void *buf, size_t size,
+                                            uint8_t *output_digest)
+{
+    gcry_md_hash_buffer(GCRY_MD_SHA256, output_digest, buf, size);
+}
+#endif
 
 PageCache *cache_hash_init(size_t num_pages, size_t page_size,
                            enum cache_hash_algorithm algo, Error **errp)
@@ -233,6 +244,17 @@ PageCache *cache_hash_init(size_t num_pages, size_t page_size,
         }
 
         cache->hash_func = cache_hash_gnutls_sha256_digest;
+    }
+#endif
+#if defined(CONFIG_GCRYPT)
+    if (algo == CACHE_HASH_GCRYPT_SHA256) {
+        cache = cache_init(num_pages, page_size,
+                           gcry_md_get_algo_dlen(GCRY_MD_SHA256) , errp);
+        if (!cache) {
+            return NULL;
+        }
+
+        cache->hash_func = cache_hash_gcrypt_sha256_digest;
     }
 #endif
 
