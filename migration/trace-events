@@ -130,6 +130,7 @@ postcopy_preempt_switch_channel(int channel) "%d"
 postcopy_preempt_reset_channel(void) ""
 hash_cache_total_stats(uint64_t dirty_sync, uint64_t cache_digests, uint64_t cache_misses, uint64_t cache_hits) "ram save block: sync count %" PRIu64 ", cache_digests %" PRIu64 ", cache_misses %" PRIu64 ", cache_hits %" PRIu64
 hash_cache_dirty_stats(uint64_t cache_misses, uint64_t dirty_pages, uint64_t cache_hits, uint32_t dirty_factor, uint64_t interval, uint64_t cycles_per_hit, uint64_t cycles_per_miss) "cache misses %lu, cache hits %lu dirty pages rate %lu, dirty rate factor %u, interval (ms) %lu cycles_per_hit (ns) %ld cycles_per_miss (ns) %ld"
+hash_cache_time_stats(uint64_t cache_misses, uint64_t cache_hits, int64_t total_ns, int64_t total_channel_ns ) "cache misses %lu, cache hits %lu total (ms) %ld total per channel (ms) %ld"
 
 # multifd.c
 multifd_new_send_channel_async(uint8_t id) "channel %u"

@@ -3601,6 +3601,48 @@ static int ram_save_complete(QEMUFile *f, void *opaque)
     return 0;
 }
 
+#define NSEC_PER_MSEC(a) ((a) / 1000000LL)
+
+static bool ram_state_hashes_pending_exact(void *opaque)
+{
+    int64_t misses_pages, hits_pages, total_ns, total_channel_msec, current_time;
+    uint64_t transferred, time_spent, expected_downtime, current_bytes;
+    MigrationState *s = migrate_get_current();
+    RAMState **temp = opaque;
+    RAMState *rs = *temp;
+
+    if (!migrate_use_hash()) {
+        return false;
+    }
+
+    if (!cache_hash_nsec_per_hit(hash_cache) ||
+        !cache_hash_nsec_per_miss(hash_cache)) {
+        return false;
+    }
+
+    misses_pages = rs->migration_dirty_pages * rs->dirty_rate_factor;
+    hits_pages = rs->migration_dirty_pages - misses_pages;
+    total_ns = misses_pages * cache_hash_nsec_per_miss(hash_cache) +
+        hits_pages * cache_hash_nsec_per_hit(hash_cache);
+    total_channel_msec = NSEC_PER_MSEC(total_ns / migrate_multifd_channels());
+    current_bytes = migration_transferred_bytes();
+    current_time = qemu_clock_get_ms(QEMU_CLOCK_REALTIME);
+    transferred = current_bytes - s->iteration_initial_bytes;
+    time_spent = current_time - s->iteration_start_time;
+
+    /* The amount of dirty memory predicted to transfer disregarding cost of hash */
+    expected_downtime = (stat64_get(&ram_counters.dirty_bytes_last_sync) *
+                            rs->dirty_rate_factor) / ((double) transferred / time_spent);
+    s->expected_downtime = expected_downtime > total_channel_msec ?
+                           expected_downtime : total_channel_msec;
+
+    trace_hash_cache_time_stats(misses_pages, hits_pages,
+                                NSEC_PER_MSEC(total_ns),
+                                total_channel_msec);
+
+    return total_channel_msec <= s->parameters.downtime_limit;
+}
+
 static void ram_state_pending_estimate(void *opaque, uint64_t *must_precopy,
                                        uint64_t *can_postcopy)
 {
@@ -3646,7 +3688,8 @@ static void ram_state_pending_exact(void *opaque, uint64_t *must_precopy,
         remaining_size = rs->migration_dirty_pages * TARGET_PAGE_SIZE;
     }
 
-    remaining_size = ((double)remaining_size * rs->dirty_rate_factor);
+    if (ram_state_hashes_pending_exact(opaque))
+        remaining_size = ((double)remaining_size * rs->dirty_rate_factor);
 
     if (migrate_postcopy_ram()) {
         /* We can do postcopy, and all the data is postcopiable */

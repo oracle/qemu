@@ -4074,7 +4074,7 @@ static void migration_update_counters(MigrationState *s,
      * recalculate. 10000 is a small enough number for our purposes
      */
     if (stat64_get(&ram_counters.dirty_pages_rate) &&
-        transferred > 10000) {
+        transferred > 10000 && !migrate_use_hash()) {
         s->expected_downtime =
             stat64_get(&ram_counters.dirty_bytes_last_sync) / expected_bw_per_ms;
     }
