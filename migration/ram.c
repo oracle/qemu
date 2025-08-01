@@ -3625,8 +3625,19 @@ static void ram_state_pending_exact(void *opaque, uint64_t *must_precopy,
     RAMState *rs = *temp;
 
     uint64_t remaining_size = rs->migration_dirty_pages * TARGET_PAGE_SIZE;
+    bool has_dirty_factor = rs->dirty_rate_factor < 1.0;
+    bool sync_bitmap = false;
 
-    if (!migration_in_postcopy() && remaining_size < s->threshold_size) {
+    if (!migration_in_postcopy() && remaining_size <= s->threshold_size) {
+        sync_bitmap = true;
+    }
+
+    if (has_dirty_factor &&
+        (remaining_size * rs->dirty_rate_factor <= s->threshold_size)) {
+        sync_bitmap = true;
+    }
+
+    if (sync_bitmap) {
         qemu_mutex_lock_iothread();
         WITH_RCU_READ_LOCK_GUARD() {
             migration_bitmap_sync_precopy(rs);
@@ -3634,6 +3645,8 @@ static void ram_state_pending_exact(void *opaque, uint64_t *must_precopy,
         qemu_mutex_unlock_iothread();
         remaining_size = rs->migration_dirty_pages * TARGET_PAGE_SIZE;
     }
+
+    remaining_size = ((double)remaining_size * rs->dirty_rate_factor);
 
     if (migrate_postcopy_ram()) {
         /* We can do postcopy, and all the data is postcopiable */
