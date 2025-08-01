@@ -520,6 +520,7 @@ bool migrate_use_zero_copy_send(void);
 int migrate_use_tls(void);
 int migrate_use_xbzrle(void);
 int migrate_use_hash(void);
+char* migrate_hash_algo(void);
 uint64_t migrate_xbzrle_cache_size(void);
 bool migrate_colo_enabled(void);
 

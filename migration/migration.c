@@ -1105,6 +1105,8 @@ MigrationParameters *qmp_query_migrate_parameters(Error **errp)
     params->zero_page_detection = s->parameters.zero_page_detection;
     params->has_switchover_limit = true;
     params->switchover_limit = s->parameters.switchover_limit;
+    params->has_migrate_hash_algo = true;
+    params->migrate_hash_algo = s->parameters.migrate_hash_algo;
 
     return params;
 }
@@ -2006,6 +2008,11 @@ static void migrate_params_apply(MigrateSetParameters *params, Error **errp)
         s->parameters.switchover_limit = params->switchover_limit;
     }
 
+    if (params->has_migrate_hash_algo) {
+        g_free(s->parameters.migrate_hash_algo);
+        assert(params->migrate_hash_algo->type == QTYPE_QSTRING);
+        s->parameters.migrate_hash_algo = g_strdup(params->migrate_hash_algo->u.s);
+    }
 }
 
 void qmp_migrate_set_parameters(MigrateSetParameters *params, Error **errp)
@@ -2026,7 +2033,11 @@ void qmp_migrate_set_parameters(MigrateSetParameters *params, Error **errp)
         params->tls_hostname->type = QTYPE_QSTRING;
         params->tls_hostname->u.s = strdup("");
     }
-
+    if (params->has_migrate_hash_algo
+        && params->migrate_hash_algo->type == QTYPE_QNULL) {
+        params->migrate_hash_algo->type = QTYPE_QSTRING;
+        params->migrate_hash_algo->u.s = strdup("gnutls-sha256");
+    }
     migrate_params_test_apply(params, &tmp);
 
     if (!migrate_params_check(&tmp, errp)) {
@@ -3066,6 +3077,13 @@ int migrate_use_hash(void)
     MigrationState *s = migrate_get_current();
 
     return s->enabled_capabilities[MIGRATION_CAPABILITY_MIGRATE_USE_HASH];
+}
+
+char* migrate_hash_algo(void)
+{
+    MigrationState *s = migrate_get_current();
+
+    return s->parameters.migrate_hash_algo;
 }
 
 /* migration thread support */
@@ -4790,6 +4808,7 @@ static Property migration_properties[] = {
     DEFINE_PROP_UINT64("x-orcl-switchover-limit", MigrationState,
                        parameters.switchover_limit,
                        DEFAULT_MIGRATE_SET_SWITCHOVER_LIMIT),
+    DEFINE_PROP_STRING("x-orcl-migrate-hash-algo", MigrationState, parameters.migrate_hash_algo),
 
     /* Migration capabilities */
     DEFINE_PROP_MIG_CAP("x-xbzrle", MIGRATION_CAPABILITY_XBZRLE),
@@ -4892,7 +4911,7 @@ static void migration_instance_init(Object *obj)
     params->has_tls_authz = true;
     params->has_zero_page_detection = true;
     params->has_switchover_limit = true;
-
+    params->has_migrate_hash_algo = true;
 
     qemu_sem_init(&ms->postcopy_pause_sem, 0);
     qemu_sem_init(&ms->postcopy_pause_rp_sem, 0);

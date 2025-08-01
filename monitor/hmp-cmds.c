@@ -512,6 +512,10 @@ void hmp_info_migrate_parameters(Monitor *mon, const QDict *qdict)
         monitor_printf(mon, "%s: %" PRIu64 "\n",
             MigrationParameter_str(MIGRATION_PARAMETER_SWITCHOVER_LIMIT),
             params->switchover_limit);
+        assert(params->has_migrate_hash_algo);
+        monitor_printf(mon, "%s: %s\n",
+            MigrationParameter_str(MIGRATION_PARAMETER_MIGRATE_HASH_ALGO),
+            params->migrate_hash_algo);
 
         if (params->has_block_bitmap_mapping) {
             const BitmapMigrationNodeAliasList *bmnal;
@@ -1374,6 +1378,12 @@ void hmp_migrate_set_parameter(Monitor *mon, const QDict *qdict)
     case MIGRATION_PARAMETER_SWITCHOVER_LIMIT:
         p->has_switchover_limit = true;
         visit_type_size(v, param, &p->switchover_limit, &err);
+        break;
+    case MIGRATION_PARAMETER_MIGRATE_HASH_ALGO:
+        p->has_migrate_hash_algo = true;
+        p->migrate_hash_algo = g_new0(StrOrNull, 1);
+        p->migrate_hash_algo->type = QTYPE_QSTRING;
+        visit_type_str(v, param, &p->migrate_hash_algo->u.s, &err);
         break;
     default:
         assert(0);

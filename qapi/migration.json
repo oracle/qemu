@@ -838,6 +838,8 @@
 #                         intiate abort of live migration if the total switchover time
 #                         exceeded downtime_limit + switchover_limit (Since 7.2)
 #
+# @migrate-hash-algo: Use hashing algorithm (string). (Since 7.2)
+#
 # Features:
 # @unstable: Member @x-checkpoint-delay is experimental.
 #
@@ -860,7 +862,8 @@
            'multifd-zlib-level' ,'multifd-zstd-level',
            'block-bitmap-mapping',
            'zero-page-detection',
-           'switchover-limit'] }
+           'switchover-limit',
+           'migrate-hash-algo'] }
 
 ##
 # @MigrateSetParameters:
@@ -1023,6 +1026,8 @@
 #                         intiate abort of live migration if the total switchover time
 #                         exceeded downtime_limit + switchover_limit (Since 7.2)
 #
+# @migrate-hash-algo: Use hashing algorithm (string). (Since 7.2)
+#
 # Features:
 # @unstable: Member @x-checkpoint-delay is experimental.
 #
@@ -1061,7 +1066,8 @@
             '*multifd-zstd-level': 'uint8',
             '*block-bitmap-mapping': [ 'BitmapMigrationNodeAlias' ],
             '*zero-page-detection': 'ZeroPageDetection',
-            '*switchover-limit': 'uint64'} }
+            '*switchover-limit': 'uint64',
+            '*migrate-hash-algo': 'StrOrNull'} }
 
 
 ##
@@ -1245,6 +1251,8 @@
 #                         intiate abort of live migration if the total switchover time
 #                         exceeded downtime_limit + switchover_limit (Since 7.2)
 #
+# @migrate-hash-algo: Use hashing algorithm (string). (Since 7.2)
+#
 # Features:
 # @unstable: Member @x-checkpoint-delay is experimental.
 #
@@ -1281,7 +1289,8 @@
             '*multifd-zstd-level': 'uint8',
             '*block-bitmap-mapping': [ 'BitmapMigrationNodeAlias' ],
             '*zero-page-detection': 'ZeroPageDetection',
-            '*switchover-limit': 'uint64'} }
+            '*switchover-limit': 'uint64',
+            '*migrate-hash-algo': 'str' } }
 
 ##
 # @query-migrate-parameters:
