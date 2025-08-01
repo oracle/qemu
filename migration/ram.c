@@ -58,6 +58,7 @@
 #include "qemu/iov.h"
 #include "multifd.h"
 #include "sysemu/runstate.h"
+#include "math.h"
 
 #include "hw/boards.h" /* for machine_dump_guest_core() */
 
@@ -345,6 +346,12 @@ struct RAMState {
     uint64_t bytes_xfer_prev;
     /* number of dirty pages since start_time */
     uint64_t num_dirty_pages_period;
+    /* for hash cache convergence prediction */
+    double dirty_rate_factor;
+    uint64_t prev_dirty_pages_sync_period;
+    uint64_t prev_dirty_pages_factor_calc;
+    uint64_t prev_cache_misses;
+    uint64_t prev_cache_hits;
     /* xbzrle misses since the beginning of the period */
     uint64_t xbzrle_cache_miss_prev;
     /* Amount of xbzrle pages since the beginning of the period */
@@ -1070,6 +1077,7 @@ static void ramblock_sync_dirty_bitmap(RAMState *rs, RAMBlock *rb)
 
     rs->migration_dirty_pages += new_dirty_pages;
     rs->num_dirty_pages_period += new_dirty_pages;
+    rs->prev_dirty_pages_sync_period += new_dirty_pages;
 }
 
 /**
@@ -1182,6 +1190,38 @@ static void migration_trigger_throttle(RAMState *rs)
     }
 }
 
+static void calc_dirty_pages_factor(RAMState *rs, uint64_t end_ts)
+{
+    uint64_t cache_misses, cache_hits, dirty_pages, hash_dirty_pages = 0;
+    uint64_t interval = end_ts - rs->prev_dirty_pages_factor_calc;
+
+    rs->dirty_rate_factor = 1;
+
+    if (!migrate_use_hash()) {
+        return;
+    }
+
+    cache_misses = stat64_get(&ram_counters.cache_misses);
+    cache_hits = stat64_get(&ram_counters.cache_hits);
+    dirty_pages = rs->prev_dirty_pages_sync_period;
+
+    trace_hash_cache_total_stats(stat64_get(&ram_counters.dirty_sync_count),
+         stat64_get(&ram_counters.cache_digests),
+         cache_misses, cache_hits);
+
+    if (cache_misses && dirty_pages && cache_misses != rs->prev_cache_misses) {
+        hash_dirty_pages = cache_misses - rs->prev_cache_misses;
+        rs->dirty_rate_factor = MIN(((double)hash_dirty_pages / (double)dirty_pages), 1);
+    }
+
+    trace_hash_cache_dirty_stats(hash_dirty_pages, cache_hits - rs->prev_cache_hits,
+                                 dirty_pages, 1/rs->dirty_rate_factor, interval);
+    rs->prev_cache_misses = cache_misses;
+    rs->prev_cache_hits = cache_hits;
+    rs->prev_dirty_pages_factor_calc = end_ts;
+    rs->prev_dirty_pages_sync_period = 0;
+}
+
 static void migration_bitmap_sync(RAMState *rs)
 {
     RAMBlock *block;
@@ -1209,6 +1249,7 @@ static void migration_bitmap_sync(RAMState *rs)
     trace_migration_bitmap_sync_end(rs->num_dirty_pages_period);
 
     end_time = qemu_clock_get_ms(QEMU_CLOCK_REALTIME);
+    calc_dirty_pages_factor(rs, end_time);
 
     /* more than 1 second = 1000 millisecons */
     if (end_time > rs->time_last_bitmap_sync + 1000) {
