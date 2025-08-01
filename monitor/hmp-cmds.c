@@ -293,6 +293,18 @@ void hmp_info_migrate(Monitor *mon, const QDict *qdict)
                            "Zero-copy-send fallbacks happened: %" PRIu64 " times\n",
                            info->ram->dirty_sync_missed_zero_copy);
         }
+        if (info->ram->has_cache_misses) {
+            monitor_printf(mon, "cache misses: %" PRIu64 "\n",
+                           info->ram->cache_misses);
+        }
+        if (info->ram->has_cache_hits) {
+            monitor_printf(mon, "cache hits: %" PRIu64 "\n",
+                           info->ram->cache_hits);
+        }
+        if (info->ram->has_cache_digests) {
+            monitor_printf(mon, "cache digests: %" PRIu64 "\n",
+                           info->ram->cache_digests);
+        }
     }
 
     if (info->has_disk) {

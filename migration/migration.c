@@ -1212,6 +1212,15 @@ static void populate_ram_info(MigrationInfo *info, MigrationState *s)
     info->ram->downtime_bytes = stat64_get(&ram_counters.downtime_bytes);
     info->ram->postcopy_bytes = stat64_get(&ram_counters.postcopy_bytes);
 
+    if (migrate_use_hash()) {
+        info->ram->has_cache_misses = true;
+        info->ram->cache_misses = stat64_get(&ram_counters.cache_misses);
+        info->ram->has_cache_hits = true;
+        info->ram->cache_hits = stat64_get(&ram_counters.cache_hits);
+        info->ram->has_cache_digests = true;
+        info->ram->cache_digests = stat64_get(&ram_counters.cache_digests);
+    }
+
     if (migrate_use_xbzrle()) {
         info->has_xbzrle_cache = true;
         info->xbzrle_cache = g_malloc0(sizeof(*info->xbzrle_cache));

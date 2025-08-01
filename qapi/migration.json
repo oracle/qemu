@@ -59,6 +59,13 @@
 #                               not avoid copying dirty pages. This is between
 #                               0 and @dirty-sync-count * @multifd-channels.
 #                               (since 7.1)
+#
+# @cache-hits: amount of bytes already transferred to the target VM
+#
+# @cache-misses: amount of bytes already transferred to the target VM
+#
+# @cache-digests: amount of bytes already transferred to the target VM
+#
 # Since: 0.14
 ##
 { 'struct': 'MigrationStats',
@@ -70,6 +77,9 @@
            'multifd-bytes' : 'uint64', 'pages-per-second' : 'uint64',
            'precopy-bytes' : 'uint64', 'downtime-bytes' : 'uint64',
            'postcopy-bytes' : 'uint64',
+           '*cache-hits': 'uint64',
+           '*cache-misses': 'uint64',
+           '*cache-digests': 'uint64',
            'dirty-sync-missed-zero-copy' : 'uint64' } }
 
 ##
