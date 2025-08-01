@@ -48,6 +48,7 @@
 #include "kvm-cpus.h"
 #include "sysemu/dirtylimit.h"
 #include "qemu/range.h"
+#include "migration/migration.h"
 
 #include "hw/boards.h"
 #include "monitor/stats.h"
@@ -533,6 +534,26 @@ out:
     return ret;
 }
 
+static void kvm_log_toggle_pgtable_tracking(KVMState *s, bool enable)
+{
+    uint64_t dirty_log_pgtable, val = 0;
+
+    if (!migrate_use_hash()) {
+        return;
+    }
+
+    dirty_log_pgtable = kvm_check_extension(s, KVM_CAP_DIRTY_LOG_PGTABLE);
+    if (!(dirty_log_pgtable & KVM_DIRTY_LOG_PGTABLE)) {
+        return;
+    }
+
+    if (enable) {
+        val = KVM_DIRTY_LOG_PGTABLE;
+    }
+
+    kvm_vm_enable_cap(s, KVM_CAP_DIRTY_LOG_PGTABLE, 0, val);
+}
+
 static void kvm_log_start(MemoryListener *listener,
                           MemoryRegionSection *section,
                           int old, int new)
@@ -547,6 +568,8 @@ static void kvm_log_start(MemoryListener *listener,
     if (old != 0) {
         return;
     }
+
+    kvm_log_toggle_pgtable_tracking(kvm_state, true);
 
     r = kvm_section_update_flags(kml, section);
     if (r < 0) {
@@ -573,6 +596,8 @@ static void kvm_log_stop(MemoryListener *listener,
     if (r < 0) {
         abort();
     }
+
+    kvm_log_toggle_pgtable_tracking(kvm_state, false);
 }
 
 /* get kvm's dirty pages bitmap and update qemu's */

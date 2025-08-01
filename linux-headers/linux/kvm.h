@@ -1174,6 +1174,9 @@ struct kvm_ppc_resize_hpt {
 #define KVM_CAP_S390_PROTECTED_ASYNC_DISABLE 224
 #define KVM_CAP_DIRTY_LOG_RING_WITH_BITMAP 225
 
+/* UEK specific extensions */
+#define KVM_CAP_DIRTY_LOG_PGTABLE 2048
+
 #ifdef KVM_CAP_IRQ_ROUTING
 
 struct kvm_irq_routing_irqchip {
@@ -2056,6 +2059,8 @@ struct kvm_hyperv_eventfd {
 
 #define KVM_DIRTY_LOG_MANUAL_PROTECT_ENABLE    (1 << 0)
 #define KVM_DIRTY_LOG_INITIALLY_SET            (1 << 1)
+
+#define KVM_DIRTY_LOG_PGTABLE                  (1 << 0)
 
 /*
  * Arch needs to define the macro after implementing the dirty ring
