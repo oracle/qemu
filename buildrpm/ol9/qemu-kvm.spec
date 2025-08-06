@@ -258,7 +258,7 @@ Requires: %{name}-block-ssh = %{epoch}:%{version}-%{release}     \
 Summary: QEMU is a machine emulator and virtualizer
 Name: qemu-kvm
 Version: 7.2.0
-Release: 24%{?dist}
+Release: 26%{?dist}
 Epoch: 30
 License: GPLv2+ and LGPLv2+ and BSD
 Group: Development/Tools
@@ -1680,6 +1680,21 @@ getent passwd qemu >/dev/null || \
 
 
 %changelog
+* Wed Aug 6 2025 Mark Kanda <mark.kanda@oracle.com> - 7.2.0-26.el9
+- accel/kvm: Enable Dirty bit tracking if hash cache is used (Joao Martins) [Orabug: 37699414]
+- migration/page_cache: Add nettle sha256 function (Elena Ufimtseva) [Orabug: 37699414]
+- migration/page_cache: Add libgcrypt sha256 function (Elena Ufimtseva) [Orabug: 37699414]
+- migration/page_cache: Add gnutls sha256 function (Joao Martins) [Orabug: 37699414]
+- migration: Add a parameter to select sha256 library (Joao Martins) [Orabug: 37699414]
+- migration: Export cache statistics to QMP (Joao Martins) [Orabug: 37699414]
+- migration/ram: Adjust estimate/exact to time-to-hash dirty data (Joao Martins) [Orabug: 37699414]
+- migration: Sync dirty bitmap in exact() considering factor (Joao Martins) [Orabug: 37699414]
+- migration: Time cache hit/miss operations (Joao Martins) [Orabug: 37699414]
+- migration/ram: Calculate real dirty pages based on hash cache stats (Elena Ufimtseva) [Orabug: 37699414]
+- migration: Add hash cache for dirty page tracking (Elena Ufimtseva) [Orabug: 37699414]
+- migration/page-cache: Differentiate page size from cache data size (Joao Martins) [Orabug: 37699414]
+- target/i386: do not expose ARCH_CAPABILITIES on AMD CPU (Paolo Bonzini) [Orabug: 38225280]
+
 * Tue Jul 8 2025 Mark Kanda <mark.kanda@oracle.com> - 7.2.0-24.el9
 - Revert "migration: Temporarily re-enable our custom switchover event by default" (Mark Kanda)
 - target/i386: Enumerate verw-clear CPUID feature (Boris Ostrovsky) [Orabug: 38118557] {CVE-2024-36350} {CVE-2024-36357}
