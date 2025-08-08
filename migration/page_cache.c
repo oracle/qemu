@@ -577,7 +577,8 @@ static int cache_hash_isal_crypto_mb_pool_submit(PageCache *cache, void *opaque,
         }
     } while (out != NULL);
 
-    time = (qemu_clock_get_ns(QEMU_CLOCK_REALTIME) - time) / nr_pages;
+    ts = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
+    time = (ts - time) / nr_pages;
     cache->nsec_per_access[CACHE_HASH_NSEC_PER_MISS] = time;
     cache->nsec_per_access[CACHE_HASH_NSEC_PER_HIT] = time;
 
@@ -598,7 +599,7 @@ static int cache_hash_isal_crypto_mb_pool_submit(PageCache *cache, void *opaque,
 
         /* On a miss hash a copy of the page */
         if (!match) {
-            ts = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
+            hash_ts = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
             cache_hash_insert(cache, addr, 0);
             memcpy(out_page, host, cache->page_size);
 
@@ -615,20 +616,44 @@ static int cache_hash_isal_crypto_mb_pool_submit(PageCache *cache, void *opaque,
             if (ret) {
                 return -EINVAL;
             }
-
-            out = NULL;
-            do {
-                ret = cache->isal_sha256_ctx_mgr_flush(mgr, &out);
-                if (ret) {
-                    return -EINVAL;
-                }
-            } while (out != NULL);
-            memcpy(it->it_data, ctx->job.result_digest, cache->item_size);
-
             cache->nsec_per_access[CACHE_HASH_NSEC_PER_MISS] = time +
-                         (qemu_clock_get_ns(QEMU_CLOCK_REALTIME) - ts);
+                         (qemu_clock_get_ns(QEMU_CLOCK_REALTIME) - hash_ts);
+            ++misses;
         }
         out_matched[i] = match;
+        ctx->user_data = (void *) ((bool) match);
+    }
+
+    /* We've had only hash matches */
+    if (!misses) {
+        return 0;
+    }
+
+    /* Update timestamp for the misses and wait for completion */
+    ts = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
+
+    out = NULL;
+    do {
+        ret = cache->isal_sha256_ctx_mgr_flush(mgr, &out);
+        if (ret) {
+            return -EINVAL;
+        }
+    } while (out != NULL);
+
+    cache->nsec_per_access[CACHE_HASH_NSEC_PER_MISS] +=
+         (qemu_clock_get_ns(QEMU_CLOCK_REALTIME) - ts) / misses;
+
+    for (i = 0; i < nr_pages; i++) {
+        uint64_t addr = base_addr + offset[i];
+        CacheItem *it;
+
+        ctx = &mb->ctx[i];
+        if (ctx->user_data) {
+            continue;
+        }
+
+        it = cache_get_by_addr(cache, addr);
+        memcpy(it->it_data, ctx->job.result_digest, cache->item_size);
     }
 
     return 0;
