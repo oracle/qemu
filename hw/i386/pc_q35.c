@@ -381,6 +381,19 @@ static void pc_q35_7_2_machine_options(MachineClass *m)
 DEFINE_Q35_MACHINE(v7_2, "pc-q35-7.2", NULL,
                    pc_q35_7_2_machine_options);
 
+static void pc_q35_7_2_exadata_machine_options(MachineClass *m)
+{
+    PCMachineClass *pcmc = PC_MACHINE_CLASS(m);
+    pc_q35_7_2_machine_options(m);
+    m->alias = NULL;
+    pcmc->legacy_no_rng_seed = true;
+    compat_props_add(m->compat_props, hw_compat_7_2_exadata, hw_compat_7_2_exadata_len);
+    compat_props_add(m->compat_props, pc_compat_7_2_exadata, pc_compat_7_2_exadata_len);
+}
+
+DEFINE_Q35_MACHINE(v7_2_exadata, "pc-q35-7.2-exadata", NULL,
+                   pc_q35_7_2_exadata_machine_options);
+
 static void pc_q35_7_1_machine_options(MachineClass *m)
 {
     PCMachineClass *pcmc = PC_MACHINE_CLASS(m);

@@ -40,6 +40,19 @@
 #include "hw/virtio/virtio-pci.h"
 #include "qom/object_interfaces.h"
 
+GlobalProperty hw_compat_7_2_exadata[] = {
+    { "vhost-scsi-pci", "virtqueue_size", "1024" },
+    { "vhost-scsi-pci", "cmd_per_lun", "1024" },
+    { "vhost-scsi-pci", "migratable", "true" },
+    { "vhost-scsi-pci", "hotplug", "true" },
+    { "vfio-pci", "x-orcl-migration-iommu-pt", "true" },
+    { "vfio-pci", "x-orcl-device-dirty-page-tracking", "off" },
+    { "vfio-pci", "migration-events", "true" },
+    { "migration", "x-orcl-switchover-event", "on" },
+    { "migration", "x-orcl-migrate-use-hash", "true" },
+};
+const size_t hw_compat_7_2_exadata_len = G_N_ELEMENTS(hw_compat_7_2_exadata);
+
 GlobalProperty hw_compat_7_1[] = {
     { "virtio-device", "queue_reset", "false" },
     { "virtio-rng-pci", "vectors", "0" },
