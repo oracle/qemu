@@ -180,8 +180,10 @@
 # Support for miscellaneous hardware
 # Trusted Platform Modules (TPM)
 %global have_tpm 1
-# USB redirection and passthrough
-%global have_usb 0
+# USB redirection
+%global have_usb_redir 0
+# USB passthrough
+%global have_usb_host 1
 # SmartCards
 %global have_smartcard 0
 # Flat Device Trees
@@ -395,7 +397,7 @@ BuildRequires: pixman-devel
 BuildRequires: glusterfs-devel >= 3.4.0
 BuildRequires: glusterfs-api-devel >= 3.4.0
 %endif
-%if 0%{?have_usb}
+%if 0%{?have_usb_host}
 # Needed for USB passthrough
 BuildRequires: libusbx-devel >= 1.0.22
 %endif
@@ -495,9 +497,10 @@ Requires: edk2-aarch64
 %if 0%{?have_gluster}
 Requires: glusterfs-api >= 3.12.2
 %endif
-%if 0%{?have_usb}
+%if 0%{?have_usb_redir}
 Requires: libusbx >= 1.0.23
 Requires: usbredir >= 0.8.0
+BuildRequires: usbredir-devel >= 0.8.0
 %endif
 Provides: qemu
 
@@ -633,6 +636,19 @@ that implements the virtio-fs device that is used for sharing a host directory
 tree with a guest.
 %endif
 
+%if 0%{?have_usb_redir}
+%package -n qemu-kvm-device-usb-redirect
+Summary: QEMU USB redirection support
+%description -n qemu-kvm-device-usb-redirect
+This package provides USB redirection support.
+%endif
+
+%if 0%{?have_usb_host}
+%package -n qemu-kvm-device-usb-host
+Summary: QEMU USB host device
+%description -n qemu-kvm-device-usb-host
+This package provides the USB pass through driver for QEMU.
+%endif
 
 %prep
 %setup -q -n qemu-%{version}%{?rcstr}
@@ -847,10 +863,16 @@ mkdir -p %{build_dir}
     %global vhostnetflags --disable-vhost-net
 %endif
 
-%if 0%{?have_usb}
-    %global usbflags --enable-libusb --enable-usb-redir
+%if 0%{?have_usb_redir}
+    %global usbredirflags --enable-usb-redir
 %else
-    %global usbflags --disable-libusb --disable-usb-redir
+    %global usbredirflags --disable-usb-redir
+%endif
+
+%if 0%{?have_usb_host}
+    %global usbhostflags --enable-libusb
+%else
+    %global usbhostflags --disable-libusb
 %endif
 
 %if 0%{?have_lzo}
@@ -1211,7 +1233,8 @@ pushd %{build_dir}
     %{libcapngflags} \
     %{attrflags} \
     %{vhostnetflags} \
-    %{usbflags} \
+    %{usbredirflags} \
+    %{usbhostflags} \
     %{lzoflags} \
     %{snappyflags} \
     %{bzip2flags} \
@@ -1676,6 +1699,15 @@ getent passwd qemu >/dev/null || \
 %{_datadir}/qemu/vhost-user/50-qemu-virtiofsd.json
 %endif
 
+%if 0%{?have_usb_redir}
+%files -n qemu-kvm-device-usb-redirect
+%{_libdir}/%{name}/hw-usb-redirect.so
+%endif
+
+%if 0%{?have_usb_host}
+%files -n qemu-kvm-device-usb-host
+%{_libdir}/%{name}/hw-usb-host.so
+%endif
 
 %changelog
 * Mon Apr 10 2023 Mark Kanda <mark.kanda@oracle.com>
