@@ -260,7 +260,7 @@ Requires: %{name}-block-ssh = %{epoch}:%{version}-%{release}     \
 Summary: QEMU is a machine emulator and virtualizer
 Name: qemu-kvm
 Version: 7.2.0
-Release: 26%{?dist}
+Release: 28%{?dist}
 Epoch: 30
 License: GPLv2+ and LGPLv2+ and BSD
 Group: Development/Tools
@@ -1712,6 +1712,13 @@ getent passwd qemu >/dev/null || \
 %endif
 
 %changelog
+* Tue Sep 9 2025 Mark Kanda <mark.kanda@oracle.com> - 7.2.0-28.el9
+- hw/i386: Add an exadata machine (Joao Martins) [Orabug: 38408711]
+- arm/kvm: add support for MTE (Cornelia Huck)
+- target/arm: When tag memory is not present, set MTE=1 (Richard Henderson)
+- spec: provide qemu-kvm-device-usb-host package (Mark Kanda) [Orabug: 38355110]
+- kvm.conf: do not automatically enable virt when loading kvm (Mark Kanda) [Orabug: 38320046]
+
 * Wed Aug 6 2025 Mark Kanda <mark.kanda@oracle.com> - 7.2.0-26.el9
 - accel/kvm: Enable Dirty bit tracking if hash cache is used (Joao Martins) [Orabug: 37699414]
 - migration/page_cache: Add nettle sha256 function (Elena Ufimtseva) [Orabug: 37699414]
