@@ -545,6 +545,7 @@ static gboolean qio_channel_websock_handshake_send(QIOChannel *ioc,
         trace_qio_channel_websock_handshake_fail(ioc, error_get_pretty(err));
         qio_task_set_error(task, err);
         qio_task_complete(task);
+        wioc->hs_io_tag = 0;
         return FALSE;
     }
 
@@ -560,6 +561,7 @@ static gboolean qio_channel_websock_handshake_send(QIOChannel *ioc,
             trace_qio_channel_websock_handshake_complete(ioc);
             qio_task_complete(task);
         }
+        wioc->hs_io_tag = 0;
         return FALSE;
     }
     trace_qio_channel_websock_handshake_pending(ioc, G_IO_OUT);
@@ -586,6 +588,7 @@ static gboolean qio_channel_websock_handshake_io(QIOChannel *ioc,
         trace_qio_channel_websock_handshake_fail(ioc, error_get_pretty(err));
         qio_task_set_error(task, err);
         qio_task_complete(task);
+        wioc->hs_io_tag = 0;
         return FALSE;
     }
     if (ret == 0) {
@@ -597,7 +600,7 @@ static gboolean qio_channel_websock_handshake_io(QIOChannel *ioc,
     error_propagate(&wioc->io_err, err);
 
     trace_qio_channel_websock_handshake_reply(ioc);
-    qio_channel_add_watch(
+    wioc->hs_io_tag = qio_channel_add_watch(
         wioc->master,
         G_IO_OUT,
         qio_channel_websock_handshake_send,
@@ -906,11 +909,12 @@ void qio_channel_websock_handshake(QIOChannelWebsock *ioc,
 
     trace_qio_channel_websock_handshake_start(ioc);
     trace_qio_channel_websock_handshake_pending(ioc, G_IO_IN);
-    qio_channel_add_watch(ioc->master,
-                          G_IO_IN,
-                          qio_channel_websock_handshake_io,
-                          task,
-                          NULL);
+    ioc->hs_io_tag = qio_channel_add_watch(
+        ioc->master,
+        G_IO_IN,
+        qio_channel_websock_handshake_io,
+        task,
+        NULL);
 }
 
 
@@ -922,6 +926,9 @@ static void qio_channel_websock_finalize(Object *obj)
     buffer_free(&ioc->encoutput);
     buffer_free(&ioc->rawinput);
     object_unref(OBJECT(ioc->master));
+    if (ioc->hs_io_tag) {
+        g_source_remove(ioc->hs_io_tag);
+    }
     if (ioc->io_tag) {
         g_source_remove(ioc->io_tag);
     }
@@ -1218,6 +1225,9 @@ static int qio_channel_websock_close(QIOChannel *ioc,
     QIOChannelWebsock *wioc = QIO_CHANNEL_WEBSOCK(ioc);
 
     trace_qio_channel_websock_close(ioc);
+    if (wioc->hs_io_tag) {
+        g_clear_handle_id(&wioc->hs_io_tag, g_source_remove);
+    }
     return qio_channel_close(wioc->master, errp);
 }
 
