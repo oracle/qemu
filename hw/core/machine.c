@@ -50,6 +50,7 @@ GlobalProperty hw_compat_7_2_exadata[] = {
     { "vfio-pci", "migration-events", "true" },
     { "migration", "x-orcl-switchover-event", "on" },
     { "migration", "x-orcl-migrate-use-hash", "true" },
+    { "kvmclock", "x-orcl-account-downtime", "true" },
 };
 const size_t hw_compat_7_2_exadata_len = G_N_ELEMENTS(hw_compat_7_2_exadata);
 

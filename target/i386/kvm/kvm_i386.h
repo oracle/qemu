@@ -32,11 +32,17 @@
 
 #endif  /* CONFIG_KVM */
 
+#define KVM_CLOCK_AUX_FLAGS (KVM_CLOCK_REALTIME | KVM_CLOCK_HOST_TSC)
+#define with_kvmclock_aux_flags(flags) \
+    ((flags & KVM_CLOCK_AUX_FLAGS) == KVM_CLOCK_AUX_FLAGS)
+
 bool kvm_has_smm(void);
 bool kvm_has_adjust_clock(void);
 bool kvm_has_adjust_clock_stable(void);
 bool kvm_has_exception_payload(void);
+bool kvm_support_clock_downtime(void);
 void kvm_synchronize_all_tsc(void);
+void kvm_write_all_tsc_offset(uint64_t delta);
 void kvm_arch_reset_vcpu(X86CPU *cs);
 void kvm_arch_after_reset_vcpu(X86CPU *cpu);
 void kvm_arch_do_init_vcpu(X86CPU *cs);

@@ -138,6 +138,9 @@ static int has_triple_fault_event;
 
 static bool has_msr_mcg_ext_ctl;
 
+static bool has_kvmclock_aux;
+static bool has_tsc_offset;
+
 static struct kvm_cpuid2 *cpuid_cache;
 static struct kvm_cpuid2 *hv_cpuid_cache;
 static struct kvm_msr_list *kvm_feature_msrs;
@@ -173,6 +176,11 @@ bool kvm_has_adjust_clock(void)
 bool kvm_has_exception_payload(void)
 {
     return has_exception_payload;
+}
+
+bool kvm_support_clock_downtime(void)
+{
+    return has_kvmclock_aux && has_tsc_offset;
 }
 
 static bool kvm_x2apic_api_set_flags(uint64_t flags)
@@ -220,6 +228,20 @@ static int kvm_get_tsc(CPUState *cs)
     uint64_t value;
     int ret;
 
+    if (kvm_support_clock_downtime()) {
+        struct kvm_device_attr attr;
+
+        attr.group = KVM_VCPU_TSC_CTRL;
+        attr.attr = KVM_VCPU_TSC_OFFSET;
+        attr.flags = 0;
+        attr.addr = (uint64_t)&env->tsc_offset;
+
+        ret = kvm_vcpu_ioctl(cs, KVM_GET_DEVICE_ATTR, &attr);
+        if (ret) {
+            return ret;
+        }
+    }
+
     if (env->tsc_valid) {
         return 0;
     }
@@ -247,6 +269,40 @@ void kvm_synchronize_all_tsc(void)
     if (kvm_enabled()) {
         CPU_FOREACH(cpu) {
             run_on_cpu(cpu, do_kvm_synchronize_tsc, RUN_ON_CPU_NULL);
+        }
+    }
+}
+
+static inline void do_kvm_write_tsc_offset(CPUState *cs, run_on_cpu_data arg)
+{
+    uint64_t delta = arg.host_ulong;
+    X86CPU *cpu = X86_CPU(cs);
+    CPUX86State *env = &cpu->env;
+    struct kvm_device_attr attr;
+    int ret;
+
+    env->tsc_offset += delta;
+
+    attr.group = KVM_VCPU_TSC_CTRL;
+    attr.attr = KVM_VCPU_TSC_OFFSET;
+    attr.flags = 0;
+    attr.addr = (uint64_t)&env->tsc_offset;
+
+    ret = kvm_vcpu_ioctl(cs, KVM_SET_DEVICE_ATTR, &attr);
+    if (ret) {
+        error_report("KVM_SET_DEVICE_ATTR: %s", strerror(-ret));
+        exit(1);
+    }
+}
+
+void kvm_write_all_tsc_offset(uint64_t delta)
+{
+    CPUState *cpu;
+
+    if (kvm_enabled()) {
+        CPU_FOREACH(cpu) {
+            run_on_cpu(cpu, do_kvm_write_tsc_offset,
+                       RUN_ON_CPU_HOST_ULONG(delta));
         }
     }
 }
@@ -2242,6 +2298,18 @@ int kvm_arch_init_vcpu(CPUState *cs)
 
     kvm_init_msrs(cpu);
 
+    if (cs == first_cpu) {
+        struct kvm_device_attr attr = {
+            .group = KVM_VCPU_TSC_CTRL,
+            .attr = KVM_VCPU_TSC_OFFSET,
+            .flags = 0,
+        };
+
+        if (!kvm_vcpu_ioctl(cs, KVM_HAS_DEVICE_ATTR, &attr)) {
+            has_tsc_offset = true;
+        }
+    }
+
     return 0;
 
  fail:
@@ -2742,6 +2810,11 @@ int kvm_arch_init(MachineState *ms, KVMState *s)
                          strerror(-ret));
             exit(1);
         }
+    }
+
+    ret = kvm_check_extension(s, KVM_CAP_ADJUST_CLOCK);
+    if (ret) {
+        has_kvmclock_aux = with_kvmclock_aux_flags(ret);
     }
 
     return 0;
