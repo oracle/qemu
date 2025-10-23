@@ -29,6 +29,7 @@
 #include "exec/cpu-common.h"
 #include "qemu/error-report.h"
 #include "qemu/qemu-print.h"
+#include "sysemu/runstate.h"
 #include "sysemu/tcg.h"
 #include "hw/boards.h"
 #include "hw/qdev-properties.h"
@@ -207,7 +208,10 @@ static void cpu_common_realizefn(DeviceState *dev, Error **errp)
 
     if (dev->hotplugged) {
         cpu_synchronize_post_init(cpu);
-        cpu_resume(cpu);
+
+        if (runstate_is_running()) {
+            cpu_resume(cpu);
+        }
     }
 
     /* NOTE: latest generic point where the cpu is fully realized */
