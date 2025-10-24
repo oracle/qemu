@@ -260,7 +260,7 @@ Requires: %{name}-block-ssh = %{epoch}:%{version}-%{release}     \
 Summary: QEMU is a machine emulator and virtualizer
 Name: qemu-kvm
 Version: 7.2.0
-Release: 28%{?dist}
+Release: 29%{?dist}
 Epoch: 30
 License: GPLv2+ and LGPLv2+ and BSD
 Group: Development/Tools
@@ -1712,6 +1712,23 @@ getent passwd qemu >/dev/null || \
 %endif
 
 %changelog
+* Fri Oct 24 2025 Mark Kanda <mark.kanda@oracle.com> - 7.2.0-29.el9
+- hw/core/machine.c: Add vhost-scsi-pci num_queues = 1 to hw_compat_7_2_exadata (Greg Jumper) [Orabug: 38544462]
+- target/i386/kvm: account blackout downtime for kvm-clock and guest TSC (Dongli Zhang) [Orabug: 38307402]
+- cpus: resume hotplugged vCPU only when the guest is running (Dongli Zhang) [Orabug: 38307402]
+- system/qdev-monitor: move drain_call_rcu call under if (!dev) in qmp_device_add() (Dmitrii Gavrilov) [Orabug: 38298220]
+- acpi: pcihp: allow repeating hot-unplug requests (Igor Mammedov) [Orabug: 38257990]
+- hw/usb/hcd-uhci: don't assert for SETUP to non-0 endpoint (Peter Maydell) [Orabug: 37517799] {CVE-2024-8354}
+- target/i386: Introduce GraniteRapids-v2 model (Tao Su) [Orabug: 38330786]
+- target/i386: Add AVX512 state when AVX10 is supported (Tao Su) [Orabug: 38330786]
+- target/i386: Add feature dependencies for AVX10 (Tao Su) [Orabug: 38330786]
+- target/i386: add CPUID.24 features for AVX10 (Tao Su) [Orabug: 38330786]
+- target/i386: add AVX10 feature and AVX10 version property (Tao Su) [Orabug: 38330786]
+- target/i386: return bool from x86_cpu_filter_features (Paolo Bonzini) [Orabug: 38330786]
+- target/i386: do not rely on ExtSaveArea for accelerator-supported XCR0 bits (Paolo Bonzini) [Orabug: 38330786]
+- target/i386: Call accel-agnostic x86_cpu_get_supported_cpuid() (Philippe Mathieu-Daudé) [Orabug: 38330786]
+- target/i386: Add new CPU model GraniteRapids (Tao Su) [Orabug: 38330786]
+
 * Tue Sep 9 2025 Mark Kanda <mark.kanda@oracle.com> - 7.2.0-28.el9
 - hw/i386: Add an exadata machine (Joao Martins) [Orabug: 38408711]
 - arm/kvm: add support for MTE (Cornelia Huck)
