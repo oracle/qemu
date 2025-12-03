@@ -60,6 +60,7 @@
 #include "migration/snapshot.h"
 #include "migration/misc.h"
 #include "migration/migration.h"
+#include "migration/multifd.h"
 
 #ifdef CONFIG_SPICE
 #include <spice/enums.h>
@@ -306,6 +307,8 @@ void hmp_info_migrate(Monitor *mon, const QDict *qdict)
             monitor_printf(mon, "cache digests: %" PRIu64 "\n",
                            info->ram->cache_digests);
         }
+        monitor_printf(mon, "pages to scan: %" PRIu64 "\n",
+                           (uint64_t)multifd_ram_pages_per_work_count());
     }
 
     if (info->has_disk) {

@@ -2546,13 +2546,12 @@ static void postcopy_preempt_reset_channel(RAMState *rs)
  */
 static int ram_save_host_page(RAMState *rs, PageSearchStatus *pss)
 {
-    bool page_dirty;
-    int tmppages, pages = 0;
+    int pages = 0;
     size_t pagesize_bits =
         qemu_ram_pagesize(pss->block) >> TARGET_PAGE_BITS;
-    unsigned long hostpage_boundary =
-        QEMU_ALIGN_UP(pss->page + 1, pagesize_bits);
     unsigned long start_page = pss->page;
+    /* Max number of pages to scan for contiguous dirty region */
+    uint64_t pages_to_scan = 0;
     int res;
 
     if (migrate_ram_is_ignored(pss->block)) {
@@ -2564,41 +2563,114 @@ static int ram_save_host_page(RAMState *rs, PageSearchStatus *pss)
         postcopy_preempt_choose_channel(rs, pss);
     }
 
+    /*
+     * Substract the pss->page that is currently dirty.
+     * When hashing is disabled or not available, the multifd_ram_page_count()
+     * is returned when calling multifd_ram_pages_per_work_count() for
+     * compatibility.
+     */
+    pages_to_scan = multifd_ram_pages_per_work_count() - 1;
+
     do {
+        unsigned long hostpage_boundary;
+
         if (postcopy_needs_preempt(rs, pss)) {
             postcopy_do_preempt(rs, pss);
             break;
         }
+        if (test_bit(pss->page, pss->block->bmap)) {
+            /* Contiguous dirty pages starting from the pss->page. */
+            uint64_t contig_pages;
+            /* Total pages dirty to clear and send (1 + contig_pages) */
+            uint64_t total_pages;
+            uint64_t cur_pages;
 
-        page_dirty = migration_bitmap_clear_dirty(rs, pss->block, pss->page);
+            if (offset_in_ramblock(pss->block,
+                                   ((ram_addr_t)(pss->page + pages_to_scan))
+                                   << TARGET_PAGE_BITS)) {
+                /*
+                 * TODO: evaluate if it is more efficient to move pss->block->bmap when
+                 * when scanning while taking into account that the whole host page will
+                 * be dirty for RAM block.
+                 */
+                /* Find zero bit starting from pss->page + 1 */
+                uint64_t page_zero_start =
+                    find_next_zero_bit(pss->block->bmap, pss->page + 1 +
+                                       pages_to_scan, pss->page + 1);
+                if (page_zero_start < pss->page + 1 + pages_to_scan) {
+                    /* Zero bit found in range. */
+                    contig_pages = page_zero_start - (pss->page + 1);
+                } else {
+                    /* All pages in range are dirty. */
+                    contig_pages = pages_to_scan;
+                }
+            } else {
+                /*
+                 * Since the end of region to scan is out of bounds of current block,
+                 * clear and send one page only.
+                 */
+                contig_pages = 0;
+            }
 
-        /* Check the pages is dirty and if it is send it */
-        if (page_dirty) {
-            tmppages = migration_ops->ram_save_target_page(rs, pss);
-            if (tmppages >= 0) {
+            total_pages = contig_pages + 1;
+
+            /* Clear the whole dirty region at once. */
+            migration_clear_memory_region_dirty_bitmap_range(pss->block, pss->page, total_pages);
+            bitmap_clear(pss->block->bmap, pss->page, total_pages);
+
+            /*
+             * Send pages starting with first dirty until the end of contiguous region
+             * or the number of pages to scan.
+             */
+            for (cur_pages = 0; cur_pages < total_pages; cur_pages++, pss->page++) {
+                int tmppages = migration_ops->ram_save_target_page(rs, pss);
+
+                if (tmppages < 0) {
+                    return tmppages;
+                }
+                if ((INT_MAX - pages) <  tmppages) {
+                    return -1;
+                }
                 pages += tmppages;
                 /*
                  * Allow rate limiting to happen in the middle of huge pages if
                  * something is sent in the current iteration.
                  */
-                if (pagesize_bits > 1 && tmppages > 0) {
+                if (pagesize_bits > 1 && (pages % 256 == 0) && tmppages > 0) {
                     migration_rate_limit();
                 }
             }
-        } else {
-            tmppages = 0;
+
+            rs->migration_dirty_pages -= total_pages;
+
+            if (contig_pages) {
+                /* Recalculate the last page sent hostpage_boundary */
+                hostpage_boundary =
+                    QEMU_ALIGN_UP(pss->page, pagesize_bits);
+
+                pss->page = MIN(pss->page, hostpage_boundary);
+
+                break;
+            }
+
+            /*
+             * If there was no contiguous region withing pages_to_scan or
+             * the pages_to_scan was out of block bounds and we sent only
+             * on page, continue looking for next dirty.
+             */
         }
 
-        if (tmppages < 0) {
-            return tmppages;
-        }
+        hostpage_boundary =
+            QEMU_ALIGN_UP(pss->page + 1, pagesize_bits);
 
         pss->page = migration_bitmap_find_dirty(rs, pss->block, pss->page);
-    } while ((pss->page < hostpage_boundary) &&
-             offset_in_ramblock(pss->block,
-                                ((ram_addr_t)pss->page) << TARGET_PAGE_BITS));
-    /* The offset we leave with is the min boundary of host page and block */
-    pss->page = MIN(pss->page, hostpage_boundary);
+        if (pss->page >= hostpage_boundary ||
+            !offset_in_ramblock(pss->block,
+                                ((ram_addr_t)pss->page) << TARGET_PAGE_BITS)) {
+            pss->page = MIN(pss->page, hostpage_boundary);
+            break;
+        }
+    } while (true);
 
     /*
      * When with postcopy preempt mode, flush the data as soon as possible for
