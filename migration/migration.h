@@ -48,6 +48,16 @@ typedef struct ThreadPool ThreadPool;
  */
 #define CLEAR_BITMAP_SHIFT_MAX            31
 
+/*
+ * The minimum number of scan_pages is 128, same as migrate_pages_count().
+ * This is done for compatibility with QEMU version without hashing or when
+ * hashing is not used. For exadata machine "pc-q35-7.2-exadata" the default is 2048.
+ * The maximum number is chosen arbitrary and may change when
+ * more experemintal data will be available.
+ */
+#define DEFAULT_MIGRATE_SCAN_PAGES 128
+#define MAX_MIGRATE_SCAN_PAGES 64000
+
 /* This is an abstraction of a "temp huge page" for postcopy's purpose */
 typedef struct {
     /*
@@ -589,4 +599,5 @@ void migrate_protocol_allow_multi_channels(bool allow);
 int migration_stop_vm(RunState state);
 ZeroPageDetection migrate_zero_page_detection(void);
 
+uint32_t migrate_scan_pages(void);
 #endif

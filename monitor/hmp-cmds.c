@@ -59,6 +59,7 @@
 #include "hw/intc/intc.h"
 #include "migration/snapshot.h"
 #include "migration/misc.h"
+#include "migration/migration.h"
 
 #ifdef CONFIG_SPICE
 #include <spice/enums.h>
@@ -516,6 +517,10 @@ void hmp_info_migrate_parameters(Monitor *mon, const QDict *qdict)
         monitor_printf(mon, "%s: %s\n",
             MigrationParameter_str(MIGRATION_PARAMETER_MIGRATE_HASH_ALGO),
             params->migrate_hash_algo);
+        assert(params->has_migrate_scan_pages);
+        monitor_printf(mon, "%s: %u\n",
+            MigrationParameter_str(MIGRATION_PARAMETER_MIGRATE_SCAN_PAGES),
+            params->migrate_scan_pages);
 
         if (params->has_block_bitmap_mapping) {
             const BitmapMigrationNodeAliasList *bmnal;
@@ -1220,6 +1225,7 @@ void hmp_migrate_set_parameter(Monitor *mon, const QDict *qdict)
     MigrateSetParameters *p = g_new0(MigrateSetParameters, 1);
     uint64_t valuebw = 0;
     uint64_t cache_size;
+    uint32_t scan_pages = 0;
     Error *err = NULL;
     int val, ret;
 
@@ -1384,6 +1390,33 @@ void hmp_migrate_set_parameter(Monitor *mon, const QDict *qdict)
         p->migrate_hash_algo = g_new0(StrOrNull, 1);
         p->migrate_hash_algo->type = QTYPE_QSTRING;
         visit_type_str(v, param, &p->migrate_hash_algo->u.s, &err);
+        break;
+    case MIGRATION_PARAMETER_MIGRATE_SCAN_PAGES:
+        p->has_migrate_scan_pages = true;
+        visit_type_uint32(v, param, &scan_pages, &err);
+        /*
+         * When hashing is disabled, the number of pages is
+         * the default DEFAULT_MIGRATE_SCAN_PAGES.
+         */
+        if (!p->has_migrate_hash_algo && scan_pages != 128) {
+            error_setg(&err, "Invalid number of pages %u in migrate-scan-pages "
+                       "(expected 128 when migration with hashing is disabled)",
+                       scan_pages);
+            break;
+        }
+        /*
+         * When hashing is enabled, the minimum number of scan_pages is 512 since
+         * thats the number of 4K pages in 2MB huge page, the maximum number is
+         * chosen arbitrary and may change when more experemintal data will be available.
+         */
+        if ((scan_pages > MAX_MIGRATE_SCAN_PAGES || scan_pages < 512 ||
+            scan_pages % 512 != 0) && p->has_migrate_hash_algo) {
+            error_setg(&err, "Invalid number of pages %u in migrate-scan-pages "
+                       "(expected between 512 and 64000 and be multiple of 512)",
+                       scan_pages);
+            break;
+        }
+        p->migrate_scan_pages = scan_pages;
         break;
     default:
         assert(0);

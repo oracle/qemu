@@ -336,8 +336,8 @@ static inline uint32_t multifd_ram_pages_per_packet_count(void)
 static inline uint32_t multifd_ram_pages_per_work_count(void)
 {
     if (migrate_use_hash()) {
-        /* TODO: change this when user-defined parameter is available. */
-        return multifd_ram_pages_per_packet_count();
+        return QEMU_ALIGN_UP(MAX(migrate_scan_pages(),
+                             multifd_ram_pages_per_packet_count()), 512);
     }
     return multifd_ram_page_count();
 }

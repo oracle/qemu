@@ -1107,6 +1107,8 @@ MigrationParameters *qmp_query_migrate_parameters(Error **errp)
     params->switchover_limit = s->parameters.switchover_limit;
     params->has_migrate_hash_algo = true;
     params->migrate_hash_algo = s->parameters.migrate_hash_algo;
+    params->has_migrate_scan_pages = true;
+    params->migrate_scan_pages = s->parameters.migrate_scan_pages;
 
     return params;
 }
@@ -1764,6 +1766,23 @@ static bool migrate_params_check(MigrationParameters *params, Error **errp)
         return false;
     }
 
+    /*
+     * The following values are allowed:
+     * DEFAULT_MIGRATE_SCAN_PAGES for when machine type is not "pc-q35-7.2".
+     * 128 or in the range of 512 to MAX_MIGRATE_SCAN_PAGES when hashing is enabled.
+     */
+    if (params->has_migrate_scan_pages &&
+        (params->migrate_scan_pages > MAX_MIGRATE_SCAN_PAGES ||
+        ((params->migrate_scan_pages % 512 != 0 || params->migrate_scan_pages < 512) &&
+        params->migrate_scan_pages != DEFAULT_MIGRATE_SCAN_PAGES))) {
+        error_setg(errp, QERR_INVALID_PARAMETER_VALUE,
+                   "migrate-scan-pages",
+                   "an integer "stringify(DEFAULT_MIGRATE_SCAN_PAGES)""
+                   " or in the range of 512 to "
+                   ""stringify(MAX_MIGRATE_SCAN_PAGES)" and multiple of 512 (except 128)");
+        return false;
+    }
+
     return true;
 }
 
@@ -1876,6 +1895,9 @@ static void migrate_params_test_apply(MigrateSetParameters *params,
         dest->switchover_limit = params->switchover_limit;
     }
 
+    if (params->has_migrate_scan_pages) {
+        dest->migrate_scan_pages = params->migrate_scan_pages;
+    }
 }
 
 static void migrate_params_apply(MigrateSetParameters *params, Error **errp)
@@ -2012,6 +2034,10 @@ static void migrate_params_apply(MigrateSetParameters *params, Error **errp)
         g_free(s->parameters.migrate_hash_algo);
         assert(params->migrate_hash_algo->type == QTYPE_QSTRING);
         s->parameters.migrate_hash_algo = g_strdup(params->migrate_hash_algo->u.s);
+    }
+
+    if (params->has_migrate_scan_pages) {
+        s->parameters.migrate_scan_pages = params->migrate_scan_pages;
     }
 }
 
@@ -3084,6 +3110,13 @@ char* migrate_hash_algo(void)
     MigrationState *s = migrate_get_current();
 
     return s->parameters.migrate_hash_algo;
+}
+
+uint32_t migrate_scan_pages(void)
+{
+    MigrationState *s = migrate_get_current();
+
+    return s->parameters.migrate_scan_pages;
 }
 
 /* migration thread support */
@@ -4809,6 +4842,9 @@ static Property migration_properties[] = {
                        parameters.switchover_limit,
                        DEFAULT_MIGRATE_SET_SWITCHOVER_LIMIT),
     DEFINE_PROP_STRING("x-orcl-migrate-hash-algo", MigrationState, parameters.migrate_hash_algo),
+    DEFINE_PROP_UINT32("x-orcl-migrate-scan-pages", MigrationState,
+                      parameters.migrate_scan_pages,
+                      DEFAULT_MIGRATE_SCAN_PAGES),
 
     /* Migration capabilities */
     DEFINE_PROP_MIG_CAP("x-xbzrle", MIGRATION_CAPABILITY_XBZRLE),
@@ -4912,6 +4948,7 @@ static void migration_instance_init(Object *obj)
     params->has_zero_page_detection = true;
     params->has_switchover_limit = true;
     params->has_migrate_hash_algo = true;
+    params->has_migrate_scan_pages = true;
 
     qemu_sem_init(&ms->postcopy_pause_sem, 0);
     qemu_sem_init(&ms->postcopy_pause_rp_sem, 0);

@@ -840,6 +840,9 @@
 #
 # @migrate-hash-algo: Use hashing algorithm (string). (Since 7.2)
 #
+# @migrate-scan-pages: Number of pages to scan contigious pages at a time and queue for
+#                      multifd thread. (Since 7.2).
+#
 # Features:
 # @unstable: Member @x-checkpoint-delay is experimental.
 #
@@ -863,7 +866,8 @@
            'block-bitmap-mapping',
            'zero-page-detection',
            'switchover-limit',
-           'migrate-hash-algo'] }
+           'migrate-hash-algo',
+           'migrate-scan-pages'] }
 
 ##
 # @MigrateSetParameters:
@@ -1028,6 +1032,9 @@
 #
 # @migrate-hash-algo: Use hashing algorithm (string). (Since 7.2)
 #
+# @migrate-scan-pages: Number of pages to scan contigious pages at a time and queue for
+#                      multifd thread. (Since 7.2).
+#
 # Features:
 # @unstable: Member @x-checkpoint-delay is experimental.
 #
@@ -1067,7 +1074,8 @@
             '*block-bitmap-mapping': [ 'BitmapMigrationNodeAlias' ],
             '*zero-page-detection': 'ZeroPageDetection',
             '*switchover-limit': 'uint64',
-            '*migrate-hash-algo': 'StrOrNull'} }
+            '*migrate-hash-algo': 'StrOrNull',
+            '*migrate-scan-pages': 'uint32'} }
 
 
 ##
@@ -1253,6 +1261,9 @@
 #
 # @migrate-hash-algo: Use hashing algorithm (string). (Since 7.2)
 #
+# @migrate-scan-pages: Number of pages to scan contigious pages at a time and queue for
+#                      multifd thread. (Since 7.2).
+#
 # Features:
 # @unstable: Member @x-checkpoint-delay is experimental.
 #
@@ -1290,7 +1301,8 @@
             '*block-bitmap-mapping': [ 'BitmapMigrationNodeAlias' ],
             '*zero-page-detection': 'ZeroPageDetection',
             '*switchover-limit': 'uint64',
-            '*migrate-hash-algo': 'str' } }
+            '*migrate-hash-algo': 'str',
+            '*migrate-scan-pages': 'uint32' } }
 
 ##
 # @query-migrate-parameters:
