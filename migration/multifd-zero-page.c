@@ -85,6 +85,8 @@ void multifd_send_zero_page_detect(MultiFDSendParams *p)
     RAMBlock *rb = pages->block;
     int i = 0;
     int j = pages->num - 1;
+    pages->skipped_num = 0;
+    pages->normal_num = 0;
 
     if (!multifd_zero_page_enabled()) {
         pages->normal_num = pages->num;

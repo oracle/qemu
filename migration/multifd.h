@@ -298,11 +298,6 @@ static inline uint32_t multifd_ram_page_size(void)
     return qemu_target_page_size();
 }
 
-static inline uint32_t multifd_ram_page_count(void)
-{
-    return MULTIFD_PACKET_SIZE / qemu_target_page_size();
-}
-
 void multifd_ram_save_setup(void);
 void multifd_ram_save_cleanup(void);
 
@@ -312,5 +307,39 @@ void multifd_device_state_send_setup(void);
 void multifd_device_state_send_cleanup(void);
 
 void multifd_device_state_send_prepare(MultiFDSendParams *p);
+
+static inline uint32_t multifd_ram_page_count(void)
+{
+    return MULTIFD_PACKET_SIZE / qemu_target_page_size();
+}
+
+/*
+ * For compatibility, use multifd_ram_page_count() if hashing is not used.
+ */
+static inline uint32_t multifd_ram_iovs_per_packet_count(void)
+{
+    if (migrate_use_hash()) {
+        return IOV_MAX;
+    }
+    /* One iov[0] is used for header packet. */
+    return multifd_ram_page_count() + 1;
+}
+
+static inline uint32_t multifd_ram_pages_per_packet_count(void)
+{
+    if (migrate_use_hash()) {
+        return multifd_ram_iovs_per_packet_count() - 1;
+    }
+    return multifd_ram_page_count();
+}
+
+static inline uint32_t multifd_ram_pages_per_work_count(void)
+{
+    if (migrate_use_hash()) {
+        /* TODO: change this when user-defined parameter is available. */
+        return multifd_ram_pages_per_packet_count();
+    }
+    return multifd_ram_page_count();
+}
 
 #endif

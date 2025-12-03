@@ -88,7 +88,11 @@ static MultiFDSendData *multifd_ram_send;
 
 static void multifd_ram_payload_alloc(MultiFDPages_t *pages)
 {
-    uint32_t page_count = multifd_ram_page_count();
+    /*
+     * This will change when we stop exchanging the "offset" pointer
+     * with main thread.
+     */
+    uint32_t page_count = multifd_ram_pages_per_work_count();
     uint32_t page_size = multifd_ram_page_size();
 
     pages->offset = g_new0(ram_addr_t, page_count);
@@ -103,7 +107,11 @@ static void multifd_ram_payload_alloc(MultiFDPages_t *pages)
 
 static void multifd_ram_payload_free(MultiFDPages_t *pages)
 {
-    uint32_t page_count = multifd_ram_page_count();
+    /*
+     * This will change when we stop exchanging the "offset" pointer
+     * with main thread.
+     */
+    uint32_t page_count = multifd_ram_pages_per_work_count();
 
     g_clear_pointer(&pages->offset, g_free);
     if (migrate_use_hash()) {
@@ -423,7 +431,7 @@ static void multifd_ram_fill_packet(MultiFDSendParams *p)
     MultiFDPages_t *pages = &p->data->u.ram;
     uint32_t zero_num = (pages->num - pages->normal_num) - pages->skipped_num;
 
-    packet->pages_alloc = cpu_to_be32(multifd_ram_page_count());
+    packet->pages_alloc = cpu_to_be32(multifd_ram_pages_per_packet_count());
     packet->normal_pages = cpu_to_be32(pages->normal_num);
     packet->zero_pages = cpu_to_be32(zero_num);
     packet->skipped_pages = cpu_to_be32(pages->skipped_num);
@@ -479,7 +487,7 @@ void multifd_send_fill_packet(MultiFDSendParams *p)
 static int multifd_ram_unfill_packet(MultiFDRecvParams *p, Error **errp)
 {
     MultiFDPacket_t *packet = p->packet;
-    uint32_t page_count = multifd_ram_page_count();
+    uint32_t page_count = multifd_ram_pages_per_packet_count();
     uint32_t page_size = multifd_ram_page_size();
     uint32_t pages_per_packet = be32_to_cpu(packet->pages_alloc);
     int i;
@@ -719,7 +727,7 @@ static inline bool multifd_queue_empty(MultiFDPages_t *pages)
 
 static inline bool multifd_queue_full(MultiFDPages_t *pages)
 {
-    return pages->num == multifd_ram_page_count();
+    return pages->num == multifd_ram_pages_per_work_count();
 }
 
 static inline void multifd_enqueue(MultiFDPages_t *pages, ram_addr_t offset)
@@ -1006,6 +1014,54 @@ int multifd_send_sync_main(QEMUFile *f)
     return 0;
 }
 
+static size_t multifd_send_pkt(MultiFDSendParams *p, uint32_t flags, uint32_t pages_pkt)
+{
+    int write_flags_masked = 0;
+    p->flags = flags;
+    p->iovs_num = 0;
+    bool is_device_state = multifd_payload_device_state(p->data);
+    size_t total_size = 0;
+    Error *local_err = NULL;
+    int ret = 0;
+
+    if (is_device_state) {
+        multifd_device_state_send_prepare(p);
+
+        /* Device state packets cannot be sent via zerocopy */
+        write_flags_masked |= QIO_CHANNEL_WRITE_FLAG_ZERO_COPY;
+    } else {
+        p->data->u.ram.num = pages_pkt;
+        ret = multifd_send_state->ops->send_prepare(p, &local_err);
+        if (ret != 0) {
+            return ret;
+        }
+
+        /* Hash cache packets cannot be sent via zerocopy */
+        if (migrate_use_hash()) {
+            write_flags_masked |= QIO_CHANNEL_WRITE_FLAG_ZERO_COPY;
+        }
+    }
+
+    /*
+     * The packet header in the zerocopy RAM case is accounted for
+     * in nocomp_send_prepare() - where it is actually
+     * being sent.
+     */
+    total_size = iov_size(p->iov, p->iovs_num);
+    stat64_add(&ram_counters.multifd_bytes, total_size);
+
+    ret = qio_channel_writev_full_all(p->c, p->iov, p->iovs_num,
+                                      NULL, 0,
+                                      p->write_flags & ~write_flags_masked,
+                                      &local_err);
+    if (ret != 0) {
+        return ret;
+    }
+
+    p->next_packet_size = 0;
+    return total_size;
+}
+
 static void *multifd_send_thread(void *opaque)
 {
     MultiFDSendParams *p = opaque;
@@ -1019,6 +1075,7 @@ static void *multifd_send_thread(void *opaque)
         ret = -1;
         goto out;
     }
+    uint32_t max_pages_per_pkt = multifd_ram_pages_per_packet_count();
 
     while (true) {
         qemu_sem_post(&multifd_send_state->channels_ready);
@@ -1033,49 +1090,29 @@ static void *multifd_send_thread(void *opaque)
          * qatomic_store_release() in multifd_send().
          */
         if (qatomic_load_acquire(&p->pending_job)) {
-            bool is_device_state = multifd_payload_device_state(p->data);
-            size_t total_size;
-            int write_flags_masked = 0;
+            uint32_t pages_total = p->data->u.ram.num;
+            uint32_t pages_processed = 0;
+            uint64_t *pages_offset = p->data->u.ram.offset;
+            /* Preserve flags for each packet in the loop below. */
+            uint32_t flags = p->flags;
+            /* Pages in current packet. */
+            uint32_t pages_pkt = 0;
 
-            p->flags = 0;
-            p->iovs_num = 0;
             assert(!multifd_payload_empty(p->data));
 
-            if (is_device_state) {
-                multifd_device_state_send_prepare(p);
-
-                /* Device state packets cannot be sent via zerocopy */
-                write_flags_masked |= QIO_CHANNEL_WRITE_FLAG_ZERO_COPY;
-            } else {
-                ret = multifd_send_state->ops->send_prepare(p, &local_err);
-                if (ret != 0) {
+            while (pages_total > pages_processed) {
+                pages_pkt = MIN(max_pages_per_pkt, pages_total - pages_processed);
+                ret = multifd_send_pkt(p, flags, pages_pkt);
+                if (ret < 0) {
+                    p->data->u.ram.offset = pages_offset;
+                    qatomic_store_release(&p->pending_job, false);
                     break;
                 }
-
-                /* Hash cache packets cannot be sent via zerocopy */
-                if (migrate_use_hash()) {
-                    write_flags_masked |= QIO_CHANNEL_WRITE_FLAG_ZERO_COPY;
-                }
+                pages_processed += pages_pkt;
+                p->data->u.ram.offset += pages_pkt;
             }
 
-            /*
-             * The packet header in the zerocopy RAM case is accounted for
-             * in nocomp_send_prepare() - where it is actually
-             * being sent.
-             */
-            total_size = iov_size(p->iov, p->iovs_num);
-
-            ret = qio_channel_writev_full_all(p->c, p->iov, p->iovs_num,
-                                              NULL, 0,
-                                              p->write_flags & ~write_flags_masked,
-                                              &local_err);
-            if (ret != 0) {
-                break;
-            }
-
-            stat64_add(&ram_counters.multifd_bytes, total_size);
-
-            p->next_packet_size = 0;
+            p->data->u.ram.offset = pages_offset;
             multifd_send_data_clear(p->data);
 
             /*
@@ -1101,6 +1138,7 @@ static void *multifd_send_thread(void *opaque)
             /* p->next_packet_size will always be zero for a SYNC packet */
             stat64_add(&ram_counters.multifd_bytes, p->packet_len);
             qatomic_set(&p->pending_sync, false);
+            p->flags = 0;
             qemu_sem_post(&p->sem_sync);
         }
     }
@@ -1238,7 +1276,7 @@ bool multifd_send_setup(void)
     MigrationState *s = migrate_get_current();
     Error *local_err = NULL;
     int thread_count, ret = 0;
-    uint32_t page_count = multifd_ram_page_count();
+    uint32_t pages_per_pkt = multifd_ram_pages_per_packet_count();
     uint8_t i;
 
     if (!migrate_use_multifd()) {
@@ -1265,14 +1303,14 @@ bool multifd_send_setup(void)
         p->id = i;
         p->data = multifd_send_data_alloc();
         p->packet_len = sizeof(MultiFDPacket_t)
-                      + sizeof(uint64_t) * page_count;
+                      + sizeof(uint64_t) * pages_per_pkt;
         p->packet = g_malloc0(p->packet_len);
         p->packet_device_state = g_malloc0(sizeof(*p->packet_device_state));
         p->packet_device_state->hdr.magic = cpu_to_be32(MULTIFD_MAGIC);
         p->packet_device_state->hdr.version = cpu_to_be32(MULTIFD_VERSION);
         p->name = g_strdup_printf("multifdsend_%d", i);
         /* We need one extra place for the packet header */
-        p->iov = g_new0(struct iovec, page_count + 1);
+        p->iov = g_new0(struct iovec, multifd_ram_iovs_per_packet_count());
         
         p->write_flags = 0;
         socket_send_channel_create(multifd_new_send_channel_async, p);
@@ -1611,7 +1649,7 @@ static void *multifd_recv_thread(void *opaque)
 int multifd_recv_setup(Error **errp)
 {
     int thread_count;
-    uint32_t page_count = multifd_ram_page_count();
+    uint32_t pages_per_pkt = multifd_ram_pages_per_packet_count();
     uint8_t i;
 
     /*
@@ -1641,13 +1679,13 @@ int multifd_recv_setup(Error **errp)
         p->quit = false;
         p->id = i;
         p->packet_len = sizeof(MultiFDPacket_t)
-                      + sizeof(uint64_t) * page_count;
+                      + sizeof(uint64_t) * pages_per_pkt;
         p->packet = g_malloc0(p->packet_len);
         p->packet_dev_state = g_malloc0(sizeof(*p->packet_dev_state));
         p->name = g_strdup_printf("multifdrecv_%d", i);
-        p->iov = g_new0(struct iovec, page_count);
-        p->normal = g_new0(ram_addr_t, page_count);
-        p->zero = g_new0(ram_addr_t, page_count);
+        p->iov = g_new0(struct iovec, multifd_ram_iovs_per_packet_count());
+        p->normal = g_new0(ram_addr_t, pages_per_pkt);
+        p->zero = g_new0(ram_addr_t, pages_per_pkt);
     }
 
     for (i = 0; i < thread_count; i++) {
