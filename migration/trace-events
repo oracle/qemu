@@ -380,3 +380,4 @@ migration_block_state_pending(uint64_t pending) "Enter save live pending  %" PRI
 # page_cache.c
 migration_pagecache_init(int64_t max_num_items) "Setting cache buckets to %" PRId64
 migration_pagecache_insert(void) "Error allocating page"
+hash_rate(uint64_t misses, uint64_t hits, uint64_t total) "Stats per ms: misses %" PRIu64 ", hits: %" PRIu64 ", total: %" PRIu64

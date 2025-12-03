@@ -1219,6 +1219,13 @@ static void calc_dirty_pages_factor(RAMState *rs, uint64_t end_ts)
                                  cache_hash_nsec_per_hit(hash_cache),
                                  cache_hash_nsec_per_miss(hash_cache));
 
+    uint64_t misses_interval = cache_misses - rs->prev_cache_misses;
+    uint64_t hits_interval = cache_hits - rs->prev_cache_hits;
+    if (interval) {
+        trace_hash_rate(misses_interval / interval,
+                        hits_interval / interval,
+                        (misses_interval + hits_interval) / interval);
+    }
     rs->prev_cache_misses = cache_misses;
     rs->prev_cache_hits = cache_hits;
     rs->prev_dirty_pages_factor_calc = end_ts;
@@ -2813,6 +2820,8 @@ static void ram_state_reset(RAMState *rs)
     rs->xbzrle_enabled = false;
     postcopy_preempt_reset(rs);
     rs->postcopy_channel = RAM_CHANNEL_PRECOPY;
+    rs->prev_cache_misses = 0;
+    rs->prev_cache_hits = 0;
 }
 
 #define MAX_WAIT 50 /* ms, half buffered_file limit */
