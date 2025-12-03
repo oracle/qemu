@@ -260,7 +260,7 @@ Requires: %{name}-block-ssh = %{epoch}:%{version}-%{release}     \
 Summary: QEMU is a machine emulator and virtualizer
 Name: qemu-kvm
 Version: 7.2.0
-Release: 29%{?dist}
+Release: 30%{?dist}
 Epoch: 30
 License: GPLv2+ and LGPLv2+ and BSD
 Group: Development/Tools
@@ -1712,6 +1712,13 @@ getent passwd qemu >/dev/null || \
 %endif
 
 %changelog
+* Wed Dec 3 2025 Karl Heubaum <karl.heubaum@oracle.com> - 7.2.0-30.el9
+- live migration: scan and clear contiguous dirty pages regions of ram (Elena Ufimtseva) [Orabug: 38388170]
+- migration: add hash_rate trace point (Elena Ufimtseva) [Orabug: 38388170]
+- migration: add parameter to specify max number of contiguous pages (Elena Ufimtseva) [Orabug: 38388170]
+- multifd: send more pages then IOV_MAX (Elena Ufimtseva) [Orabug: 38388170]
+- io: fix use after free in websocket handshake code (Daniel P. Berrangé) [Orabug: 38687831] {CVE-2025-11234}
+
 * Fri Oct 24 2025 Mark Kanda <mark.kanda@oracle.com> - 7.2.0-29.el9
 - hw/core/machine.c: Add vhost-scsi-pci num_queues = 1 to hw_compat_7_2_exadata (Greg Jumper) [Orabug: 38544462]
 - target/i386/kvm: account blackout downtime for kvm-clock and guest TSC (Dongli Zhang) [Orabug: 38307402]
