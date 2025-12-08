@@ -1014,7 +1014,8 @@ int multifd_send_sync_main(QEMUFile *f)
     return 0;
 }
 
-static size_t multifd_send_pkt(MultiFDSendParams *p, uint32_t flags, uint32_t pages_pkt)
+static int multifd_send_pkt(MultiFDSendParams *p, uint32_t flags,
+                               uint32_t pages_pkt, Error **errp)
 {
     int write_flags_masked = 0;
     p->flags = flags;
@@ -1033,6 +1034,9 @@ static size_t multifd_send_pkt(MultiFDSendParams *p, uint32_t flags, uint32_t pa
         p->data->u.ram.num = pages_pkt;
         ret = multifd_send_state->ops->send_prepare(p, &local_err);
         if (ret != 0) {
+            if (local_err) {
+                error_propagate(errp, local_err);
+            }
             return ret;
         }
 
@@ -1055,11 +1059,14 @@ static size_t multifd_send_pkt(MultiFDSendParams *p, uint32_t flags, uint32_t pa
                                       p->write_flags & ~write_flags_masked,
                                       &local_err);
     if (ret != 0) {
+        if (local_err) {
+            error_propagate(errp, local_err);
+        }
         return ret;
     }
 
     p->next_packet_size = 0;
-    return total_size;
+    return ret;
 }
 
 static void *multifd_send_thread(void *opaque)
@@ -1102,7 +1109,7 @@ static void *multifd_send_thread(void *opaque)
 
             while (pages_total > pages_processed) {
                 pages_pkt = MIN(max_pages_per_pkt, pages_total - pages_processed);
-                ret = multifd_send_pkt(p, flags, pages_pkt);
+                ret = multifd_send_pkt(p, flags, pages_pkt, &local_err);
                 if (ret < 0) {
                     p->data->u.ram.offset = pages_offset;
                     qatomic_store_release(&p->pending_job, false);
