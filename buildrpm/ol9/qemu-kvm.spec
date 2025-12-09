@@ -261,7 +261,7 @@ Summary: QEMU is a machine emulator and virtualizer
 Name: qemu-kvm
 Version: 7.2.0
 Release: 30%{?dist}
-Epoch: 30
+Epoch: 31
 License: GPLv2+ and LGPLv2+ and BSD
 Group: Development/Tools
 URL: http://www.qemu.org/
@@ -1712,6 +1712,9 @@ getent passwd qemu >/dev/null || \
 %endif
 
 %changelog
+* Tue Dec 9 2025 Karl Heubaum <karl.heubaum@oracle.com> - 7.2.0-31.el9
+- migration: Fix the cancellation/error path (Elena Ufimtseva) [Orabug: 38739293]
+
 * Wed Dec 3 2025 Karl Heubaum <karl.heubaum@oracle.com> - 7.2.0-30.el9
 - live migration: scan and clear contiguous dirty pages regions of ram (Elena Ufimtseva) [Orabug: 38388170]
 - migration: add hash_rate trace point (Elena Ufimtseva) [Orabug: 38388170]
