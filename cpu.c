@@ -34,6 +34,7 @@
 #include "sysemu/tcg.h"
 #include "sysemu/kvm.h"
 #include "sysemu/replay.h"
+#include "sysemu/runstate.h"
 #include "exec/cpu-common.h"
 #include "exec/exec-all.h"
 #include "exec/translate-all.h"
@@ -181,6 +182,16 @@ void cpu_exec_unrealizefn(CPUState *cpu)
     }
 
     cpu_list_remove(cpu);
+}
+
+void cpu_resume_running(CPUState *cpu)
+{
+#ifndef CONFIG_USER_ONLY
+    if (!runstate_is_running()) {
+        return;
+    }
+#endif
+    cpu_resume(cpu);
 }
 
 /*
