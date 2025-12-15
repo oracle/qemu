@@ -1167,6 +1167,8 @@ mkdir -p %{build_dir}
     %global block_drivers_rw_list %{block_drivers_rw_list},curl
 %endif
 
+%global isal_major %(readelf -d %{_libdir}/libisal_crypto.so | grep SONAME | sed 's/.*\.so\.\([0-9]\+\)].*/\1/')
+
 pushd %{build_dir}
 
 ../configure \
@@ -1278,7 +1280,8 @@ pushd %{build_dir}
     %{moduleupgradeflags} \
     %{slirpflags} \
     %{vfiouserserfverflags} \
-    %{vduseblkexportflags}
+    %{vduseblkexportflags} \
+    --isal-major=%{isal_major}
 
 %make_build
 
@@ -1710,6 +1713,9 @@ getent passwd qemu >/dev/null || \
 %endif
 
 %changelog
+* Wed Jan 14 2026 Elena Ufimtseva <elena.ufimtseva@oracle.com> - 7.2.0-32.el8
+- migration: find the major version (ABI) of the libisal_crypto library to pass to configure
+
 * Mon Apr 10 2023 Mark Kanda <mark.kanda@oracle.com>
 - spec: allow have_tools 0 (Steve Sistare)
 - spec: allow no block device modules (Steve Sistare)

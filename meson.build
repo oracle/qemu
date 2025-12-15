@@ -555,6 +555,23 @@ if have_system or have_tools
 endif
 zlib = dependency('zlib', required: true, kwargs: static_kwargs)
 
+dl_lib = cc.find_library('dl', required: false)
+
+isal_major = get_option('isal_major')
+if isal_major != '' and isal_major != 'auto'
+  isal_dep = dependency('libisal_crypto', method: 'pkg-config', required: false)
+  config_host_data.set('CONFIG_ISAL', isal_dep.found())
+  if isal_dep.found()
+    isal_version = isal_dep.version()
+    message('Found isa-l_crypto version: ' + isal_version)
+    isal_file_name = isal_dep.name() + host_dsosuf + '.' + isal_major
+    config_host_data.set_quoted('ISAL_LIB_FILE_NAME', isal_file_name)
+    message('ISAL library' + isal_file_name)
+  endif
+else
+  config_host_data.set('CONFIG_ISAL', false)
+endif
+
 libaio = not_found
 if not get_option('linux_aio').auto() or have_block
   libaio = cc.find_library('aio', has_headers: ['libaio.h'],
@@ -3319,8 +3336,14 @@ io = declare_dependency(link_whole: libio, dependencies: [crypto, qom])
 libmigration = static_library('migration', sources: migration_files + genh,
                               name_suffix: 'fa',
                               build_by_default: false)
+have_isal = config_host_data.get('CONFIG_ISAL')
+if have_isal
+  migration_deps = [zlib, qom, io, dl_lib]
+else
+  migration_deps = [zlib, qom, io]
+endif
 migration = declare_dependency(link_with: libmigration,
-                               dependencies: [zlib, qom, io])
+                               dependencies: migration_deps)
 softmmu_ss.add(migration)
 
 block_ss = block_ss.apply(config_host, strict: false)

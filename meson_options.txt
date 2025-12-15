@@ -325,3 +325,5 @@ option('profiler', type: 'boolean', value: false,
        description: 'profiler support')
 option('slirp_smbd', type : 'feature', value : 'auto',
        description: 'use smbd (at path --smbd=*) in slirp networking')
+option('isal_major', type: 'string', value: 'auto',
+       description: 'isa-l crypto library major version')

@@ -1194,6 +1194,8 @@ mkdir -p %{build_dir}
     %global block_drivers_rw_list %{block_drivers_rw_list},curl
 %endif
 
+%global isal_major %(readelf -d %{_libdir}/libisal_crypto.so | grep SONAME | sed 's/.*\.so\.\([0-9]\+\)].*/\1/')
+
 pushd %{build_dir}
 
 ../configure \
@@ -1305,7 +1307,8 @@ pushd %{build_dir}
     %{moduleupgradeflags} \
     %{slirpflags} \
     %{vfiouserserfverflags} \
-    %{vduseblkexportflags}
+    %{vduseblkexportflags} \
+    --isal-major=%{isal_major}
 
 %make_build
 
@@ -1811,6 +1814,9 @@ getent passwd qemu >/dev/null || \
 %endif
 
 %changelog
+* Wed Jan 14 2026 Elena Ufimtseva <elena.ufimtseva@oracle.com> - 7.2.0-32.el9
+- migration: find the major version (ABI) of the libisal_crypto library to pass to configure
+
 * Tue Dec 23 2025 Mark Kanda <mark.kanda@oracle.com> - 7.2.0-32.el9
 - spec: Provide aarch64 and mips user static packages (Mark Kanda)
   These packages are for Oracle internal use only (not for external customers)
