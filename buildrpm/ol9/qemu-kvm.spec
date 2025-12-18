@@ -238,6 +238,11 @@
 %global have_qmpregdump 1
 %endif
 
+# Support for static user mode emulation
+%ifarch x86_64
+%global have_user_static 1
+%endif
+
 %global requires_all_modules                                     \
 %if %{have_iscsi}                                                \
 Requires: %{name}-block-iscsi = %{epoch}:%{version}-%{release}   \
@@ -469,6 +474,14 @@ BuildRequires: libslirp-devel
 BuildRequires: liburing-devel
 %endif
 
+%if 0%{?have_user_static}
+BuildRequires:  glibc-static
+BuildRequires:  glib2-static
+BuildRequires:  pcre-static
+BuildRequires:  zlib-static
+BuildRequires:  libstdc++-static
+%endif
+
 Requires: qemu-kvm-core = %{epoch}:%{version}-%{release}
 
 %{requires_all_modules}
@@ -650,6 +663,18 @@ This package provides USB redirection support.
 Summary: QEMU USB host device
 %description -n qemu-kvm-device-usb-host
 This package provides the USB pass through driver for QEMU.
+%endif
+
+%if 0%{?have_user_static}
+%package -n qemu-user-static-aarch64
+Summary: QEMU static user mode emulation for aarch64
+%description -n qemu-user-static-aarch64
+QEMU static user mode emulation for aarch64
+
+%package -n qemu-user-static-mips
+Summary: QEMU static user mode emulation for mips
+%description -n qemu-user-static-mips
+QEMU static user mode emulation for mips
 %endif
 
 %prep
@@ -1303,6 +1328,25 @@ cp -a %{kvm_target}-softmmu/qemu-system-%{kvm_target} qemu-kvm
 
 popd
 
+%if 0%{?have_user_static}
+%global build_dir_static build-static
+mkdir -p %{build_dir_static}
+pushd %{build_dir_static}
+
+../configure \
+    --enable-user \
+    --disable-system \
+    --disable-tools \
+    --static \
+    --enable-tcg \
+    --enable-pie \
+    --target-list="aarch64-linux-user,mips-linux-user,mips64-linux-user, \
+    mips64el-linux-user,mipsel-linux-user,mipsn32-linux-user,mipsn32el-linux-user"
+
+%make_build
+
+popd
+%endif
 
 %install
 
@@ -1506,6 +1550,27 @@ install -m 0755 %{_sourcedir}/qemu_regdump.py %{buildroot}%{python3_sitelib}/sos
 # RPM won't pick up their dependencies.
 chmod -f +x %{buildroot}%{_libdir}/qemu-kvm/block-*.so || true
 
+%if 0%{?have_user_static}
+%global build_archs aarch64 mips mips64 mips64el mipsel mipsn32 mipsn32el
+
+for i in %{build_archs}; do
+    mv %{build_dir_static}/qemu-${i} %{build_dir_static}/qemu-${i}-static
+    install -m 0755 %{build_dir_static}/qemu-${i}-static %{buildroot}%{_bindir}
+done
+
+# Install binfmt
+%global binfmt_dir %{buildroot}%{_exec_prefix}/lib/binfmt.d
+mkdir -p %{binfmt_dir}
+
+for i in %{build_archs}; do
+    ./scripts/qemu-binfmt-conf.sh --systemd ${i} --exportdir %{binfmt_dir} \
+	--qemu-path %{_bindir} --qemu-suffix -static --persistent yes
+done
+
+for i in %{binfmt_dir}/*; do
+    mv $i $(echo $i | sed 's/.conf/-static.conf/')
+done
+%endif
 
 %check
 
@@ -1521,6 +1586,20 @@ getent group qemu >/dev/null || groupadd -g 107 -r qemu
 getent passwd qemu >/dev/null || \
   useradd -r -u 107 -g qemu -G kvm -d / -s /sbin/nologin \
     -c "qemu user" qemu
+
+%if 0%{?have_user_static}
+%post -n qemu-user-static-aarch64
+/bin/systemctl --system try-restart systemd-binfmt.service &>/dev/null || :
+
+%post -n qemu-user-static-mips
+/bin/systemctl --system try-restart systemd-binfmt.service &>/dev/null || :
+
+%postun -n qemu-user-static-aarch64
+/bin/systemctl --system try-restart systemd-binfmt.service &>/dev/null || :
+
+%postun -n qemu-user-static-mips
+/bin/systemctl --system try-restart systemd-binfmt.service &>/dev/null || :
+%endif
 
 %global qemu_kvm_files \
 %{_libexecdir}/qemu-kvm \
@@ -1709,6 +1788,26 @@ getent passwd qemu >/dev/null || \
 %if 0%{?have_usb_host}
 %files -n qemu-kvm-device-usb-host
 %{_libdir}/%{name}/hw-usb-host.so
+%endif
+
+%if 0%{?have_user_static}
+%files -n qemu-user-static-aarch64
+%{_bindir}/qemu-aarch64-static
+%{_exec_prefix}/lib/binfmt.d/qemu-aarch64-static.conf
+
+%files -n qemu-user-static-mips
+%{_bindir}/qemu-mips-static
+%{_bindir}/qemu-mips64-static
+%{_bindir}/qemu-mips64el-static
+%{_bindir}/qemu-mipsel-static
+%{_bindir}/qemu-mipsn32-static
+%{_bindir}/qemu-mipsn32el-static
+%{_exec_prefix}/lib/binfmt.d/qemu-mips-static.conf
+%{_exec_prefix}/lib/binfmt.d/qemu-mips64-static.conf
+%{_exec_prefix}/lib/binfmt.d/qemu-mips64el-static.conf
+%{_exec_prefix}/lib/binfmt.d/qemu-mipsel-static.conf
+%{_exec_prefix}/lib/binfmt.d/qemu-mipsn32-static.conf
+%{_exec_prefix}/lib/binfmt.d/qemu-mipsn32el-static.conf
 %endif
 
 %changelog
