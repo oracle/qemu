@@ -54,6 +54,43 @@ struct PageCache {
     void (*hash_func)(PageCache *, const void *, size_t, uint8_t *);
 };
 
+const char *cache_hash_algo_to_str(CacheHashAlgorithm algo)
+{
+    for (int i = CACHE_HASH_NONE; i < ARRAY_SIZE(cache_hash_algos); i++) {
+        if (cache_hash_algos[i].algo == algo) {
+            return cache_hash_algos[i].name;
+        }
+    }
+    return "unknown";
+}
+
+/*
+ * Iterates once over all algorithms in CacheHashAlgoDesc.
+ * Returns next supported algorithm or
+ * returns CACHE_HASH_NONE if none available.
+ * If current == CACHE_HASH_NONE, we return first supported
+ * algorithm or CACHE_HASH_NONE.
+ */
+CacheHashAlgorithm next_supported_algo(CacheHashAlgorithm current)
+{
+    int i, n;
+
+    for (n = 1; n < ARRAY_SIZE(cache_hash_algos); n++) {
+        i = (current + n) % ARRAY_SIZE(cache_hash_algos);
+        const CacheHashAlgoDesc *d = &cache_hash_algos[i];
+
+        if (d->algo == CACHE_HASH_NONE || !d->check_supported) {
+            continue;
+        }
+
+        if (d->check_supported()) {
+            return d->algo;
+        }
+    }
+
+    return CACHE_HASH_NONE;
+}
+
 PageCache *cache_init(size_t num_pages, size_t page_size, size_t item_size,
                       Error **errp)
 {

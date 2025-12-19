@@ -71,7 +71,7 @@ uint8_t *get_cached_data(const PageCache *cache, uint64_t addr);
 int cache_insert(PageCache *cache, uint64_t addr, const uint8_t *pdata,
                  uint64_t current_age);
 
-enum cache_hash_algorithm {
+typedef enum cache_hash_algorithm {
     CACHE_HASH_NONE = 0,
 #if defined(CONFIG_GNUTLS)
     CACHE_HASH_GNUTLS_SHA256,
@@ -82,6 +82,32 @@ enum cache_hash_algorithm {
 #if defined(CONFIG_NETTLE)
     CACHE_HASH_NETTLE_SHA256,
 #endif
+    CACHE_HASH_MAX,
+} CacheHashAlgorithm;
+
+/*
+ * Algorithm description structure.
+ */
+typedef struct {
+    CacheHashAlgorithm algo;
+    const char *name;
+    bool (*check_supported)(void);
+    size_t (*digest_size)(void);
+    void (*digest)(PageCache *cache,
+                    const void *buf, size_t size,
+                    uint8_t *output_digest);
+    PageCache *(*cache_algo_init)(size_t num_pages, size_t page_size,
+                                  size_t item_size, Error **errp);
+} CacheHashAlgoDesc;
+
+const char *cache_hash_algo_to_str(enum cache_hash_algorithm algo);
+CacheHashAlgorithm next_supported_algo(CacheHashAlgorithm current);
+
+static inline bool hash_supported(void) {return true;}
+static inline bool hash_not_supported(void) {return false;}
+
+static const CacheHashAlgoDesc cache_hash_algos[] = {
+    { CACHE_HASH_NONE, "none", hash_not_supported, NULL, NULL, NULL },
 };
 
 PageCache *cache_hash_init(size_t num_pages, size_t page_size,
