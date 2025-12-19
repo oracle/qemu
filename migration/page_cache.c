@@ -231,7 +231,7 @@ int cache_insert(PageCache *cache, uint64_t addr, const uint8_t *pdata,
 }
 
 #if defined(CONFIG_GNUTLS)
-static bool cache_hash_gnutls_sha256_supported(void)
+bool cache_hash_gnutls_sha256_supported(void)
 {
     size_t i;
     const gnutls_digest_algorithm_t *algs;
@@ -246,9 +246,9 @@ static bool cache_hash_gnutls_sha256_supported(void)
     return false;
 }
 
-static void cache_hash_gnutls_sha256_digest(PageCache *cache,
-                                            const void *buf, size_t size,
-                                            uint8_t *output_digest)
+void cache_hash_gnutls_sha256_digest(PageCache *cache,
+                                     const void *buf, size_t size,
+                                     uint8_t *output_digest)
 {
     gnutls_hash_hd_t hash;
     int ret;
@@ -260,17 +260,17 @@ static void cache_hash_gnutls_sha256_digest(PageCache *cache,
 }
 #endif
 #if defined(CONFIG_GCRYPT)
-static void cache_hash_gcrypt_sha256_digest(PageCache *cache,
-                                            const void *buf, size_t size,
-                                            uint8_t *output_digest)
+void cache_hash_gcrypt_sha256_digest(PageCache *cache,
+                                     const void *buf, size_t size,
+                                     uint8_t *output_digest)
 {
     gcry_md_hash_buffer(GCRY_MD_SHA256, output_digest, buf, size);
 }
 #endif
 #if defined(CONFIG_NETTLE)
-static void cache_hash_nettle_sha256_digest(PageCache *cache,
-                                            const void *buf, size_t size,
-                                            uint8_t *output_digest)
+void cache_hash_nettle_sha256_digest(PageCache *cache,
+                                     const void *buf, size_t size,
+                                     uint8_t *output_digest)
 {
     struct sha256_ctx ctx;
 

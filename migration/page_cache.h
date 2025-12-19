@@ -15,6 +15,17 @@
 #ifndef PAGE_CACHE_H
 #define PAGE_CACHE_H
 
+#if defined(CONFIG_GNUTLS)
+#include <gnutls/crypto.h>
+#endif
+#if defined(CONFIG_NETTLE)
+#include <nettle/sha2.h>
+#include <nettle/sha.h>
+#endif
+#if defined(CONFIG_GCRYPT)
+#include "gcrypt.h"
+#endif
+
 /* Page cache for storing guest pages */
 typedef struct PageCache PageCache;
 
@@ -108,7 +119,56 @@ static inline bool hash_not_supported(void) {return false;}
 
 static const CacheHashAlgoDesc cache_hash_algos[] = {
     { CACHE_HASH_NONE, "none", hash_not_supported, NULL, NULL, NULL },
+#if defined(CONFIG_GNUTLS)
+    { CACHE_HASH_GNUTLS_SHA256, "gnutls-sha256",
+      cache_hash_gnutls_sha256_supported,
+      cache_hash_gnutls_sha256_digest_size,
+      cache_hash_gnutls_sha256_digest, cache_init },
+#endif
+#if defined(CONFIG_GCRYPT)
+    { CACHE_HASH_GCRYPT_SHA256, "gcrypt-sha256",
+      hash_supported,
+      cache_hash_gcrypt_sha256_digest_size,
+      cache_hash_gcrypt_sha256_digest, cache_init },
+#endif
+#if defined(CONFIG_NETTLE)
+    { CACHE_HASH_NETTLE_SHA256, "nettle-sha256",
+      hash_supported,
+      cache_hash_nettle_sha256_digest_size,
+      cache_hash_nettle_sha256_digest, cache_init },
+#endif
 };
+
+#if defined(CONFIG_GNUTLS)
+void cache_hash_gnutls_sha256_digest(PageCache *cache,
+                                     const void *buf, size_t size,
+                                     uint8_t *output_digest);
+static size_t cache_hash_gnutls_sha256_digest_size(void)
+{
+    return gnutls_hash_get_len(GNUTLS_DIG_SHA256);
+}
+bool cache_hash_gnutls_sha256_supported(void);
+#endif
+
+#if defined(CONFIG_GCRYPT)
+void cache_hash_gcrypt_sha256_digest(PageCache *cache,
+                                     const void *buf, size_t size,
+                                     uint8_t *output_digest);
+static size_t cache_hash_gcrypt_sha256_digest_size(void)
+{
+    return gcry_md_get_algo_dlen(GCRY_MD_SHA256);
+}
+#endif
+
+#if defined(CONFIG_NETTLE)
+void cache_hash_nettle_sha256_digest(PageCache *cache,
+                                     const void *buf, size_t size,
+                                     uint8_t *output_digest);
+static size_t cache_hash_nettle_sha256_digest_size(void)
+{
+    return SHA256_DIGEST_SIZE;
+}
+#endif
 
 PageCache *cache_hash_init(size_t num_pages, size_t page_size,
                            enum cache_hash_algorithm algo, Error **errp);
