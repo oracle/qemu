@@ -3283,15 +3283,17 @@ static void ram_init_bitmaps(RAMState *rs)
     migration_bitmap_clear_discarded_pages(rs);
 }
 
-bool hash_cache_init(Error **local_err)
+bool hash_cache_init(Error **err)
 {
-    enum cache_hash_algorithm hash_algo = CACHE_HASH_NONE;
+    CacheHashAlgorithm hash_algo = CACHE_HASH_NONE, start_algo;
     ram_addr_t max_ram_addr = 0;
 
     size_t num_pages = 0;
     RAMBlock *block;
-    const char *algo;
+    const char *algo_str;
     hash_cache = NULL;
+    int i;
+    Error *local_err = NULL;
 
     if (!migrate_use_hash()) {
         return true;
@@ -3307,35 +3309,49 @@ bool hash_cache_init(Error **local_err)
         }
     }
 
-    algo = migrate_hash_algo();
-    if (!algo) {
-        algo = "gnutls-sha256";
+    /* Support for these algos will be checked later. */
+    algo_str = migrate_hash_algo();
+    if (!algo_str) {
+        algo_str = "gnutls-sha256";
     }
-
-#if defined(CONFIG_GNUTLS)
-    if (strlen(algo) == strlen("gnutls-sha256") &&
-        strncmp(algo, "gnutls-sha256", strlen(algo)) == 0)  {
-        hash_algo = CACHE_HASH_GNUTLS_SHA256;
-    }
-#endif
-#if defined(CONFIG_GCRYPT)
-    if (strlen(algo) == strlen("gcrypt-sha256") &&
-        strncmp(algo, "gcrypt-sha256", strlen(algo)) == 0)  {
-        hash_algo = CACHE_HASH_GCRYPT_SHA256;
-    }
-#endif
-#if defined(CONFIG_NETTLE)
-    if (strlen(algo) == strlen("nettle-sha256") &&
-        strncmp(algo, "nettle-sha256", strlen(algo)) == 0)  {
-        hash_algo = CACHE_HASH_NETTLE_SHA256;
-    }
-#endif
 
     num_pages = ((size_t) max_ram_addr) >> TARGET_PAGE_BITS;
     num_pages = pow2ceil(num_pages);
-    hash_cache = cache_hash_init(num_pages, TARGET_PAGE_SIZE,
-                                 hash_algo, local_err);
+
+    for (i = CACHE_HASH_NONE + 1; i < ARRAY_SIZE(cache_hash_algos); i++) {
+        if (strcmp(algo_str, cache_hash_algo_to_str(cache_hash_algos[i].algo)) == 0) {
+            hash_algo = cache_hash_algos[i].algo;
+            break;
+        }
+    }
+
+    start_algo = hash_algo;
+    /* Try algos until we loop. */
+    do {
+        hash_cache = cache_hash_init(num_pages, TARGET_PAGE_SIZE,
+                                     hash_algo, &local_err);
+        if (hash_cache) {
+            break;
+        }
+
+        if (local_err) {
+            error_report_err(local_err);
+        }
+        warn_report("Failed to init hash algorithm %s ",
+                    cache_hash_algo_to_str(hash_algo));
+
+        hash_algo = next_supported_algo(hash_algo);
+        if (hash_algo == CACHE_HASH_NONE) {
+            break;
+        }
+
+        warn_report("Will try next algorithm %s ",
+                    cache_hash_algo_to_str(hash_algo));
+    } while (hash_algo != start_algo);
+
     if (!hash_cache) {
+        error_setg(err, QERR_INVALID_PARAMETER_VALUE, "algo",
+                         "a known or supported hash algorithm");
         return false;
     }
 

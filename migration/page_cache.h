@@ -117,28 +117,6 @@ CacheHashAlgorithm next_supported_algo(CacheHashAlgorithm current);
 static inline bool hash_supported(void) {return true;}
 static inline bool hash_not_supported(void) {return false;}
 
-static const CacheHashAlgoDesc cache_hash_algos[] = {
-    { CACHE_HASH_NONE, "none", hash_not_supported, NULL, NULL, NULL },
-#if defined(CONFIG_GNUTLS)
-    { CACHE_HASH_GNUTLS_SHA256, "gnutls-sha256",
-      cache_hash_gnutls_sha256_supported,
-      cache_hash_gnutls_sha256_digest_size,
-      cache_hash_gnutls_sha256_digest, cache_init },
-#endif
-#if defined(CONFIG_GCRYPT)
-    { CACHE_HASH_GCRYPT_SHA256, "gcrypt-sha256",
-      hash_supported,
-      cache_hash_gcrypt_sha256_digest_size,
-      cache_hash_gcrypt_sha256_digest, cache_init },
-#endif
-#if defined(CONFIG_NETTLE)
-    { CACHE_HASH_NETTLE_SHA256, "nettle-sha256",
-      hash_supported,
-      cache_hash_nettle_sha256_digest_size,
-      cache_hash_nettle_sha256_digest, cache_init },
-#endif
-};
-
 #if defined(CONFIG_GNUTLS)
 void cache_hash_gnutls_sha256_digest(PageCache *cache,
                                      const void *buf, size_t size,
@@ -170,8 +148,30 @@ static size_t cache_hash_nettle_sha256_digest_size(void)
 }
 #endif
 
+static const CacheHashAlgoDesc cache_hash_algos[] = {
+    { CACHE_HASH_NONE, "none", hash_not_supported, NULL, NULL, NULL },
+#if defined(CONFIG_GNUTLS)
+    { CACHE_HASH_GNUTLS_SHA256, "gnutls-sha256",
+      cache_hash_gnutls_sha256_supported,
+      cache_hash_gnutls_sha256_digest_size,
+      cache_hash_gnutls_sha256_digest, cache_init },
+#endif
+#if defined(CONFIG_GCRYPT)
+    { CACHE_HASH_GCRYPT_SHA256, "gcrypt-sha256",
+      hash_supported,
+      cache_hash_gcrypt_sha256_digest_size,
+      cache_hash_gcrypt_sha256_digest, cache_init },
+#endif
+#if defined(CONFIG_NETTLE)
+    { CACHE_HASH_NETTLE_SHA256, "nettle-sha256",
+      hash_supported,
+      cache_hash_nettle_sha256_digest_size,
+      cache_hash_nettle_sha256_digest, cache_init },
+#endif
+};
+
 PageCache *cache_hash_init(size_t num_pages, size_t page_size,
-                           enum cache_hash_algorithm algo, Error **errp);
+                           CacheHashAlgorithm algo, Error **errp);
 bool cache_hash_is_cached(PageCache *cache, uint64_t addr, const void *buf,
                           void *digest, void **out_page);
 void cache_hash_invalidate(PageCache *cache, uint64_t addr);

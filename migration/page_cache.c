@@ -280,52 +280,6 @@ void cache_hash_nettle_sha256_digest(PageCache *cache,
 }
 #endif
 
-PageCache *cache_hash_init(size_t num_pages, size_t page_size,
-                           enum cache_hash_algorithm algo, Error **errp)
-{
-    struct PageCache *cache = NULL;
-
-#if defined(CONFIG_GNUTLS)
-    if (algo == CACHE_HASH_GNUTLS_SHA256 &&
-        cache_hash_gnutls_sha256_supported()) {
-        cache = cache_init(num_pages, page_size,
-                           gnutls_hash_get_len(GNUTLS_DIG_SHA256), errp);
-
-        if (!cache) {
-            return NULL;
-        }
-
-        cache->hash_func = cache_hash_gnutls_sha256_digest;
-    }
-#endif
-#if defined(CONFIG_GCRYPT)
-    if (algo == CACHE_HASH_GCRYPT_SHA256) {
-        cache = cache_init(num_pages, page_size,
-                           gcry_md_get_algo_dlen(GCRY_MD_SHA256) , errp);
-        if (!cache) {
-            return NULL;
-        }
-
-        cache->hash_func = cache_hash_gcrypt_sha256_digest;
-    }
-#endif
-#if defined(CONFIG_NETTLE)
-    if (algo == CACHE_HASH_NETTLE_SHA256) {
-        cache = cache_init(num_pages, page_size, SHA256_DIGEST_SIZE, errp);
-        if (!cache) {
-            return NULL;
-        }
-
-        cache->hash_func = cache_hash_nettle_sha256_digest;
-    }
-#endif
-
-    if (!cache) {
-        error_setg(errp, QERR_INVALID_PARAMETER_VALUE, "algo",
-                   "a known hash algorithm");
-    }
-    return cache;
-}
 
 static int cache_hash_insert(PageCache *cache, uint64_t addr,
                              uint64_t current_age)
@@ -351,6 +305,59 @@ static int cache_hash_insert(PageCache *cache, uint64_t addr,
     it->it_addr = addr;
 
     return 0;
+}
+
+PageCache *cache_hash_init(size_t num_pages, size_t page_size,
+                           CacheHashAlgorithm algo, Error **errp)
+{
+    struct PageCache *cache = NULL;
+    int i;
+    Error *local_err = NULL;
+
+    assert(ARRAY_SIZE(cache_hash_algos) == CACHE_HASH_MAX);
+
+    if (algo == CACHE_HASH_NONE) {
+        error_setg(errp, "Unsupported algorithm %s",
+                   cache_hash_algo_to_str(algo));
+
+        return NULL;
+    }
+
+    for (i = 0; i < ARRAY_SIZE(cache_hash_algos); i++) {
+        const CacheHashAlgoDesc *desc = &cache_hash_algos[i];
+
+        if (desc->algo != algo) {
+            continue;
+        }
+
+        if (!desc->check_supported) {
+            error_setg(errp, "Cannot determine if hash %s is supported, assume it is not",
+                       cache_hash_algo_to_str(algo));
+            return NULL;
+        }
+
+        if (desc->check_supported && !desc->check_supported()) {
+            error_setg(errp, "Hash algorithm %s is not supported",
+                       cache_hash_algo_to_str(algo));
+            return NULL;
+        }
+
+        size_t digest_size = desc->digest_size() ? desc->digest_size() : 0;
+
+        cache = desc->cache_algo_init ? desc->cache_algo_init(num_pages, page_size,
+                                                              digest_size,
+                                                              &local_err) : NULL;
+        if (!cache) {
+            if (local_err) {
+                error_propagate(errp, local_err);
+            }
+            return NULL;
+        }
+
+        cache->hash_func = desc->digest;
+        break;
+    }
+    return cache;
 }
 
 bool cache_hash_is_cached(PageCache *cache, uint64_t addr, const void *buf,
