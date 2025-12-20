@@ -25,6 +25,12 @@
 #if defined(CONFIG_GCRYPT)
 #include "gcrypt.h"
 #endif
+#include "hw/core/machine.h"
+#include <dlfcn.h>
+#if defined(CONFIG_ISAL)
+#include <isa-l_crypto/mh_sha256.h>
+#include <isa-l_crypto/sha256_mb.h>
+#endif
 
 /* Page cache for storing guest pages */
 typedef struct PageCache PageCache;
@@ -93,6 +99,9 @@ typedef enum cache_hash_algorithm {
 #if defined(CONFIG_NETTLE)
     CACHE_HASH_NETTLE_SHA256,
 #endif
+#if defined(CONFIG_ISAL)
+    CACHE_HASH_ISAL_CRYPTO_MB,
+#endif
     CACHE_HASH_MAX,
 } CacheHashAlgorithm;
 
@@ -116,6 +125,19 @@ CacheHashAlgorithm next_supported_algo(CacheHashAlgorithm current);
 
 static inline bool hash_supported(void) {return true;}
 static inline bool hash_not_supported(void) {return false;}
+
+#if defined(CONFIG_ISAL)
+PageCache *cache_init_isal(size_t num_pages, size_t page_size,
+                           size_t item_size, Error **errp);
+
+bool isal_sha256_mb_supported(void);
+
+static size_t isal_sha256_mb_digest_size(void)
+{
+    return ISAL_SHA256_DIGEST_WORDS*sizeof(uint32_t);
+}
+#endif
+bool is_exadata_machine(void);
 
 #if defined(CONFIG_GNUTLS)
 void cache_hash_gnutls_sha256_digest(PageCache *cache,
@@ -168,7 +190,14 @@ static const CacheHashAlgoDesc cache_hash_algos[] = {
       cache_hash_nettle_sha256_digest_size,
       cache_hash_nettle_sha256_digest, cache_init },
 #endif
+#if defined(CONFIG_ISAL)
+    { CACHE_HASH_ISAL_CRYPTO_MB, "isal-crypto-mb-sha256",
+      isal_sha256_mb_supported,
+      isal_sha256_mb_digest_size, NULL, cache_init_isal },
+#endif
 };
+
+bool isal_sha256_symbols_available(void);
 
 PageCache *cache_hash_init(size_t num_pages, size_t page_size,
                            CacheHashAlgorithm algo, Error **errp);

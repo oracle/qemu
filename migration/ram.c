@@ -3309,10 +3309,13 @@ bool hash_cache_init(Error **err)
         }
     }
 
-    /* Support for these algos will be checked later. */
     algo_str = migrate_hash_algo();
     if (!algo_str) {
-        algo_str = "gnutls-sha256";
+        if (is_exadata_machine()) {
+            algo_str = "isal-crypto-mb-sha256";
+        } else {
+            algo_str = "gnutls-sha256";
+        }
     }
 
     num_pages = ((size_t) max_ram_addr) >> TARGET_PAGE_BITS;

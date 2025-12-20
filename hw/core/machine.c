@@ -39,6 +39,7 @@
 #include "hw/virtio/virtio.h"
 #include "hw/virtio/virtio-pci.h"
 #include "qom/object_interfaces.h"
+#include "machine.h"
 
 GlobalProperty hw_compat_7_2_exadata[] = {
     { "vhost-scsi-pci", "virtqueue_size", "1024" },
@@ -290,6 +291,13 @@ GlobalProperty hw_compat_2_1[] = {
 const size_t hw_compat_2_1_len = G_N_ELEMENTS(hw_compat_2_1);
 
 MachineState *current_machine;
+
+const char *machine_get_name(void)
+{
+    MachineClass *mc = MACHINE_GET_CLASS(current_machine);
+
+    return mc->name;
+}
 
 static char *machine_get_kernel(Object *obj, Error **errp)
 {

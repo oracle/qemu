@@ -20,6 +20,7 @@
 #include "qemu/timer.h"
 #include "page_cache.h"
 #include "trace.h"
+#include "migration.h"
 #if defined(CONFIG_GNUTLS)
 #include <gnutls/crypto.h>
 #endif
@@ -51,6 +52,12 @@ struct PageCache {
     size_t page_size;
     size_t max_num_items;
     size_t num_items;
+#if defined(CONFIG_ISAL)
+    void *dlopen_handle;
+    typeof(&isal_sha256_ctx_mgr_init) isal_sha256_ctx_mgr_init;
+    typeof(&isal_sha256_ctx_mgr_submit) isal_sha256_ctx_mgr_submit;
+    typeof(&isal_sha256_ctx_mgr_flush) isal_sha256_ctx_mgr_flush;
+#endif
 
 #define CACHE_HASH_NSEC_PER_MISS 0
 #define CACHE_HASH_NSEC_PER_HIT  1
@@ -165,9 +172,11 @@ void cache_fini(PageCache *cache)
         g_free(cache->page_cache[i].it_data);
     }
 
-    g_free(cache->page_cache);
-    cache->page_cache = NULL;
-    g_free(cache);
+#if defined(CONFIG_ISAL)
+    g_clear_pointer(&cache->dlopen_handle, dlclose);
+#endif
+    g_clear_pointer(&cache->page_cache, g_free);
+    g_clear_pointer(&cache, g_free);
 }
 
 static size_t cache_get_cache_pos(const PageCache *cache,
@@ -291,7 +300,6 @@ void cache_hash_nettle_sha256_digest(PageCache *cache,
 }
 #endif
 
-
 static int cache_hash_insert(PageCache *cache, uint64_t addr,
                              uint64_t current_age)
 {
@@ -408,6 +416,274 @@ void cache_hash_invalidate(PageCache *cache, uint64_t addr)
         memset(it->it_data, 0, cache->item_size);
     }
 }
+
+bool is_exadata_machine(void)
+{
+    if (strstr(machine_get_name(), "-exadata") == NULL) {
+        return false;
+    }
+    return true;
+}
+
+#if defined(CONFIG_ISAL)
+bool isal_sha256_mb_supported(void)
+{
+
+    char *algo_str = migrate_hash_algo();
+
+    /*
+     * Do not allow to use isa-l crypto if is not explicitly set for
+     * non-exadata machines in migration options.
+     * Exadata machines can select it by default.
+     */
+    if (!algo_str) {
+        if (!is_exadata_machine()) {
+            return false;
+        }
+        return isal_sha256_symbols_available();
+    }
+
+    if (strcmp(algo_str, "isal-crypto-mb-sha256") == 0) {
+        return isal_sha256_symbols_available();
+    }
+
+    return false;
+}
+
+static void *dlsym_impl(void *handle, const char *sym_name, Error **errp)
+{
+    void *sym = NULL;
+
+    dlerror();
+    if (!sym_name) {
+        error_setg(errp, "dlsym failed, empty symbol string");
+        return NULL;
+    }
+
+    sym = dlsym(handle, sym_name);
+    if (!sym) {
+        error_setg(errp, "dlsym failed with symbol %s: %s", sym_name, dlerror());
+        return NULL;
+    }
+
+    return sym;
+}
+
+bool isal_sha256_symbols_available(void)
+{
+    void *mgr_init = NULL, *mgr_submit = NULL, *mgr_flush = NULL;
+    void *handle;
+    Error *local_err = NULL;
+    bool ret = false;
+
+    dlerror();
+    handle = dlopen(ISAL_LIB_FILE_NAME, RTLD_LAZY);
+
+    if (handle == NULL) {
+        error_report("Could not dlopen library %s", ISAL_LIB_FILE_NAME);
+        return false;
+    }
+    mgr_init = dlsym_impl(handle, "isal_sha256_ctx_mgr_init", &local_err);
+    if (!mgr_init) {
+        goto out_sym;
+    }
+    mgr_submit = dlsym_impl(handle, "isal_sha256_ctx_mgr_submit", &local_err);
+    if (!mgr_submit) {
+        goto out_sym;
+    }
+    mgr_flush = dlsym_impl(handle, "isal_sha256_ctx_mgr_flush", &local_err);
+    if (!mgr_flush) {
+        goto out_sym;
+    }
+
+    ret = true;
+
+ out_sym:
+    if (local_err) {
+        error_report_err(local_err);
+    }
+    g_clear_pointer(&handle, dlclose);
+
+    return ret;
+}
+
+struct multi_buffer_ctx {
+    ISAL_SHA256_HASH_CTX_MGR *mgr;
+    ISAL_SHA256_HASH_CTX *ctx;
+};
+
+static int cache_hash_isal_crypto_mb_pool_init(PageCache *cache, size_t nr_pages, void **opaque)
+{
+    ISAL_SHA256_HASH_CTX_MGR *mgr = NULL;
+    struct multi_buffer_ctx *out;
+
+    out = g_malloc0(sizeof(*out));
+    out->mgr = g_malloc0(sizeof(*mgr));
+    out->ctx = g_new0(ISAL_SHA256_HASH_CTX, nr_pages);
+    for (int i = 0; i < nr_pages; i++) {
+         isal_hash_ctx_init(&out->ctx[i]);
+         out->ctx[i].user_data = (void *) ((uint64_t) i);
+    }
+    cache->isal_sha256_ctx_mgr_init(out->mgr);
+    *opaque = out;
+    return 0;
+}
+
+static void cache_hash_isal_crypto_mb_pool_fini(PageCache *cache, size_t nr_pages, void **opaque)
+{
+    struct multi_buffer_ctx *out = *opaque;
+
+    g_clear_pointer(&out->ctx, g_free);
+    g_clear_pointer(&out->mgr, g_free);
+    g_clear_pointer(&out, g_free);
+
+    *opaque = NULL;
+}
+
+static int cache_hash_isal_crypto_mb_pool_submit(PageCache *cache, void *opaque,
+                                                 const void *buf, uint64_t base_addr,
+                                                 uint64_t *offset, size_t nr_pages,
+                                                 bool *out_matched, void **out_pages)
+{
+    struct multi_buffer_ctx *mb = opaque;
+    ISAL_SHA256_HASH_CTX_MGR *mgr = mb->mgr;
+    ISAL_SHA256_HASH_CTX *ctx, *out;
+    int64_t time, ts, hash_ts;
+    int i, misses = 0;
+    int ret;
+
+    if (nr_pages == 0) {
+        return 0;
+    }
+    time = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
+    for (i = 0; i < nr_pages; i++) {
+        const void *page = buf + offset[i];
+
+        ctx = &mb->ctx[i];
+        isal_hash_ctx_init(ctx);
+        ctx->user_data = (void *) ((uint64_t) i);
+        ret = cache->isal_sha256_ctx_mgr_submit(mgr, ctx, &out, page,
+                                   cache->page_size, ISAL_HASH_ENTIRE);
+        if (ret) {
+            return -EINVAL;
+        }
+    }
+
+    out = NULL;
+    do {
+        ret = cache->isal_sha256_ctx_mgr_flush(mgr, &out);
+        if (ret) {
+            return -EINVAL;
+        }
+    } while (out != NULL);
+
+    time = (qemu_clock_get_ns(QEMU_CLOCK_REALTIME) - time) / nr_pages;
+    cache->nsec_per_access[CACHE_HASH_NSEC_PER_MISS] = time;
+    cache->nsec_per_access[CACHE_HASH_NSEC_PER_HIT] = time;
+
+    for (i = 0; i < nr_pages; i++) {
+        uint64_t addr = base_addr + offset[i];
+        const void *host = buf + offset[i];
+        void *out_page = out_pages[i];
+        bool match = false;
+        CacheItem *it;
+
+        ctx = &mb->ctx[i];
+        it = cache_get_by_addr(cache, addr);
+
+        /* Match against the batch-calculated hash */
+        if (it->it_data && it->it_addr == addr) {
+            match = !memcmp(it->it_data, ctx->job.result_digest, cache->item_size);
+        }
+
+        /* On a miss hash a copy of the page */
+        if (!match) {
+            ts = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
+            cache_hash_insert(cache, addr, 0);
+            memcpy(out_page, host, cache->page_size);
+
+            /*
+             * We don't use the simple multi-hash API as it produces results
+             * with different format. Submit a single job and flush it right
+             * away. If we care about latency of misses we should copy the page
+             * even on hits and skip this step. But it adds up about 400-600
+             * cycles on the hit path.
+             */
+            isal_hash_ctx_init(ctx);
+            ret = cache->isal_sha256_ctx_mgr_submit(mgr, ctx, &out, out_page,
+                                       cache->page_size, ISAL_HASH_ENTIRE);
+            if (ret) {
+                return -EINVAL;
+            }
+
+            out = NULL;
+            do {
+                ret = cache->isal_sha256_ctx_mgr_flush(mgr, &out);
+                if (ret) {
+                    return -EINVAL;
+                }
+            } while (out != NULL);
+            memcpy(it->it_data, ctx->job.result_digest, cache->item_size);
+
+            cache->nsec_per_access[CACHE_HASH_NSEC_PER_MISS] = time +
+                         (qemu_clock_get_ns(QEMU_CLOCK_REALTIME) - ts);
+        }
+        out_matched[i] = match;
+    }
+
+    return 0;
+}
+
+PageCache *cache_init_isal(size_t num_pages, size_t page_size,
+                           size_t item_size, Error **errp)
+{
+    PageCache *cache = NULL;
+    void *mgr_init = NULL, *mgr_submit = NULL, *mgr_flush = NULL;
+    void *handle;
+
+    handle = dlopen(ISAL_LIB_FILE_NAME, RTLD_LAZY);
+    if (handle == NULL) {
+        error_setg(errp, "Could not load library with dlopen %s: , err %s",
+                   ISAL_LIB_FILE_NAME, dlerror());
+        return NULL;
+    }
+
+    mgr_init = dlsym_impl(handle, "isal_sha256_ctx_mgr_init", errp);
+    if (!mgr_init) {
+        g_clear_pointer(&handle, dlclose);
+        return NULL;
+    }
+    mgr_submit = dlsym_impl(handle, "isal_sha256_ctx_mgr_submit", errp);
+    if (!mgr_submit) {
+        g_clear_pointer(&handle, dlclose);
+        return NULL;
+    }
+    mgr_flush = dlsym_impl(handle, "isal_sha256_ctx_mgr_flush", errp);
+    if (!mgr_flush) {
+        g_clear_pointer(&handle, dlclose);
+        return NULL;
+    }
+
+    cache = cache_init(num_pages, page_size, item_size, errp);
+    if (!cache) {
+        g_clear_pointer(&handle, dlclose);
+        return NULL;
+    }
+
+    cache->dlopen_handle = handle;
+
+    cache->isal_sha256_ctx_mgr_init = mgr_init;
+    cache->isal_sha256_ctx_mgr_submit = mgr_submit;
+    cache->isal_sha256_ctx_mgr_flush = mgr_flush;
+
+    cache->flags |= PAGE_CACHE_SUBMIT_BATCH;
+    cache->hash_pool_init = cache_hash_isal_crypto_mb_pool_init;
+    cache->hash_pool_fini = cache_hash_isal_crypto_mb_pool_fini;
+    cache->hash_pool_submit = cache_hash_isal_crypto_mb_pool_submit;
+
+    return cache;
+}
+#endif /* CONFIG_ISAL */
 
 /* TODO: check the error at caller site. */
 int cache_hash_pool_init(PageCache *cache, size_t nr_pages, void **opaque)
