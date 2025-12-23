@@ -97,6 +97,11 @@ static void multifd_ram_payload_alloc(MultiFDPages_t *pages)
 
     pages->offset = g_new0(ram_addr_t, page_count);
     if (migrate_use_hash()) {
+        if (cache_hash_is_batch(hash_cache)) {
+            cache_hash_pool_init(hash_cache, page_count,
+                                 &pages->batch_context);
+            pages->matched = g_new0(bool, page_count);
+        }
         pages->digest = g_malloc0(cache_hash_item_size(hash_cache));
         pages->cached = g_new0(void*, page_count);
         for (int i = 0; i < page_count; i++) {
@@ -115,6 +120,11 @@ static void multifd_ram_payload_free(MultiFDPages_t *pages)
 
     g_clear_pointer(&pages->offset, g_free);
     if (migrate_use_hash()) {
+        if (pages->batch_context) {
+            cache_hash_pool_fini(hash_cache, page_count,
+                                 &pages->batch_context);
+            g_clear_pointer(&pages->matched, g_free);
+        }
         g_clear_pointer(&pages->digest, g_free);
         for (int i = 0; i < page_count; i++) {
              g_clear_pointer(&pages->cached[i], g_free);

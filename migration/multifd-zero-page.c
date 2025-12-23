@@ -36,12 +36,36 @@ static void swap_page_offset(ram_addr_t *pages_offset, int a, int b)
     pages_offset[b] = temp;
 }
 
+static void swap_batch_metadata(MultiFDPages_t *pages, int a, int b)
+{
+    bool tmpmatch;
+    void *tmppage;
+
+    if (a == b) {
+        return;
+    }
+
+    tmppage = pages->cached[a];
+    pages->cached[a] = pages->cached[b];
+    pages->cached[b] = tmppage;
+    tmpmatch = pages->matched[a];
+    pages->matched[a] = pages->matched[b];
+    pages->matched[b] = tmpmatch;
+}
+
 static void multifd_skip_cached_pages(MultiFDSendParams *p, int normal_num)
 {
     MultiFDPages_t *pages = &p->data->u.ram;
     RAMBlock *rb = pages->block;
     int i = 0;
     int j = normal_num - 1;
+    bool batch = cache_hash_is_batch(hash_cache);
+
+    if (batch) {
+        cache_hash_pool_submit(hash_cache, pages->batch_context, rb->host,
+                               rb->offset, pages->offset, normal_num,
+                               pages->matched, pages->cached);
+    }
 
     /*
      * Sort the page offset array by moving all normal pages to
@@ -49,15 +73,25 @@ static void multifd_skip_cached_pages(MultiFDSendParams *p, int normal_num)
      */
     while (i <= j) {
         uint64_t offset = pages->offset[i];
+        bool match;
 
-        if (!cache_hash_is_cached(hash_cache,
-                                  rb->offset + offset,
-                                  rb->host + offset, pages->digest,
-                                  &pages->cached[i])) {
+        if (!batch) {
+            match = cache_hash_is_cached(hash_cache,
+                                         rb->offset + offset,
+                                         rb->host + offset, pages->digest,
+                                         &pages->cached[i]);
+        } else {
+            match = pages->matched[i];
+        }
+
+        if (!match) {
             i++;
             continue;
         }
 
+        if (batch) {
+            swap_batch_metadata(pages, i, j);
+        }
         swap_page_offset(pages->offset, i, j);
         ram_release_page(rb->idstr, offset);
         j--;

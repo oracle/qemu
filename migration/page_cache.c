@@ -29,6 +29,10 @@
 #if defined(CONFIG_GCRYPT)
 #include "gcrypt.h"
 #endif
+#if defined(CONFIG_ISAL)
+#include <isa-l_crypto/mh_sha256.h>
+#include <isa-l_crypto/sha256_mb.h>
+#endif
 
 /* the page in cache will not be replaced in two cycles */
 #define CACHED_PAGE_LIFETIME 2
@@ -52,6 +56,13 @@ struct PageCache {
 #define CACHE_HASH_NSEC_PER_HIT  1
     int64_t nsec_per_access[2];
     void (*hash_func)(PageCache *, const void *, size_t, uint8_t *);
+    int (*hash_pool_init)(PageCache *, size_t, void **);
+    void (*hash_pool_fini)(PageCache *, size_t, void **);
+    int (*hash_pool_submit)(PageCache *, void *, const void *, uint64_t,
+                            uint64_t *, size_t, bool *, void **);
+
+#define PAGE_CACHE_SUBMIT_BATCH  (1UL << 0)
+    uint64_t flags;
 };
 
 const char *cache_hash_algo_to_str(CacheHashAlgorithm algo)
@@ -396,6 +407,43 @@ void cache_hash_invalidate(PageCache *cache, uint64_t addr)
         it->it_addr = -1;
         memset(it->it_data, 0, cache->item_size);
     }
+}
+
+/* TODO: check the error at caller site. */
+int cache_hash_pool_init(PageCache *cache, size_t nr_pages, void **opaque)
+{
+    if (!cache_hash_is_batch(cache)) {
+        return -EINVAL;
+    }
+
+    return cache->hash_pool_init(cache, nr_pages, opaque);
+}
+
+void cache_hash_pool_fini(PageCache *cache, size_t nr_pages, void **opaque)
+{
+    if (!cache_hash_is_batch(cache)) {
+        return;
+    }
+
+    cache->hash_pool_fini(cache, nr_pages, opaque);
+}
+
+/* TODO: check the error at caller site. */
+int cache_hash_pool_submit(PageCache *cache, void *opaque, const void *buf,
+                           uint64_t base_addr, uint64_t *offset, size_t nr_pages,
+                           bool *out_matched, void **out_pages)
+{
+    if (!cache_hash_is_batch(cache)) {
+        return -EINVAL;
+    }
+
+    return cache->hash_pool_submit(cache, opaque, buf, base_addr, offset,
+                                   nr_pages, out_matched, out_pages);
+}
+
+bool cache_hash_is_batch(PageCache *cache)
+{
+    return cache->flags & PAGE_CACHE_SUBMIT_BATCH;
 }
 
 size_t cache_hash_item_size(PageCache *cache)

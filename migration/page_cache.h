@@ -178,6 +178,12 @@ void cache_hash_invalidate(PageCache *cache, uint64_t addr);
 size_t cache_hash_item_size(PageCache *cache);
 int64_t cache_hash_nsec_per_miss(PageCache *cache);
 int64_t cache_hash_nsec_per_hit(PageCache *cache);
+int cache_hash_pool_init(PageCache *cache, size_t nr_pages, void **opaque);
+void cache_hash_pool_fini(PageCache *cache, size_t nr_pages, void **opaque);
+int cache_hash_pool_submit(PageCache *cache, void *opaque, const void *buf,
+                           uint64_t base_addr, uint64_t *offset, size_t nr_pages,
+                           bool *out_matched, void **out_pages);
+bool cache_hash_is_batch(PageCache *cache);
 extern PageCache *hash_cache;
 
 #endif

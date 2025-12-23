@@ -105,6 +105,10 @@ typedef struct {
     void **cached;
     /* temporary buffer for digest computation */
     void *digest;
+    /* temporary context for digest computation */
+    void *batch_context;
+    /* buffer array of each matched digest status, managed by multifd */
+    bool *matched;
 } MultiFDPages_t;
 
 typedef struct {
