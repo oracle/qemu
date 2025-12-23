@@ -265,7 +265,7 @@ Requires: %{name}-block-ssh = %{epoch}:%{version}-%{release}     \
 Summary: QEMU is a machine emulator and virtualizer
 Name: qemu-kvm
 Version: 7.2.0
-Release: 30%{?dist}
+Release: 32%{?dist}
 Epoch: 31
 License: GPLv2+ and LGPLv2+ and BSD
 Group: Development/Tools
@@ -1811,6 +1811,12 @@ getent passwd qemu >/dev/null || \
 %endif
 
 %changelog
+* Tue Dec 23 2025 Mark Kanda <mark.kanda@oracle.com> - 7.2.0-32.el9
+- spec: Provide aarch64 and mips user static packages (Mark Kanda)
+  These packages are for Oracle internal use only (not for external customers)
+- cpu: Only compile runstate_is_running() for system mode (Mark Kanda)
+- linux-user: Do not define struct sched_attr if libc headers do (Khem Raj)
+
 * Tue Dec 9 2025 Karl Heubaum <karl.heubaum@oracle.com> - 7.2.0-31.el9
 - migration: Fix the cancellation/error path (Elena Ufimtseva) [Orabug: 38739293]
 
