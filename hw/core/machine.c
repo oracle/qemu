@@ -53,7 +53,7 @@ GlobalProperty hw_compat_7_2_exadata[] = {
     { "migration", "x-orcl-switchover-event", "on" },
     { "migration", "x-orcl-migrate-use-hash", "true" },
     { "kvmclock", "x-orcl-account-downtime", "true" },
-    { "migration", "x-orcl-migrate-scan-pages", "2048" },
+    { "migration", "x-orcl-migrate-scan-pages", "8192" },
 };
 const size_t hw_compat_7_2_exadata_len = G_N_ELEMENTS(hw_compat_7_2_exadata);
 
