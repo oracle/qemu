@@ -237,6 +237,11 @@
 %global have_qmpregdump 1
 %endif
 
+# Support for isa-l_crypto
+%ifarch x86_64
+%global have_isal_crypto 1
+%endif
+
 %global requires_all_modules                                     \
 %if %{have_iscsi}                                                \
 Requires: %{name}-block-iscsi = %{epoch}:%{version}-%{release}   \
@@ -257,7 +262,7 @@ Requires: %{name}-block-ssh = %{epoch}:%{version}-%{release}     \
 Summary: QEMU is a machine emulator and virtualizer
 Name: qemu-kvm
 Version: 7.2.0
-Release: 1%{?dist}
+Release: 33%{?dist}
 Epoch: 15
 License: GPLv2+ and LGPLv2+ and BSD
 Group: Development/Tools
@@ -465,6 +470,11 @@ BuildRequires: libslirp-devel
 %endif
 %if 0%{?have_linux_io_uring}
 BuildRequires: liburing-devel
+%endif
+
+%if 0%{?have_isal_crypto}
+BuildRequires: binutils
+BuildRequires: isa-l_crypto-devel
 %endif
 
 Requires: qemu-kvm-core = %{epoch}:%{version}-%{release}
@@ -1167,7 +1177,12 @@ mkdir -p %{build_dir}
     %global block_drivers_rw_list %{block_drivers_rw_list},curl
 %endif
 
-%global isal_major %(readelf -d %{_libdir}/libisal_crypto.so | grep SONAME | sed 's/.*\.so\.\([0-9]\+\)].*/\1/')
+%if 0%{?have_isal_crypto}
+    isal_major="$(readelf -d %{_libdir}/libisal_crypto.so.2 | awk -F'[.\\]]' '/SONAME/ { print $(NF-1); exit }')"
+    %global isalflags --isal-major=$isal_major
+%else
+    %global isalflags --isal-major=
+%endif
 
 pushd %{build_dir}
 
@@ -1281,7 +1296,7 @@ pushd %{build_dir}
     %{slirpflags} \
     %{vfiouserserfverflags} \
     %{vduseblkexportflags} \
-    --isal-major=%{isal_major}
+    %{isalflags}
 
 %make_build
 
@@ -1713,8 +1728,15 @@ getent passwd qemu >/dev/null || \
 %endif
 
 %changelog
-* Wed Jan 14 2026 Elena Ufimtseva <elena.ufimtseva@oracle.com> - 7.2.0-32.el8
-- migration: find the major version (ABI) of the libisal_crypto library to pass to configure
+* Wed Jan 21 2026 Karl Heubaum <karl.heubaum@oracle.com> - 7.2.0-33.el8
+- migration: Change default pages to scan to 8192 for Exadata (Elena Ufimtseva) [Orabug: 38732433]
+- meson: check if isa-l installed and enable it (Elena Ufimtseva) [Orabug: 38732433]
+- migration/page_cache: Improve isal-crypto-mb-sha256 cache-miss handling (Joao Martins) [Orabug: 38732433]
+- migration/page_cache: Add isal_crypto multi-buffer sha256 variant (Joao Martins) [Orabug: 38732433]
+- migration/page_cache: Add batching mode support for isa-l_crypto (Joao Martins) [Orabug: 38732433]
+- migration: Use algorithm table to initialize hashing (Elena Ufimtseva) [Orabug: 38732433]
+- migration: Add existing algorithms to description table (Elena Ufimtseva) [Orabug: 38732433]
+- migration: Add a unified description structure for hashing algorithms (Elena Ufimtseva) [Orabug: 38732433]
 
 * Mon Apr 10 2023 Mark Kanda <mark.kanda@oracle.com>
 - spec: allow have_tools 0 (Steve Sistare)
