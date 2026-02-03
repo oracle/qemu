@@ -39,7 +39,10 @@
 /* the page in cache will not be replaced in two cycles */
 #define CACHED_PAGE_LIFETIME 2
 
-typedef struct CacheItem CacheItem;
+#define PAGECACHE_BLOCK_SHIFT  12
+#define PAGECACHE_BLOCK_SIZE   (1 << PAGECACHE_BLOCK_SHIFT) /* must be power of 2 */
+#define PAGECACHE_BLOCK_MASK   (PAGECACHE_BLOCK_SIZE - 1)
+#define NUM_BLOCKS(c)  ((c)->max_num_items >> PAGECACHE_BLOCK_SHIFT)
 
 struct CacheItem {
     uint64_t it_addr;
@@ -48,10 +51,12 @@ struct CacheItem {
 };
 
 struct PageCache {
-    CacheItem *page_cache;
     size_t item_size;
     size_t page_size;
-    size_t max_num_items;
+    CacheItem **blocks;  /* array[NUM_BLOCKS] of CacheItem* blocks */
+    unsigned long *block_bitmap; /* allocated blocks bitmap */
+
+    size_t max_num_items; /* should be power of two */
     size_t num_items;
 #if defined(CONFIG_ISAL)
     void *dlopen_handle;
@@ -113,13 +118,16 @@ CacheHashAlgorithm next_supported_algo(CacheHashAlgorithm current)
 PageCache *cache_init(size_t num_pages, size_t page_size, size_t item_size,
                       Error **errp)
 {
-    int64_t i;
-    size_t new_size = num_pages * item_size;
+    ERRP_GUARD();
     PageCache *cache;
 
-    if (new_size < item_size) {
-        error_setg(errp, QERR_INVALID_PARAMETER_VALUE, "cache size",
-                   "is smaller than one target page size");
+    if (item_size == 0 || page_size == 0) {
+        error_setg(errp, "page_size or item_size is zero");
+        return NULL;
+    }
+
+    if (num_pages == 0) {
+        error_setg(errp, "cache num_pages is zero");
         return NULL;
     }
 
@@ -136,6 +144,12 @@ PageCache *cache_init(size_t num_pages, size_t page_size, size_t item_size,
         error_setg(errp, "Failed to allocate cache");
         return NULL;
     }
+
+    if (num_pages < PAGECACHE_BLOCK_SIZE) {
+        error_setg(errp, "cache num_pages must be >= %u", PAGECACHE_BLOCK_SIZE);
+        goto out_fail;
+    }
+
     cache->item_size = item_size;
     cache->page_size = page_size;
     cache->num_items = 0;
@@ -144,72 +158,154 @@ PageCache *cache_init(size_t num_pages, size_t page_size, size_t item_size,
 
     trace_migration_pagecache_init(cache->max_num_items);
 
-    /* We prefer not to abort if there is no memory */
-    cache->page_cache = g_try_malloc((cache->max_num_items) *
-                                     sizeof(*cache->page_cache));
-    if (!cache->page_cache) {
-        error_setg(errp, "Failed to allocate page cache");
-        g_free(cache);
-        return NULL;
+    /* Allocate cache dynamically if needed */
+    if (NUM_BLOCKS(cache) > SIZE_MAX / sizeof(*cache->blocks)) {
+        error_setg(errp, "cache blocks array size overflows");
+        goto out_fail;
     }
 
-    for (i = 0; i < cache->max_num_items; i++) {
-        cache->page_cache[i].it_data = NULL;
-        cache->page_cache[i].it_age = 0;
-        cache->page_cache[i].it_addr = -1;
+    cache->blocks = g_try_new0(CacheItem *, NUM_BLOCKS(cache));
+    if (!cache->blocks) {
+        error_setg(errp, "Could not allocate cache->blocks");
+        goto out_fail;
+    }
+
+    cache->block_bitmap = g_try_new0(unsigned long,
+                                     BITS_TO_LONGS(NUM_BLOCKS(cache)));
+    if (!cache->block_bitmap) {
+        error_setg(errp, "Could not allocate cache->block_bitmap");
+        goto out_fail;
     }
 
     return cache;
+
+ out_fail:
+    g_clear_pointer(&cache->block_bitmap, g_free);
+    g_clear_pointer(&cache->blocks, g_free);
+    g_clear_pointer(&cache, g_free);
+    return NULL;
 }
 
+/* Unsafe if threads are still present */
 void cache_fini(PageCache *cache)
 {
-    int64_t i;
+    uint64_t i, bidx;
 
     g_assert(cache);
-    g_assert(cache->page_cache);
+    g_assert(cache->blocks);
 
-    for (i = 0; i < cache->max_num_items; i++) {
-        g_free(cache->page_cache[i].it_data);
+    for (bidx = 0; bidx < NUM_BLOCKS(cache); bidx++) {
+        if (test_bit(bidx, cache->block_bitmap)) {
+            for (i = 0; i < PAGECACHE_BLOCK_SIZE; i++) {
+                g_clear_pointer(&cache->blocks[bidx][i].it_data, g_free);
+            }
+            g_clear_pointer(&cache->blocks[bidx], g_free);
+        }
     }
+
+    g_clear_pointer(&cache->block_bitmap, g_free);
+
 
 #if defined(CONFIG_ISAL)
     g_clear_pointer(&cache->dlopen_handle, dlclose);
 #endif
-    g_clear_pointer(&cache->page_cache, g_free);
     g_clear_pointer(&cache, g_free);
+}
+
+static inline size_t cache_index(PageCache *cache, uint64_t addr)
+{
+    return (addr / cache->page_size) & (cache->max_num_items - 1);
+}
+
+static inline size_t cache_block_idx(size_t idx)
+{
+    return idx >> PAGECACHE_BLOCK_SHIFT;
+}
+
+static inline size_t cache_block_off(size_t idx)
+{
+    return idx & PAGECACHE_BLOCK_MASK;
+}
+
+CacheItem *
+pagecache_get_entry(PageCache *cache, size_t idx)
+{
+    size_t bidx = cache_block_idx(idx);
+    size_t off  = cache_block_off(idx);
+    CacheItem *block;
+
+    g_assert(bidx < NUM_BLOCKS(cache));
+
+    if (likely(test_bit(bidx, cache->block_bitmap))) {
+        block = qatomic_read(&cache->blocks[bidx]);
+        if (likely(block)) {
+            return &block[off];
+        }
+    }
+
+    block = g_try_new0(CacheItem, PAGECACHE_BLOCK_SIZE);
+    if (!block) {
+        return NULL;
+    }
+    /* TODO: evaluate if this can be improved/eliminated. */
+    for (size_t i = 0; i < PAGECACHE_BLOCK_SIZE; i++) {
+        block[i].it_addr = -1;
+    }
+
+    CacheItem *existing = NULL;
+    existing = qatomic_cmpxchg(&cache->blocks[bidx], NULL, block);
+    if (unlikely(existing)) {
+        g_free(block);
+    } else {
+        bitmap_set_atomic(cache->block_bitmap, bidx, 1);
+    }
+
+    block = qatomic_read(&cache->blocks[bidx]);
+    return &block[off];
 }
 
 static size_t cache_get_cache_pos(const PageCache *cache,
                                   uint64_t address)
 {
     g_assert(cache->max_num_items);
+
     return (address / cache->page_size) & (cache->max_num_items - 1);
 }
 
-static CacheItem *cache_get_by_addr(const PageCache *cache, uint64_t addr)
+static CacheItem *cache_get_by_addr(PageCache *cache, uint64_t addr)
 {
     size_t pos;
+    CacheItem *item;
 
     g_assert(cache);
-    g_assert(cache->page_cache);
 
     pos = cache_get_cache_pos(cache, addr);
+    item = pagecache_get_entry(cache, pos);
 
-    return &cache->page_cache[pos];
+    return item;
 }
 
-uint8_t *get_cached_data(const PageCache *cache, uint64_t addr)
+uint8_t *get_cached_data(PageCache *cache, uint64_t addr)
 {
-    return cache_get_by_addr(cache, addr)->it_data;
+    CacheItem *item;
+
+    item = cache_get_by_addr(cache, addr);
+    if (item) {
+        return item->it_data;
+    }
+
+    return NULL;
 }
 
-bool cache_is_cached(const PageCache *cache, uint64_t addr,
+bool cache_is_cached(PageCache *cache, uint64_t addr,
                      uint64_t current_age)
 {
     CacheItem *it;
 
     it = cache_get_by_addr(cache, addr);
+    if (!it) {
+        return false;
+    }
 
     if (it->it_addr == addr) {
         /* update the it_age when the cache hit */
@@ -227,6 +323,9 @@ int cache_insert(PageCache *cache, uint64_t addr, const uint8_t *pdata,
 
     /* actual update of entry */
     it = cache_get_by_addr(cache, addr);
+    if (!it) {
+        return -1;
+    }
 
     if (it->it_data && it->it_addr != addr &&
         it->it_age + CACHED_PAGE_LIFETIME > current_age) {
@@ -308,6 +407,9 @@ static int cache_hash_insert(PageCache *cache, uint64_t addr,
 
     /* actual update of entry */
     it = cache_get_by_addr(cache, addr);
+    if (!it) {
+        return -1;
+    }
 
     /* allocate page */
     if (!it->it_data) {
@@ -389,6 +491,10 @@ bool cache_hash_is_cached(PageCache *cache, uint64_t addr, const void *buf,
     uint64_t age = 0;
     int64_t time;
 
+    if (!it) {
+        return false;
+    }
+
     time = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
     memset(digest, 0, cache->item_size);
     cache->hash_func(cache, buf, cache->page_size, digest);
@@ -409,14 +515,18 @@ bool cache_hash_is_cached(PageCache *cache, uint64_t addr, const void *buf,
     return match;
 }
 
-void cache_hash_invalidate(PageCache *cache, uint64_t addr)
+int cache_hash_invalidate(PageCache *cache, uint64_t addr)
 {
     CacheItem *it = cache_get_by_addr(cache, addr);
 
+    if (!it) {
+        return -1;
+    }
     if (it->it_data) {
         it->it_addr = -1;
         memset(it->it_data, 0, cache->item_size);
     }
+    return 0;
 }
 
 bool is_exadata_machine(void)
@@ -618,6 +728,9 @@ static int cache_hash_isal_crypto_mb_pool_submit(PageCache *cache, void *opaque,
 
         ctx = &mb->ctx[i];
         it = cache_get_by_addr(cache, addr);
+        if (!it) {
+            ret = -EINVAL;
+        }
 
         /* Match against the batch-calculated hash */
         if (it->it_data && it->it_addr == addr) {
@@ -680,6 +793,9 @@ static int cache_hash_isal_crypto_mb_pool_submit(PageCache *cache, void *opaque,
         }
 
         it = cache_get_by_addr(cache, addr);
+        if (!it) {
+            return -EINVAL;
+        }
         memcpy(it->it_data, ctx->job.result_digest, cache->item_size);
     }
 

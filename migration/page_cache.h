@@ -35,6 +35,8 @@
 /* Page cache for storing guest pages */
 typedef struct PageCache PageCache;
 
+typedef struct CacheItem CacheItem;
+
 /**
  * cache_init: Initialize the page cache
  *
@@ -61,7 +63,7 @@ void cache_fini(PageCache *cache);
  * @addr: page addr
  * @current_age: current bitmap generation
  */
-bool cache_is_cached(const PageCache *cache, uint64_t addr,
+bool cache_is_cached(PageCache *cache, uint64_t addr,
                      uint64_t current_age);
 
 /**
@@ -72,7 +74,7 @@ bool cache_is_cached(const PageCache *cache, uint64_t addr,
  * @cache pointer to the PageCache struct
  * @addr: page addr
  */
-uint8_t *get_cached_data(const PageCache *cache, uint64_t addr);
+uint8_t *get_cached_data(PageCache *cache, uint64_t addr);
 
 /**
  * cache_insert: insert the page into the cache. the page cache
@@ -203,7 +205,7 @@ PageCache *cache_hash_init(size_t num_pages, size_t page_size,
                            CacheHashAlgorithm algo, Error **errp);
 bool cache_hash_is_cached(PageCache *cache, uint64_t addr, const void *buf,
                           void *digest, void **out_page);
-void cache_hash_invalidate(PageCache *cache, uint64_t addr);
+int cache_hash_invalidate(PageCache *cache, uint64_t addr);
 size_t cache_hash_item_size(PageCache *cache);
 int64_t cache_hash_nsec_per_miss(PageCache *cache);
 int64_t cache_hash_nsec_per_hit(PageCache *cache);
@@ -214,5 +216,6 @@ int cache_hash_pool_submit(PageCache *cache, void *opaque, const void *buf,
                            bool *out_matched, void **out_pages);
 bool cache_hash_is_batch(PageCache *cache);
 extern PageCache *hash_cache;
+CacheItem *pagecache_get_entry(PageCache *cache, size_t idx);
 
 #endif

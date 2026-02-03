@@ -528,7 +528,10 @@ static int multifd_ram_fill_packet(MultiFDSendParams *p, Error **errp)
         /* TODO: Workaround spurious zero pages ghosting in the pages->offset array */
         if (migrate_use_hash() &&
             i >= (pages->normal_num + pages->skipped_num)) {
-            cache_hash_invalidate(hash_cache, pages->block->offset + temp);
+            if (cache_hash_invalidate(hash_cache, pages->block->offset + temp) < 0) {
+                error_setg(errp, "%s: failed to invalidate offset %lu", __func__, temp);
+                return -1;
+            }
         }
     }
 
