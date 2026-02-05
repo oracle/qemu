@@ -17,6 +17,8 @@
 #include "migration-stats.h"
 #include "multifd.h"
 #include "ram.h"
+#include "error.h"
+#include "qapi/error.h"
 
 static bool multifd_zero_page_enabled(void)
 {
@@ -53,18 +55,24 @@ static void swap_batch_metadata(MultiFDPages_t *pages, int a, int b)
     pages->matched[b] = tmpmatch;
 }
 
-static void multifd_skip_cached_pages(MultiFDSendParams *p, int normal_num)
+static int multifd_skip_cached_pages(MultiFDSendParams *p, int normal_num, Error **errp)
 {
+    ERRP_GUARD();
     MultiFDPages_t *pages = &p->data->u.ram;
     RAMBlock *rb = pages->block;
     int i = 0;
     int j = normal_num - 1;
     bool batch = cache_hash_is_batch(hash_cache);
+    int ret = 0;
 
     if (batch) {
-        cache_hash_pool_submit(hash_cache, pages->batch_context, rb->host,
-                               rb->offset, pages->offset, normal_num,
-                               pages->matched, pages->cached);
+        ret = cache_hash_pool_submit(hash_cache, pages->batch_context, rb->host,
+                                     rb->offset, pages->offset, normal_num,
+                                     pages->matched, pages->cached);
+        if (ret) {
+            error_setg(errp, "Error in cache_hash_pool_submit");
+            return ret;
+        }
     }
 
     /*
@@ -103,6 +111,8 @@ static void multifd_skip_cached_pages(MultiFDSendParams *p, int normal_num)
 
     pages->normal_num = i;
     pages->skipped_num = normal_num - pages->normal_num;
+
+    return ret;
 }
 
 /**
@@ -113,14 +123,16 @@ static void multifd_skip_cached_pages(MultiFDSendParams *p, int normal_num)
  *
  * @param p A pointer to the send params.
  */
-void multifd_send_zero_page_detect(MultiFDSendParams *p)
+int multifd_send_zero_page_detect(MultiFDSendParams *p, Error **errp)
 {
+    ERRP_GUARD();
     MultiFDPages_t *pages = &p->data->u.ram;
     RAMBlock *rb = pages->block;
     int i = 0;
     int j = pages->num - 1;
     pages->skipped_num = 0;
     pages->normal_num = 0;
+    int ret = 0;
 
     if (!multifd_zero_page_enabled()) {
         pages->normal_num = pages->num;
@@ -147,12 +159,17 @@ void multifd_send_zero_page_detect(MultiFDSendParams *p)
     pages->normal_num = i;
 
     if (migrate_use_hash() && pages->normal_num) {
-        multifd_skip_cached_pages(p, pages->normal_num);
+        ret = multifd_skip_cached_pages(p, pages->normal_num, errp);
+        if (ret) {
+            return ret;
+        }
     }
 
 out:
     stat64_add(&ram_counters.normal_pages, pages->normal_num);
     stat64_add(&ram_counters.zero_pages, pages->num - pages->normal_num - pages->skipped_num);
+
+    return ret;
 }
 
 void multifd_recv_zero_page_process(MultiFDRecvParams *p)

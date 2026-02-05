@@ -296,12 +296,16 @@ static void multifd_ram_prepare_header(MultiFDSendParams *p)
  */
 static int nocomp_send_prepare(MultiFDSendParams *p, Error **errp)
 {
+    ERRP_GUARD();
     bool use_zero_copy_send = migrate_use_zero_copy_send();
     MultiFDPages_t *pages = &p->data->u.ram;
     uint32_t page_size = multifd_ram_page_size();
     int ret;
 
-    multifd_send_zero_page_detect(p);
+    ret = multifd_send_zero_page_detect(p, errp);
+    if (ret) {
+        return -1;
+    }
 
     if (!use_zero_copy_send) {
         /*
@@ -1886,7 +1890,7 @@ void multifd_recv_new_channel(QIOChannel *ioc, Error **errp)
 bool multifd_send_prepare_common(MultiFDSendParams *p)
 {
     MultiFDPages_t *pages = &p->data->u.ram;
-    multifd_send_zero_page_detect(p);
+    multifd_send_zero_page_detect(p, NULL);
 
     if (!pages->normal_num) {
         p->next_packet_size = 0;

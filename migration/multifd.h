@@ -290,7 +290,7 @@ typedef struct {
 void multifd_register_ops(int method, MultiFDMethods *ops);
 void multifd_send_fill_packet(MultiFDSendParams *p);
 bool multifd_send_prepare_common(MultiFDSendParams *p);
-void multifd_send_zero_page_detect(MultiFDSendParams *p);
+int multifd_send_zero_page_detect(MultiFDSendParams *p, Error **errp);
 void multifd_recv_zero_page_process(MultiFDRecvParams *p);
 
 bool multifd_send(MultiFDSendData **send_data);
