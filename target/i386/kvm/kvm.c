@@ -315,13 +315,13 @@ bool kvm_has_same_tsc_offset(void)
 
 static inline void do_kvm_write_tsc_offset(CPUState *cs, run_on_cpu_data arg)
 {
-    uint64_t delta = arg.host_ulong;
+    uint64_t tsc_offset = arg.host_ulong;
     X86CPU *cpu = X86_CPU(cs);
     CPUX86State *env = &cpu->env;
     struct kvm_device_attr attr;
     int ret;
 
-    env->tsc_offset += delta;
+    env->tsc_offset = tsc_offset;
 
     attr.group = KVM_VCPU_TSC_CTRL;
     attr.attr = KVM_VCPU_TSC_OFFSET;
@@ -337,13 +337,21 @@ static inline void do_kvm_write_tsc_offset(CPUState *cs, run_on_cpu_data arg)
 
 void kvm_write_all_tsc_offset(uint64_t delta)
 {
+    uint64_t tsc_offset;
     CPUState *cpu;
 
-    if (kvm_enabled()) {
-        CPU_FOREACH(cpu) {
-            run_on_cpu(cpu, do_kvm_write_tsc_offset,
-                       RUN_ON_CPU_HOST_ULONG(delta));
-        }
+    if (!kvm_enabled()) {
+        return;
+    }
+
+    assert(first_cpu);
+
+    tsc_offset = X86_CPU(first_cpu)->env.tsc_offset;
+    tsc_offset += delta;
+
+    CPU_FOREACH(cpu) {
+        run_on_cpu(cpu, do_kvm_write_tsc_offset,
+                   RUN_ON_CPU_HOST_ULONG(tsc_offset));
     }
 }
 
