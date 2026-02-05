@@ -42,6 +42,7 @@ bool kvm_has_adjust_clock_stable(void);
 bool kvm_has_exception_payload(void);
 bool kvm_support_clock_downtime(void);
 void kvm_synchronize_all_tsc(void);
+bool kvm_has_same_tsc_offset(void);
 void kvm_write_all_tsc_offset(uint64_t delta);
 void kvm_arch_reset_vcpu(X86CPU *cs);
 void kvm_arch_after_reset_vcpu(X86CPU *cpu);

@@ -273,6 +273,46 @@ void kvm_synchronize_all_tsc(void)
     }
 }
 
+/*
+ * Return true if all vCPUs have the same tsc_offset as first_cpu, unless
+ * any vCPU's tsc_offset is 0. A tsc_offset of 0 indicates that the vCPU
+ * is either newly hotplugged or that its value is 0 by chance. This is
+ * acceptable, as our goal is to use the first_cpu's tsc_offset for all
+ * vCPUs.
+ *
+ * The tsc_offset is preserved either from the previous running-to-stopped
+ * transition or from the source QEMU instance during live migration. It is
+ * used only when vCPUs were already synchronized and will remain
+ * synchronized on the TSC (i.e., when the KVM masterclock was, and will
+ * continue to be, active). This function serves as a double-check and
+ * should be called only when all vCPU TSCs are synchronized.
+ */
+bool kvm_has_same_tsc_offset(void)
+{
+    uint64_t tsc_offset;
+    CPUX86State *env;
+    CPUState *cpu;
+
+    if (!kvm_enabled()) {
+        return false;
+    }
+
+    assert(first_cpu);
+
+    tsc_offset = X86_CPU(first_cpu)->env.tsc_offset;
+
+    CPU_FOREACH(cpu) {
+        env = &X86_CPU(cpu)->env;
+
+        if (env->tsc_offset != tsc_offset && env->tsc_offset) {
+            fprintf(stderr, "warning: unsynchronized guest TSC\n");
+            return false;
+        }
+    }
+
+    return true;
+}
+
 static inline void do_kvm_write_tsc_offset(CPUState *cs, run_on_cpu_data arg)
 {
     uint64_t delta = arg.host_ulong;

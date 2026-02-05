@@ -242,7 +242,8 @@ static void kvmclock_vm_state_change(void *opaque, bool running,
 
         account_downtime = s->account_downtime &&
             kvm_support_clock_downtime() &&
-            with_kvmclock_aux_flags(s->flags);
+            with_kvmclock_aux_flags(s->flags) &&
+            kvm_has_same_tsc_offset();
 
         if (account_downtime) {
             data.realtime = s->realtime;
