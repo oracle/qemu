@@ -86,8 +86,10 @@ struct {
 
 static MultiFDSendData *multifd_ram_send;
 
-static void multifd_ram_payload_alloc(MultiFDPages_t *pages)
+static int multifd_ram_payload_alloc(MultiFDPages_t *pages, Error **errp)
 {
+    ERRP_GUARD();
+
     /*
      * This will change when we stop exchanging the "offset" pointer
      * with main thread.
@@ -95,19 +97,59 @@ static void multifd_ram_payload_alloc(MultiFDPages_t *pages)
     uint32_t page_count = multifd_ram_pages_per_work_count();
     uint32_t page_size = multifd_ram_page_size();
 
-    pages->offset = g_new0(ram_addr_t, page_count);
-    if (migrate_use_hash()) {
-        if (cache_hash_is_batch(hash_cache)) {
-            cache_hash_pool_init(hash_cache, page_count,
-                                 &pages->batch_context);
-            pages->matched = g_new0(bool, page_count);
-        }
-        pages->digest = g_malloc0(cache_hash_item_size(hash_cache));
-        pages->cached = g_new0(void*, page_count);
-        for (int i = 0; i < page_count; i++) {
-             pages->cached[i] = g_malloc0(page_size);
+    pages->offset = g_try_new0(ram_addr_t, page_count);
+    if (!pages->offset) {
+        error_setg(errp, "Could not allocate pages->offset");
+        return -1;
+    }
+
+    if (!migrate_use_hash()) {
+        return 0;
+    }
+
+    if (cache_hash_is_batch(hash_cache)) {
+        cache_hash_pool_init(hash_cache, page_count,
+                             &pages->batch_context);
+        pages->matched = g_try_new0(bool, page_count);
+        if (!pages->matched) {
+            error_setg(errp, "Could not allocate pages->matched");
+            goto payload_fail;
         }
     }
+    pages->digest = g_try_malloc0(cache_hash_item_size(hash_cache));
+    if (!pages->digest) {
+        error_setg(errp, "Could not allocate pages->digest");
+        goto payload_fail;
+    }
+
+    pages->cached = g_try_new0(void*, page_count);
+    if (!pages->cached) {
+        error_setg(errp, "Could not allocate pages->cached");
+        goto payload_fail;
+    }
+    for (int i = 0; i < page_count; i++) {
+         pages->cached[i] = g_try_malloc0(page_size);
+         if (!pages->cached[i]) {
+             error_setg(errp, "Could not allocate one of pages->cached");
+             goto payload_fail;
+         }
+    }
+
+    return 0;
+
+ payload_fail:
+    if (pages->cached) {
+        for (int i = 0; i < page_count; i++) {
+            g_clear_pointer(&pages->cached[i], g_free);
+        }
+        g_clear_pointer(&pages->cached, g_free);
+    }
+
+    g_clear_pointer(&pages->digest, g_free);
+    g_clear_pointer(&pages->matched, g_free);
+    g_clear_pointer(&pages->offset, g_free);
+
+    return -1;
 }
 
 static void multifd_ram_payload_free(MultiFDPages_t *pages)
@@ -126,18 +168,30 @@ static void multifd_ram_payload_free(MultiFDPages_t *pages)
             g_clear_pointer(&pages->matched, g_free);
         }
         g_clear_pointer(&pages->digest, g_free);
-        for (int i = 0; i < page_count; i++) {
-             g_clear_pointer(&pages->cached[i], g_free);
+        if (pages->cached) {
+            for (int i = 0; i < page_count; i++) {
+                 g_clear_pointer(&pages->cached[i], g_free);
+            }
         }
         g_clear_pointer(&pages->cached, g_free);
     }
 }
 
-MultiFDSendData *multifd_send_data_alloc(void)
+MultiFDSendData *multifd_send_data_alloc(Error **errp)
 {
-    MultiFDSendData *new = g_new0(MultiFDSendData, 1);
+    ERRP_GUARD();
 
-    multifd_ram_payload_alloc(&new->u.ram);
+    MultiFDSendData *new = g_try_new0(MultiFDSendData, 1);
+
+    if (!new) {
+        error_setg(errp, "Failed to allocate MultiFDSendData");
+        return NULL;
+    }
+
+    if (multifd_ram_payload_alloc(&new->u.ram, errp) != 0) {
+        g_free(new);
+        return NULL;
+    }
     /* Device state allocates its payload on-demand */
 
     return new;
@@ -175,9 +229,16 @@ void multifd_send_data_free(MultiFDSendData *data)
     g_free(data);
 }
 
-void multifd_ram_save_setup(void)
+int multifd_ram_save_setup(Error **errp)
 {
-    multifd_ram_send = multifd_send_data_alloc();
+    ERRP_GUARD();
+
+    multifd_ram_send = multifd_send_data_alloc(errp);
+    if (!multifd_ram_send) {
+        return -1;
+    }
+
+    return 0;
 }
 
 void multifd_ram_save_cleanup(void)
@@ -829,8 +890,9 @@ static void multifd_send_terminate_threads(void)
      */
     for (i = 0; i < migrate_multifd_channels(); i++) {
         MultiFDSendParams *p = &multifd_send_state->params[i];
-
-        qemu_sem_post(&p->sem);
+        if (p->setup_done) {
+            qemu_sem_post(&p->sem);
+        }
         if (p->c) {
             qio_channel_shutdown(p->c, QIO_CHANNEL_SHUTDOWN_BOTH, NULL);
         }
@@ -859,8 +921,11 @@ static bool multifd_send_cleanup_channel(MultiFDSendParams *p, Error **errp)
     }
     socket_send_channel_destroy(p->c);
     p->c = NULL;
-    qemu_sem_destroy(&p->sem);
-    qemu_sem_destroy(&p->sem_sync);
+    if (p->setup_done) {
+        qemu_sem_destroy(&p->sem);
+        qemu_sem_destroy(&p->sem_sync);
+        p->setup_done = false;
+    }
     g_free(p->name);
     p->name = NULL;
     g_clear_pointer(&p->data, multifd_send_data_free);
@@ -1304,8 +1369,20 @@ bool multifd_send_setup(void)
     }
 
     thread_count = migrate_multifd_channels();
-    multifd_send_state = g_malloc0(sizeof(*multifd_send_state));
-    multifd_send_state->params = g_new0(MultiFDSendParams, thread_count);
+    multifd_send_state = g_try_malloc0(sizeof(*multifd_send_state));
+    if (!multifd_send_state) {
+        error_setg(&local_err, "%s: allocation failed for multifd_send_state",
+                   __func__);
+        goto err_out;
+    }
+
+    multifd_send_state->params = g_try_new0(MultiFDSendParams, thread_count);
+    if (!multifd_send_state->params) {
+        error_setg(&local_err, "%s: allocation failed for multifd_send_state->params",
+                   __func__);
+        goto err_out;
+    }
+
     qemu_mutex_init(&multifd_send_state->multifd_send_mutex);
     qemu_sem_init(&multifd_send_state->channels_created, 0);
     qemu_sem_init(&multifd_send_state->channels_ready, 0);
@@ -1315,21 +1392,47 @@ bool multifd_send_setup(void)
     for (i = 0; i < thread_count; i++) {
         MultiFDSendParams *p = &multifd_send_state->params[i];
 
-        qemu_sem_init(&p->sem, 0);
-        qemu_sem_init(&p->sem_sync, 0);
         p->id = i;
-        p->data = multifd_send_data_alloc();
+        p->data = multifd_send_data_alloc(&local_err);
+        if (!p->data) {
+            ret = -1;
+            goto err_out;
+        }
+
         p->packet_len = sizeof(MultiFDPacket_t)
                       + sizeof(uint64_t) * pages_per_pkt;
-        p->packet = g_malloc0(p->packet_len);
-        p->packet_device_state = g_malloc0(sizeof(*p->packet_device_state));
+        p->packet = g_try_malloc0(p->packet_len);
+        if (!p->packet) {
+            error_setg(&local_err, "%s: allocation failed for p->packet",
+                   __func__);
+            ret = -1;
+            goto err_out;
+        }
+
+        p->packet_device_state = g_try_malloc0(sizeof(*p->packet_device_state));
+        if (!p->packet_device_state) {
+            error_setg(&local_err, "%s: allocation failed for p->packet_device_state",
+                   __func__);
+            ret = -1;
+            goto err_out;
+        }
+
         p->packet_device_state->hdr.magic = cpu_to_be32(MULTIFD_MAGIC);
         p->packet_device_state->hdr.version = cpu_to_be32(MULTIFD_VERSION);
         p->name = g_strdup_printf("multifdsend_%d", i);
         /* We need one extra place for the packet header */
-        p->iov = g_new0(struct iovec, multifd_ram_iovs_per_packet_count());
+        p->iov = g_try_new0(struct iovec, multifd_ram_iovs_per_packet_count());
+        if (!p->iov) {
+            error_setg(&local_err, "%s: allocation failed for p->iov",
+                   __func__);
+            ret = -1;
+            goto err_out;
+        }
         
         p->write_flags = 0;
+        qemu_sem_init(&p->sem, 0);
+        qemu_sem_init(&p->sem_sync, 0);
+        p->setup_done = true;
         socket_send_channel_create(multifd_new_send_channel_async, p);
     }
 
@@ -1347,10 +1450,18 @@ bool multifd_send_setup(void)
 
         ret = multifd_send_state->ops->send_setup(p, &local_err);
         if (ret) {
-            break;
+            goto err_out;
         }
     }
 
+    ret = multifd_device_state_send_setup(&local_err);
+ err_out:
+    /*
+     * Memory allocated during the setup phase will be
+     * freed by calling migrate_fd_cleanup().
+     * migrate_fd_cleanup() calls qemu_savevm_state_cleanup()
+     * and after multifd_send_shutdown().
+     */
     if (ret) {
         migrate_set_error(s, local_err);
         error_report_err(local_err);
@@ -1359,7 +1470,6 @@ bool multifd_send_setup(void)
         return false;
     }
 
-    multifd_device_state_send_setup();
 
     return true;
 }

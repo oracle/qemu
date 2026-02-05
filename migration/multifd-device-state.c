@@ -30,21 +30,45 @@ static struct {
     bool threads_abort;
 } *multifd_send_device_state;
 
-void multifd_device_state_send_setup(void)
+int multifd_device_state_send_setup(Error **errp)
 {
+    ERRP_GUARD();
+
     assert(!multifd_send_device_state);
-    multifd_send_device_state = g_malloc(sizeof(*multifd_send_device_state));
+    multifd_send_device_state = g_try_malloc0(sizeof(*multifd_send_device_state));
+
+    if (!multifd_send_device_state) {
+        error_setg(errp, "Failed to allocate multifd_send_device_state");
+        return -ENOMEM;
+    }
 
     qemu_mutex_init(&multifd_send_device_state->queue_job_mutex);
 
-    multifd_send_device_state->send_data = multifd_send_data_alloc();
+    multifd_send_device_state->send_data = multifd_send_data_alloc(errp);
+    if (!multifd_send_device_state->send_data) {
+        qemu_mutex_destroy(&multifd_send_device_state->queue_job_mutex);
+        g_clear_pointer(&multifd_send_device_state, g_free);
+        return -ENOMEM;
+    }
 
     multifd_send_device_state->threads = thread_pool_new();
+
     multifd_send_device_state->threads_abort = false;
+
+    return 0;
+
 }
 
 void multifd_device_state_send_cleanup(void)
 {
+    /*
+     * Do not call thread_pool_free() if we never initialized
+     * multifd_send_device_state or failed in
+     * multifd_device_state_send_setup().
+     */
+    if (!multifd_send_device_state) {
+        return;
+    }
     g_clear_pointer(&multifd_send_device_state->threads, thread_pool_free);
     g_clear_pointer(&multifd_send_device_state->send_data,
                     multifd_send_data_free);

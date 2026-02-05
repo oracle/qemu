@@ -2877,8 +2877,7 @@ static void ram_save_cleanup(void *opaque)
     compress_threads_save_cleanup();
     multifd_ram_save_cleanup();
     ram_state_cleanup(rsp);
-    g_free(migration_ops);
-    migration_ops = NULL;
+    g_clear_pointer(migration_ops, g_free);
 }
 
 static void ram_state_reset(RAMState *rs)
@@ -3477,6 +3476,7 @@ void qemu_guest_free_page_hint(void *addr, size_t len)
  */
 static int ram_save_setup(QEMUFile *f, void *opaque, Error **errp)
 {
+    ERRP_GUARD();
     RAMState **rsp = opaque;
     RAMBlock *block;
     int ret = 0;
@@ -3516,10 +3516,19 @@ static int ram_save_setup(QEMUFile *f, void *opaque, Error **errp)
     ram_control_before_iterate(f, RAM_CONTROL_SETUP);
     ram_control_after_iterate(f, RAM_CONTROL_SETUP);
 
-    migration_ops = g_malloc0(sizeof(MigrationOps));
+    migration_ops = g_try_malloc0(sizeof(MigrationOps));
+    if (!migration_ops) {
+        error_setg(errp, "%s: failed to allocate migration_ops", __func__);
+        return -1;
+    }
 
     if (migrate_use_multifd()) {
-        multifd_ram_save_setup();
+        ret = multifd_ram_save_setup(errp);
+        if (ret < 0) {
+            g_clear_pointer(migration_ops, g_free);
+            error_report("Failure in %s", __func__);
+            return ret;
+        }
         migration_ops->ram_save_target_page = ram_save_target_page_multifd;
     } else {
         migration_ops->ram_save_target_page = ram_save_target_page_legacy;

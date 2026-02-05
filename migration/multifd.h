@@ -210,6 +210,7 @@ typedef struct {
     uint32_t iovs_num;
     /* used for compression methods */
     void *compress_data;
+    bool setup_done;
 }  MultiFDSendParams;
 
 typedef struct {
@@ -293,7 +294,7 @@ void multifd_send_zero_page_detect(MultiFDSendParams *p);
 void multifd_recv_zero_page_process(MultiFDRecvParams *p);
 
 bool multifd_send(MultiFDSendData **send_data);
-MultiFDSendData *multifd_send_data_alloc(void);
+MultiFDSendData *multifd_send_data_alloc(Error **errp);
 void multifd_send_data_clear(MultiFDSendData *data);
 void multifd_send_data_free(MultiFDSendData *data);
 
@@ -302,12 +303,12 @@ static inline uint32_t multifd_ram_page_size(void)
     return qemu_target_page_size();
 }
 
-void multifd_ram_save_setup(void);
+int multifd_ram_save_setup(Error **errp);
 void multifd_ram_save_cleanup(void);
 
 void multifd_send_data_clear_device_state(MultiFDDeviceState_t *device_state);
 
-void multifd_device_state_send_setup(void);
+int multifd_device_state_send_setup(Error **errp);
 void multifd_device_state_send_cleanup(void);
 
 void multifd_device_state_send_prepare(MultiFDSendParams *p);
