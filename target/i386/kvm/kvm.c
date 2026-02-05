@@ -337,8 +337,11 @@ static inline void do_kvm_write_tsc_offset(CPUState *cs, run_on_cpu_data arg)
 
 void kvm_write_all_tsc_offset(uint64_t delta)
 {
+    struct KVMParkedVcpu *parked_cpu;
+    struct kvm_device_attr attr;
     uint64_t tsc_offset;
     CPUState *cpu;
+    int ret;
 
     if (!kvm_enabled()) {
         return;
@@ -352,6 +355,22 @@ void kvm_write_all_tsc_offset(uint64_t delta)
     CPU_FOREACH(cpu) {
         run_on_cpu(cpu, do_kvm_write_tsc_offset,
                    RUN_ON_CPU_HOST_ULONG(tsc_offset));
+    }
+
+    QLIST_FOREACH(parked_cpu, &kvm_state->kvm_parked_vcpus, node) {
+        memset(&attr, 0, sizeof(attr));
+
+        attr.group = KVM_VCPU_TSC_CTRL;
+        attr.attr = KVM_VCPU_TSC_OFFSET;
+        attr.flags = 0;
+        attr.addr = (uint64_t)&tsc_offset;
+
+        ret = ioctl(parked_cpu->kvm_fd, KVM_SET_DEVICE_ATTR, &attr);
+        if (ret) {
+            error_report("parked CPU %lu KVM_SET_DEVICE_ATTR: %s",
+                         parked_cpu->vcpu_id, strerror(-ret));
+            exit(1);
+        }
     }
 }
 
