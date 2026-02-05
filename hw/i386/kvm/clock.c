@@ -285,6 +285,19 @@ static void kvmclock_vm_state_change(void *opaque, bool running,
     }
 }
 
+static void kvmclock_reset(DeviceState *dev)
+{
+    KVMClockState *s = KVM_CLOCK(dev);
+
+    if (!kvm_enabled()) {
+        return;
+    }
+
+    s->flags = 0;
+    s->realtime = 0;
+    s->host_tsc = 0;
+}
+
 static void kvmclock_realize(DeviceState *dev, Error **errp)
 {
     KVMClockState *s = KVM_CLOCK(dev);
@@ -408,6 +421,7 @@ static void kvmclock_class_init(ObjectClass *klass, void *data)
     DeviceClass *dc = DEVICE_CLASS(klass);
 
     dc->realize = kvmclock_realize;
+    dc->reset = kvmclock_reset;
     dc->vmsd = &kvmclock_vmsd;
     device_class_set_props(dc, kvmclock_properties);
 }
