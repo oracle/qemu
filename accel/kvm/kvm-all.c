@@ -80,12 +80,6 @@
     do { } while (0)
 #endif
 
-struct KVMParkedVcpu {
-    unsigned long vcpu_id;
-    int kvm_fd;
-    QLIST_ENTRY(KVMParkedVcpu) node;
-};
-
 KVMState *kvm_state;
 bool kvm_kernel_irqchip;
 bool kvm_split_irqchip;

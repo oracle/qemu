@@ -15,6 +15,12 @@
 #include "qemu/queue.h"
 #include "sysemu/kvm.h"
 
+struct KVMParkedVcpu {
+    unsigned long vcpu_id;
+    int kvm_fd;
+    QLIST_ENTRY(KVMParkedVcpu) node;
+};
+
 typedef struct KVMSlot
 {
     hwaddr start_addr;
