@@ -330,6 +330,7 @@ static int cache_hash_insert(PageCache *cache, uint64_t addr,
 PageCache *cache_hash_init(size_t num_pages, size_t page_size,
                            CacheHashAlgorithm algo, Error **errp)
 {
+    ERRP_GUARD();
     struct PageCache *cache = NULL;
     int i;
     Error *local_err = NULL;
@@ -517,17 +518,42 @@ static int cache_hash_isal_crypto_mb_pool_init(PageCache *cache, size_t nr_pages
 {
     ISAL_SHA256_HASH_CTX_MGR *mgr = NULL;
     struct multi_buffer_ctx *out;
+    int ret = 0;
 
-    out = g_malloc0(sizeof(*out));
-    out->mgr = g_malloc0(sizeof(*mgr));
-    out->ctx = g_new0(ISAL_SHA256_HASH_CTX, nr_pages);
+    out = g_try_malloc0(sizeof(*out));
+    if (!out) {
+        ret = -ENOMEM;
+        goto out_err;
+    }
+    out->mgr = g_try_malloc0(sizeof(*mgr));
+    if (!out->mgr) {
+        ret = -ENOMEM;
+        goto out_err;
+    }
+    out->ctx = g_try_new0(ISAL_SHA256_HASH_CTX, nr_pages);
+    if (!out->ctx) {
+        ret = -ENOMEM;
+        goto out_err;
+    }
     for (int i = 0; i < nr_pages; i++) {
          isal_hash_ctx_init(&out->ctx[i]);
          out->ctx[i].user_data = (void *) ((uint64_t) i);
     }
-    cache->isal_sha256_ctx_mgr_init(out->mgr);
+    ret = cache->isal_sha256_ctx_mgr_init(out->mgr);
+    if (ret) {
+        goto out_err;
+    }
     *opaque = out;
     return 0;
+
+ out_err:
+    g_clear_pointer(&out->ctx, g_free);
+    g_clear_pointer(&out->mgr, g_free);
+    g_clear_pointer(&out, g_free);
+
+    *opaque = NULL;
+
+    return ret;
 }
 
 static void cache_hash_isal_crypto_mb_pool_fini(PageCache *cache, size_t nr_pages, void **opaque)
@@ -663,6 +689,7 @@ static int cache_hash_isal_crypto_mb_pool_submit(PageCache *cache, void *opaque,
 PageCache *cache_init_isal(size_t num_pages, size_t page_size,
                            size_t item_size, Error **errp)
 {
+    ERRP_GUARD();
     PageCache *cache = NULL;
     void *mgr_init = NULL, *mgr_submit = NULL, *mgr_flush = NULL;
     void *handle;
