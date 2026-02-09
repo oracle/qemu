@@ -328,7 +328,9 @@ static int nocomp_send_prepare(MultiFDSendParams *p, Error **errp)
     p->next_packet_size = pages->normal_num * page_size;
     p->flags |= MULTIFD_FLAG_NOCOMP;
 
-    multifd_send_fill_packet(p);
+    if (multifd_send_fill_packet(p, errp)) {
+        return -1;
+    }
 
     if (use_zero_copy_send) {
         /* Send header first, without zerocopy */
@@ -500,8 +502,10 @@ static int multifd_recv_initial_packet(QIOChannel *c, Error **errp)
     return msg.id;
 }
 
-static void multifd_ram_fill_packet(MultiFDSendParams *p)
+static int multifd_ram_fill_packet(MultiFDSendParams *p, Error **errp)
 {
+    ERRP_GUARD();
+
     MultiFDPacket_t *packet = p->packet;
     MultiFDPages_t *pages = &p->data->u.ram;
     uint32_t zero_num = (pages->num - pages->normal_num) - pages->skipped_num;
@@ -529,11 +533,15 @@ static void multifd_ram_fill_packet(MultiFDSendParams *p)
     }
 
     trace_multifd_send_ram_fill(p->id, pages->normal_num, zero_num);
+
+    return 0;
 }
 
 /* Fills a RAM multifd packet */
-void multifd_send_fill_packet(MultiFDSendParams *p)
+int multifd_send_fill_packet(MultiFDSendParams *p, Error **errp)
 {
+    ERRP_GUARD();
+
     MultiFDPacket_t *packet = p->packet;
     uint64_t packet_num;
     bool sync_packet = p->flags & MULTIFD_FLAG_SYNC;
@@ -552,11 +560,15 @@ void multifd_send_fill_packet(MultiFDSendParams *p)
     p->packets_sent++;
 
     if (!sync_packet) {
-        multifd_ram_fill_packet(p);
+        if (multifd_ram_fill_packet(p, errp)) {
+            return -1;
+        }
     }
 
     trace_multifd_send_fill(p->id, packet_num,
                             p->flags, p->next_packet_size);
+
+    return 0;
 }
 
 static int multifd_ram_unfill_packet(MultiFDRecvParams *p, Error **errp)
@@ -1215,7 +1227,10 @@ static void *multifd_send_thread(void *opaque)
              */
             assert(qatomic_read(&p->pending_sync));
             p->flags = MULTIFD_FLAG_SYNC;
-            multifd_send_fill_packet(p);
+            ret = multifd_send_fill_packet(p, &local_err);
+            if (ret) {
+                break;
+            }
             ret = qio_channel_write_all(p->c, (void *)p->packet,
                                         p->packet_len, &local_err);
             if (ret != 0) {

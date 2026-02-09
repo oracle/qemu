@@ -178,7 +178,9 @@ static int zlib_send_prepare(MultiFDSendParams *p, Error **errp)
 
 out:
     p->flags |= MULTIFD_FLAG_ZLIB;
-    multifd_send_fill_packet(p);
+    if (multifd_send_fill_packet(p, errp)) {
+        return -1;
+    }
     return 0;
 }
 
