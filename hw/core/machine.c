@@ -48,7 +48,7 @@ GlobalProperty hw_compat_7_2_exadata[] = {
     { "vhost-scsi-pci", "hotplug", "true" },
     { "vhost-scsi-pci", "num_queues", "1" },
     { "vfio-pci", "x-orcl-migration-iommu-pt", "true" },
-    { "vfio-pci", "x-orcl-device-dirty-page-tracking", "off" },
+    { "vfio-pci", "x-device-dirty-page-tracking", "off" },
     { "vfio-pci", "migration-events", "true" },
     { "migration", "x-orcl-switchover-event", "on" },
     { "migration", "x-orcl-migrate-use-hash", "true" },
