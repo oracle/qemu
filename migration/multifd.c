@@ -1167,7 +1167,9 @@ static void *multifd_send_thread(void *opaque)
 {
     MultiFDSendParams *p = opaque;
     Error *local_err = NULL;
-    int ret = 0;
+    int ret;
+    bool has_pending = false;
+    uint32_t max_pages_per_pkt;
 
     trace_multifd_send_thread_start(p->id);
     rcu_register_thread();
@@ -1176,7 +1178,8 @@ static void *multifd_send_thread(void *opaque)
         ret = -1;
         goto out;
     }
-    uint32_t max_pages_per_pkt = multifd_ram_pages_per_packet_count();
+
+    max_pages_per_pkt = multifd_ram_pages_per_packet_count();
 
     while (true) {
         qemu_sem_post(&multifd_send_state->channels_ready);
@@ -1190,7 +1193,8 @@ static void *multifd_send_thread(void *opaque)
          * Read pending_job flag before p->data.  Pairs with the
          * qatomic_store_release() in multifd_send().
          */
-        if (qatomic_load_acquire(&p->pending_job)) {
+        has_pending = qatomic_load_acquire(&p->pending_job);
+        if (has_pending) {
             uint32_t pages_total = p->data->u.ram.num;
             uint32_t pages_processed = 0;
             uint64_t *pages_offset = p->data->u.ram.offset;
@@ -1199,14 +1203,16 @@ static void *multifd_send_thread(void *opaque)
             /* Pages in current packet. */
             uint32_t pages_pkt = 0;
 
-            assert(!multifd_payload_empty(p->data));
+            if (multifd_payload_empty(p->data)) {
+                error_setg(&local_err, "Payload data for thread %d is empty", p->id);
+                ret = -1;
+                break;
+            }
 
             while (pages_total > pages_processed) {
                 pages_pkt = MIN(max_pages_per_pkt, pages_total - pages_processed);
                 ret = multifd_send_pkt(p, flags, pages_pkt, &local_err);
                 if (ret < 0) {
-                    p->data->u.ram.offset = pages_offset;
-                    qatomic_store_release(&p->pending_job, false);
                     break;
                 }
                 pages_processed += pages_pkt;
@@ -1215,6 +1221,11 @@ static void *multifd_send_thread(void *opaque)
 
             p->data->u.ram.offset = pages_offset;
             multifd_send_data_clear(p->data);
+            /* On error, defer releasing pending_job until after we set
+             * set migration error and wake up main thread. */
+            if (ret) {
+                break;
+            }
 
             /*
              * Making sure p->data is published before saying "we're
@@ -1249,10 +1260,17 @@ static void *multifd_send_thread(void *opaque)
 
 out:
     if (ret) {
-        assert(local_err);
+        if (!local_err) {
+            error_setg(&local_err, "multifd send thread %d failed (ret=%d)",
+                       p->id, ret);
+        }
         trace_multifd_send_error(p->id);
         multifd_send_set_error(local_err);
         multifd_send_kick_main(p);
+        if (has_pending) {
+            qatomic_store_release(&p->pending_job, false);
+        }
+
         error_free(local_err);
     }
 
