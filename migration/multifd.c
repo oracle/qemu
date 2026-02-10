@@ -508,9 +508,22 @@ static int multifd_ram_fill_packet(MultiFDSendParams *p, Error **errp)
 
     MultiFDPacket_t *packet = p->packet;
     MultiFDPages_t *pages = &p->data->u.ram;
-    uint32_t zero_num = (pages->num - pages->normal_num) - pages->skipped_num;
+    uint32_t zero_num;
+    uint32_t max_pages = multifd_ram_pages_per_packet_count();
 
-    packet->pages_alloc = cpu_to_be32(multifd_ram_pages_per_packet_count());
+    if (pages->num > max_pages) {
+        error_setg(errp, "%s: Number of pages %u is larger than per-packet allowed %u",
+                   __func__, pages->num, max_pages);
+        return -1;
+    }
+    if (pages->num < pages->normal_num + pages->skipped_num) {
+        error_setg(errp, "%s: Sum of normal and skipped pages larger that total pages",
+                   __func__);
+        return -1;
+    }
+    zero_num = pages->num - pages->normal_num - pages->skipped_num;
+
+    packet->pages_alloc = cpu_to_be32(max_pages);
     packet->normal_pages = cpu_to_be32(pages->normal_num);
     packet->zero_pages = cpu_to_be32(zero_num);
     packet->skipped_pages = cpu_to_be32(pages->skipped_num);
