@@ -1298,3 +1298,7 @@ bool kvm_arch_cpu_check_are_resettable(void)
 void kvm_arch_accel_class_init(ObjectClass *oc)
 {
 }
+
+void kvm_arch_init_post_loadvm(void)
+{
+}

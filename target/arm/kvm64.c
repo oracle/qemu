@@ -1630,3 +1630,7 @@ bool kvm_arm_verify_ext_dabt_pending(CPUState *cs)
     }
     return false;
 }
+
+void kvm_arch_init_post_loadvm(void)
+{
+}

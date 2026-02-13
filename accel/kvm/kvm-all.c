@@ -4235,3 +4235,8 @@ void query_stats_schemas_cb(StatsSchemaList **result, Error **errp)
         run_on_cpu(first_cpu, query_stats_schema_vcpu, RUN_ON_CPU_HOST_PTR(&stats_args));
     }
 }
+
+void kvm_init_post_loadvm(void)
+{
+    kvm_arch_init_post_loadvm();
+}

@@ -2592,3 +2592,7 @@ int kvm_s390_get_zpci_op(void)
 void kvm_arch_accel_class_init(ObjectClass *oc)
 {
 }
+
+void kvm_arch_init_post_loadvm(void)
+{
+}

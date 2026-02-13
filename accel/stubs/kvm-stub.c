@@ -142,3 +142,7 @@ bool kvm_hwpoisoned_mem(void)
 {
     return false;
 }
+
+void kvm_init_post_loadvm(void)
+{
+}

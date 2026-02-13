@@ -596,4 +596,7 @@ uint32_t kvm_dirty_ring_size(void);
  * reported for the VM.
  */
 bool kvm_hwpoisoned_mem(void);
+
+void kvm_arch_init_post_loadvm(void);
+void kvm_init_post_loadvm(void);
 #endif

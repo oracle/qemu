@@ -70,6 +70,7 @@
 #include "net/announce.h"
 #include "qemu/yank.h"
 #include "yank_functions.h"
+#include "sysemu/kvm.h"
 
 const unsigned int postcopy_ram_discard_version;
 
@@ -3213,6 +3214,10 @@ int qemu_loadvm_state(QEMUFile *f)
             }
             g_free(buf);
         }
+    }
+
+    if (kvm_enabled()) {
+        kvm_init_post_loadvm();
     }
 
     cpu_synchronize_all_post_init();
