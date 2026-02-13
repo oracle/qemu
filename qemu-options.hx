@@ -186,6 +186,7 @@ DEF("accel", HAS_ARG, QEMU_OPTION_accel,
     "                tb-size=n (TCG translation block cache size)\n"
     "                dirty-ring-size=n (KVM dirty ring GFN count, default 0)\n"
     "                notify-vmexit=run|internal-error|disable,notify-window=n (enable notify VM exit and set notify window, x86 only)\n"
+    "                x-orcl-vm-tsc-khz-post-loadvm=true|false (VM ioctl KVM_SET_TSC_KVM, x86 only, default false)\n"
     "                thread=single|multi (enable multi-threaded TCG)\n", QEMU_ARCH_ALL)
 SRST
 ``-accel name[,prop=value[,...]]``
@@ -246,6 +247,17 @@ SRST
         This feature can mitigate the CPU stuck issue due to event windows don't
         open up for a specified of time (i.e. notify-window).
         Default: notify-vmexit=run,notify-window=0.
+
+    ``x-orcl-vm-tsc-khz-post-loadvm=true|false``
+        When the x86 KVM accelerator is used, it controls whether to
+        configure the default guest VM TSC frequency via VM ioctl
+        KVM_SET_TSC_KHZ post loadvm, especially for the live migration.
+        This is for x86 host only.
+        Since Linux v6.17 kernel commit dcbe5a466c12 ("KVM: x86: Reject
+        KVM_SET_TSC_KHZ VM ioctl when vCPUs have been created"), it is
+        not permitted to call VM ioctl KVM_SET_TSC_KHZ once any vCPU is
+        already created. Additional change in KVM is required to relax the
+        restriction to support "x-orcl-vm-tsc-khz-post-loadvm".
 
 ERST
 

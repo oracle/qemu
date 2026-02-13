@@ -125,6 +125,8 @@ struct KVMState
     struct KVMDirtyRingReaper reaper;
     NotifyVmexitOption notify_vmexit;
     uint32_t notify_window;
+
+    bool vm_tsc_khz_post_loadvm;
 };
 
 void kvm_memory_listener_register(KVMState *s, KVMMemoryListener *kml,

@@ -5991,6 +5991,28 @@ static void kvm_arch_set_notify_window(Object *obj, Visitor *v,
     s->notify_window = value;
 }
 
+static void kvm_arch_set_vm_tsc_khz(Object *obj, Visitor *v,
+                                    const char *name, void *opaque,
+                                    Error **errp)
+{
+    KVMState *s = KVM_STATE(obj);
+    Error *error = NULL;
+    bool value;
+
+    if (s->fd != -1) {
+        error_setg(errp, "Cannot set properties after the accelerator has been initialized");
+        return;
+    }
+
+    visit_type_bool(v, name, &value, &error);
+    if (error) {
+        error_propagate(errp, error);
+        return;
+    }
+
+    s->vm_tsc_khz_post_loadvm = value;
+}
+
 void kvm_arch_accel_class_init(ObjectClass *oc)
 {
     object_class_property_add_enum(oc, "notify-vmexit", "NotifyVMexitOption",
@@ -6007,6 +6029,14 @@ void kvm_arch_accel_class_init(ObjectClass *oc)
     object_class_property_set_description(oc, "notify-window",
                                           "Clock cycles without an event window "
                                           "after which a notification VM exit occurs");
+
+    object_class_property_add(oc, "x-orcl-vm-tsc-khz-post-loadvm",
+                              "bool", NULL, kvm_arch_set_vm_tsc_khz,
+                              NULL, NULL);
+    object_class_property_set_description(oc, "x-orcl-vm-tsc-khz-post-loadvm",
+                                          "Configure VM default TSC frequency"
+                                          "at the end of loadvm, especially during"
+                                          "live migration");
 }
 
 void kvm_set_max_apic_id(uint32_t max_apic_id)
@@ -6014,6 +6044,34 @@ void kvm_set_max_apic_id(uint32_t max_apic_id)
     kvm_vm_enable_cap(kvm_state, KVM_CAP_MAX_VCPU_ID, 0, max_apic_id);
 }
 
+static void kvm_arch_vm_set_tsc_khz(void)
+{
+    X86CPU *x86cpu = X86_CPU(first_cpu);
+    CPUX86State *env = &x86cpu->env;
+    int ret;
+
+    assert(first_cpu);
+
+    if (env->tsc_khz &&
+        kvm_check_extension(kvm_state, KVM_CAP_VM_TSC_CONTROL)) {
+        ret = kvm_vm_ioctl(kvm_state, KVM_SET_TSC_KHZ, env->tsc_khz);
+        if (ret < 0) {
+            error_report("Unable to set VM TSC frequency to %"PRId64" kHz",
+                         env->tsc_khz);
+        }
+    }
+}
+
 void kvm_arch_init_post_loadvm(void)
 {
+    if (kvm_state->vm_tsc_khz_post_loadvm) {
+        /*
+         * Since Linux v6.17 kernel commit dcbe5a466c12 ("KVM: x86: Reject
+         * KVM_SET_TSC_KHZ VM ioctl when vCPUs have been created"), it is
+         * not permitted to call VM ioctl KVM_SET_TSC_KHZ once any vCPU is
+         * already created. Additional change in KVM is required to relax
+         * the restriction to support "x-orcl-vm-tsc-khz-post-loadvm".
+         */
+        kvm_arch_vm_set_tsc_khz();
+    }
 }
