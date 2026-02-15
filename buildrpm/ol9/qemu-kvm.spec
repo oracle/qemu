@@ -270,7 +270,7 @@ Requires: %{name}-block-ssh = %{epoch}:%{version}-%{release}     \
 Summary: QEMU is a machine emulator and virtualizer
 Name: qemu-kvm
 Version: 7.2.0
-Release: 33%{?dist}
+Release: 34%{?dist}
 Epoch: 31
 License: GPLv2+ and LGPLv2+ and BSD
 Group: Development/Tools
@@ -1829,6 +1829,33 @@ getent passwd qemu >/dev/null || \
 %endif
 
 %changelog
+* Sun Feb 15 2026 Karl Heubaum <karl.heubaum@oracle.com> - 7.2.0-34.el9
+- target/i386/kvm: set VM ioctl KVM_SET_TSC_KHZ post loadvm (Dongli Zhang) [Orabug: 38928409]
+- migration: introduce KVM function called post loadvm (Dongli Zhang) [Orabug: 38928409]
+- migration: add extra checks in multifd_ram_fill_packet (Elena Ufimtseva) [Orabug: 38949741]
+- migration: fix the error path semantic in multifd thread (Elena Ufimtseva) [Orabug: 38949741]
+- page_cache: dynamic cache allocation (Elena Ufimtseva) [Orabug: 38854239] [Orabug: 38949741]
+- multifd: return errors on packets filling (Elena Ufimtseva) [Orabug: 38854239]
+- migration: detect errors on hash initialization (Elena Ufimtseva) [Orabug: 38876780]
+- migration: propagate hashing errors (Elena Ufimtseva) [Orabug: 38876780]
+- migration/multifd: Handle allocation failures (Elena Ufimtseva) [Orabug: 38876780]
+- migration: Add Error** argument to ram_state_init() (Cédric Le Goater) [Orabug: 38876780]
+- migration: Add Error** argument to .load_setup() handler (Cédric Le Goater) [Orabug: 38876780]
+- migration: Add Error** argument to .save_setup() handler (Cédric Le Goater) [Orabug: 38876780]
+- migration: Add Error** argument to qemu_savevm_state_setup() (Cédric Le Goater) [Orabug: 38876780]
+- migration: Add Error** argument to vmstate_save() (Cédric Le Goater) [Orabug: 38876780]
+- migration: Always report an error in ram_save_setup() (Cédric Le Goater) [Orabug: 38876780]
+- qemu-file: Make qemu_fflush() return errors (Juan Quintela) [Orabug: 38876780]
+- qemu-file: remove shutdown member (Juan Quintela) [Orabug: 38876780]
+- vfio: Always report an error in vfio_save_setup() (Cédric Le Goater) [Orabug: 38876780]
+- migration/vmstate: Introduce vmstate_save_state_with_err (Tejus GK) [Orabug: 38876780]
+- migration/vfio: Remove x-orcl-device-dirty-page-tracking (Elena Ufimtseva) [Orabug: 38944077]
+- target/i386/kvm: write tsc_offset for parked vCPUs too (Dongli Zhang) [Orabug: 38853905]
+- accel/kvm:: move KVMParkedVcpu definition to header file (Dongli Zhang) [Orabug: 38853905]
+- target/i386/kvm: use vCPU 0 tsc_offset for all vCPUs (Dongli Zhang) [Orabug: 38853905]
+- target/i386/kvm: account downtime only with synchronized TSC (Dongli Zhang) [Orabug: 38853905]
+- target/i386/kvm: implement reset method for kvmclock (Dongli Zhang) [Orabug: 38853905]
+
 * Wed Jan 21 2026 Karl Heubaum <karl.heubaum@oracle.com> - 7.2.0-33.el9
 - migration: Change default pages to scan to 8192 for Exadata (Elena Ufimtseva) [Orabug: 38732433]
 - meson: check if isa-l installed and enable it (Elena Ufimtseva) [Orabug: 38732433]
