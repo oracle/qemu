@@ -1728,7 +1728,8 @@ getent passwd qemu >/dev/null || \
 %endif
 
 %changelog
-* Sun Feb 15 2026 Karl Heubaum <karl.heubaum@oracle.com> - 7.2.0-34.el8
+* Tue Feb 17 2026 Karl Heubaum <karl.heubaum@oracle.com> - 7.2.0-34.el8
+- migration: bugfix - free migration_ops correctly (Elena Ufimtseva) [Orabug: 38977316]
 - target/i386/kvm: set VM ioctl KVM_SET_TSC_KHZ post loadvm (Dongli Zhang) [Orabug: 38928409]
 - migration: introduce KVM function called post loadvm (Dongli Zhang) [Orabug: 38928409]
 - migration: add extra checks in multifd_ram_fill_packet (Elena Ufimtseva) [Orabug: 38949741]
