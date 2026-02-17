@@ -2877,7 +2877,7 @@ static void ram_save_cleanup(void *opaque)
     compress_threads_save_cleanup();
     multifd_ram_save_cleanup();
     ram_state_cleanup(rsp);
-    g_clear_pointer(migration_ops, g_free);
+    g_clear_pointer(&migration_ops, g_free);
 }
 
 static void ram_state_reset(RAMState *rs)
@@ -3525,7 +3525,7 @@ static int ram_save_setup(QEMUFile *f, void *opaque, Error **errp)
     if (migrate_use_multifd()) {
         ret = multifd_ram_save_setup(errp);
         if (ret < 0) {
-            g_clear_pointer(migration_ops, g_free);
+            g_clear_pointer(&migration_ops, g_free);
             error_report("Failure in %s", __func__);
             return ret;
         }
